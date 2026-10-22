@@ -15,6 +15,12 @@ import { LibraryManagerModal } from "./components/LibraryManagerModal";
 import { Gamepad2, Loader2, Sparkles } from "lucide-react";
 import "./App.css";
 
+interface ScanResult {
+  count: number;
+  installed: number;
+  uninstalled: number;
+}
+
 export function App() {
   const [games, setGames] = useState<Game[]>([]);
   const [selectedGameId, setSelectedGameId] = useState<string | null>(null);
@@ -37,7 +43,6 @@ export function App() {
 
   const [isLoading, setIsLoading] = useState(true);
   const [isScanning, setIsScanning] = useState(false);
-  const [isSyncingMetadata, setIsSyncingMetadata] = useState(false);
   const [isLaunchingId, setIsLaunchingId] = useState<string | null>(null);
   const [isFetchingMetaId, setIsFetchingMetaId] = useState<string | null>(null);
 
@@ -100,22 +105,16 @@ export function App() {
   const loadInitialData = async () => {
     try {
       setIsLoading(true);
-      // Load Steam integration
       const integration = await invoke<LibraryIntegration>("get_steam_integration");
       if (integration) {
         setSteamIntegration(integration);
       }
 
-      // Load games
       const list = await invoke<Game[]>("get_games");
-      if (list.length === 0) {
-        await handleScanLibrary();
-      } else {
-        setGames(list);
-        if (list.length > 0 && !selectedGameId) {
-          const retro = list.find((g) => g.title.toLowerCase().includes("retroarch"));
-          setSelectedGameId(retro ? retro.id : list[0].id);
-        }
+      setGames(list);
+      if (list.length > 0 && !selectedGameId) {
+        const retro = list.find((g) => g.title.toLowerCase().includes("retroarch"));
+        setSelectedGameId(retro ? retro.id : list[0].id);
       }
     } catch (err) {
       console.error("Failed to load initial data:", err);
@@ -174,11 +173,11 @@ export function App() {
     };
   }, []);
 
-  // Scan Steam Library
-  const handleScanLibrary = async () => {
+  // Scan Steam Library with return count
+  const handleScanLibrary = async (): Promise<number> => {
     try {
       setIsScanning(true);
-      await invoke("scan_steam_library");
+      const res = await invoke<ScanResult>("scan_steam_library");
       const list = await invoke<Game[]>("get_games");
       setGames(list);
       const integration = await invoke<LibraryIntegration>("get_steam_integration");
@@ -188,10 +187,23 @@ export function App() {
         const retro = list.find((g) => g.title.toLowerCase().includes("retroarch"));
         setSelectedGameId(retro ? retro.id : list[0].id);
       }
+      return res.installed;
     } catch (err) {
       console.error("Error scanning Steam library:", err);
+      throw err;
     } finally {
       setIsScanning(false);
+    }
+  };
+
+  // Clear all games from database
+  const handleClearLibrary = async () => {
+    try {
+      await invoke("clear_all_games");
+      setGames([]);
+      setSelectedGameId(null);
+    } catch (err) {
+      console.error("Error clearing library:", err);
     }
   };
 
@@ -213,7 +225,6 @@ export function App() {
       setIsAuthenticatingSteam(true);
       const updated = await invoke<LibraryIntegration>("authenticate_steam_account", { idOrVanity });
       setSteamIntegration(updated);
-      // Auto-scan to pull user's owned games if enabled
       await handleScanLibrary();
     } catch (err) {
       console.error("Failed to authenticate Steam:", err);
@@ -238,20 +249,6 @@ export function App() {
       setSteamIntegration(updated);
     } catch (err) {
       console.error("Failed to save integration settings:", err);
-    }
-  };
-
-  // Sync all metadata in background
-  const handleSyncAllMetadata = async () => {
-    try {
-      setIsSyncingMetadata(true);
-      await invoke("sync_all_metadata");
-      const list = await invoke<Game[]>("get_games");
-      setGames(list);
-    } catch (err) {
-      console.error("Error syncing metadata:", err);
-    } finally {
-      setIsSyncingMetadata(false);
     }
   };
 
@@ -360,7 +357,7 @@ export function App() {
 
   return (
     <div className="h-screen w-screen flex flex-col bg-[#090a0f] text-slate-100 overflow-hidden">
-      {/* Top Navigation Bar with Drawer Toggle Button */}
+      {/* Top Navigation Bar */}
       <TopNav
         onToggleDrawer={() => setIsDrawerOpen(true)}
         searchQuery={searchQuery}
@@ -371,11 +368,6 @@ export function App() {
         onToggleFavoritesOnly={() => setShowFavoritesOnly(!showFavoritesOnly)}
         showInstalledOnly={showInstalledOnly}
         onToggleInstalledOnly={() => setShowInstalledOnly(!showInstalledOnly)}
-        onScanLibrary={handleScanLibrary}
-        isScanning={isScanning}
-        onSyncAllMetadata={handleSyncAllMetadata}
-        isSyncingMetadata={isSyncingMetadata}
-        onOpenAddModal={() => setIsAddModalOpen(true)}
         onOpenSettings={() => setIsSettingsOpen(true)}
         gameCount={filteredGames.length}
       />
@@ -406,16 +398,10 @@ export function App() {
               <div className="flex space-x-3">
                 <button
                   onClick={() => setIsLibraryManagerOpen(true)}
-                  className="flex items-center space-x-2 px-5 py-2.5 bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-bold rounded-xl text-xs transition-all shadow-md"
+                  className="flex items-center space-x-2 px-5 py-2.5 bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-bold rounded-xl text-xs transition-all shadow-md cursor-pointer"
                 >
                   <Sparkles className="w-4 h-4" />
                   <span>Open Library Manager</span>
-                </button>
-                <button
-                  onClick={() => setIsAddModalOpen(true)}
-                  className="px-4 py-2.5 bg-[#161a26] hover:bg-[#202638] text-slate-200 border border-[#272e44] rounded-xl text-xs font-medium transition-all"
-                >
-                  Add Manually
                 </button>
               </div>
             )}
@@ -423,7 +409,7 @@ export function App() {
         ) : viewMode === "split" ? (
           /* Split View: Responsive 7-Column Grid on Left + Resizable Splitter + Compact Details on Right */
           <div className="flex-1 flex overflow-hidden w-full h-full">
-            {/* Left Column: Poster Grid (Default 58% width, adjustable) */}
+            {/* Left Column: Poster Grid */}
             <div
               style={{ width: `${gridWidthPercent}%` }}
               className="min-w-[340px] max-w-[80%] flex flex-col h-full bg-[#0c0d14] relative z-10"
@@ -540,7 +526,7 @@ export function App() {
                           e.stopPropagation();
                           handleLaunchGame(g);
                         }}
-                        className="px-3 py-1 bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 border border-cyan-500/40 rounded text-xs font-semibold"
+                        className="px-3 py-1 bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 border border-cyan-500/40 rounded text-xs font-semibold cursor-pointer"
                       >
                         Play
                       </button>
@@ -558,10 +544,7 @@ export function App() {
         isOpen={isDrawerOpen}
         onClose={() => setIsDrawerOpen(false)}
         onOpenLibraryManager={() => setIsLibraryManagerOpen(true)}
-        onOpenAddGame={() => setIsAddModalOpen(true)}
         onOpenSettings={() => setIsSettingsOpen(true)}
-        viewMode={viewMode}
-        onViewModeChange={setViewMode}
         gameCount={filteredGames.length}
       />
 
@@ -575,6 +558,7 @@ export function App() {
         onLogoutSteam={handleLogoutSteam}
         onSaveSteamIntegration={handleSaveSteamIntegration}
         onSyncSteamLibrary={handleScanLibrary}
+        onClearLibrary={handleClearLibrary}
         isSyncing={isScanning}
         isAuthenticating={isAuthenticatingSteam}
       />

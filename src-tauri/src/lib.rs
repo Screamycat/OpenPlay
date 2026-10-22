@@ -102,14 +102,22 @@ async fn open_steam_login_window(app_handle: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+#[derive(serde::Serialize)]
+pub struct ScanResult {
+    pub count: usize,
+    pub installed: usize,
+    pub uninstalled: usize,
+}
+
 #[tauri::command]
-async fn scan_steam_library(state: State<'_, AppState>) -> Result<usize, String> {
+async fn scan_steam_library(state: State<'_, AppState>) -> Result<ScanResult, String> {
     let integration = state.db.get_integration("steam").unwrap_or_default();
 
     // 1. Scan installed games from local disk
     let installed_games = SteamScanner::scan_installed_games()?;
     let mut installed_ids = std::collections::HashSet::new();
-    let mut count = installed_games.len();
+    let installed_count = installed_games.len();
+    let mut uninstalled_count = 0;
 
     for game in installed_games {
         if let Some(ref aid) = game.source_id {
@@ -127,7 +135,7 @@ async fn scan_steam_library(state: State<'_, AppState>) -> Result<usize, String>
                         if !installed_ids.contains(aid) {
                             owned.is_installed = false;
                             let _ = state.db.upsert_game(&owned);
-                            count += 1;
+                            uninstalled_count += 1;
                         }
                     }
                 }
@@ -139,7 +147,18 @@ async fn scan_steam_library(state: State<'_, AppState>) -> Result<usize, String>
     updated_integration.last_sync = Some(chrono::Local::now().format("%Y-%m-%d %H:%M").to_string());
     let _ = state.db.save_integration(&updated_integration);
 
-    Ok(count)
+    let all_games = state.db.get_all_games().unwrap_or_default();
+
+    Ok(ScanResult {
+        count: all_games.len(),
+        installed: installed_count,
+        uninstalled: uninstalled_count,
+    })
+}
+
+#[tauri::command]
+fn clear_all_games(state: State<'_, AppState>) -> Result<(), String> {
+    state.db.clear_all_games()
 }
 
 #[tauri::command]
@@ -233,6 +252,7 @@ pub fn run() {
             open_steam_login_window,
             authenticate_steam_account,
             logout_steam,
+            clear_all_games,
             save_game,
             delete_game,
             toggle_favorite,

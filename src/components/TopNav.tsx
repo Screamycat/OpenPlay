@@ -7,8 +7,6 @@ import {
   LayoutGrid,
   Columns2,
   List,
-  RefreshCw,
-  Plus,
   Settings,
   X,
 } from "lucide-react";
@@ -25,11 +23,6 @@ interface TopNavProps {
   onToggleFavoritesOnly: () => void;
   showInstalledOnly: boolean;
   onToggleInstalledOnly: () => void;
-  onScanLibrary: () => void;
-  isScanning: boolean;
-  onSyncAllMetadata: () => void;
-  isSyncingMetadata: boolean;
-  onOpenAddModal: () => void;
   onOpenSettings: () => void;
   gameCount: number;
 }
@@ -44,11 +37,6 @@ export const TopNav: React.FC<TopNavProps> = ({
   onToggleFavoritesOnly,
   showInstalledOnly,
   onToggleInstalledOnly,
-  onScanLibrary,
-  isScanning,
-  onSyncAllMetadata,
-  isSyncingMetadata,
-  onOpenAddModal,
   onOpenSettings,
   gameCount,
 }) => {
@@ -160,49 +148,8 @@ export const TopNav: React.FC<TopNavProps> = ({
         </button>
       </div>
 
-      {/* Right: Actions (Scan, Add Game, Settings) */}
+      {/* Right: Settings */}
       <div className="flex items-center space-x-2">
-        <button
-          onClick={onScanLibrary}
-          disabled={isScanning || isSyncingMetadata}
-          title="Scan Local Steam Library"
-          className="flex items-center space-x-1.5 px-3 py-1.5 text-xs bg-[#161a26] hover:bg-[#202638] text-slate-200 border border-[#272e44] rounded-lg transition-all disabled:opacity-50"
-        >
-          <RefreshCw
-            className={`w-3.5 h-3.5 text-cyan-400 ${
-              isScanning ? "animate-spin" : ""
-            }`}
-          />
-          <span className="hidden md:inline font-medium">
-            {isScanning ? "Scanning..." : "Scan Steam"}
-          </span>
-        </button>
-
-        <button
-          onClick={onSyncAllMetadata}
-          disabled={isScanning || isSyncingMetadata}
-          title="Download descriptions, tags & community scores from Steam for all games"
-          className="flex items-center space-x-1.5 px-3 py-1.5 text-xs bg-[#161a26] hover:bg-[#202638] text-slate-200 border border-[#272e44] rounded-lg transition-all disabled:opacity-50"
-        >
-          <RefreshCw
-            className={`w-3.5 h-3.5 text-amber-400 ${
-              isSyncingMetadata ? "animate-spin" : ""
-            }`}
-          />
-          <span className="hidden md:inline font-medium">
-            {isSyncingMetadata ? "Syncing..." : "Sync Metadata"}
-          </span>
-        </button>
-
-        <button
-          onClick={onOpenAddModal}
-          title="Add Game Manually"
-          className="flex items-center space-x-1.5 px-3 py-1.5 text-xs bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 border border-cyan-500/40 rounded-lg transition-all font-medium"
-        >
-          <Plus className="w-3.5 h-3.5" />
-          <span className="hidden md:inline">Add Game</span>
-        </button>
-
         <button
           onClick={onOpenSettings}
           title="Settings"

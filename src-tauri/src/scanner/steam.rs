@@ -283,6 +283,33 @@ impl SteamScanner {
         Ok(games)
     }
 
+    pub fn is_blacklisted_app(appid: &str, name: &str) -> bool {
+        let lower = name.to_lowercase();
+        if lower.contains("dedicated server")
+            || lower.contains("server")
+            || lower.contains("redistributable")
+            || lower.contains("steam linux runtime")
+            || lower.contains("proton")
+            || lower.contains("soundtrack")
+            || lower.contains("benchmark")
+            || lower.contains("playtest")
+        {
+            return true;
+        }
+
+        // Known non-game utility/software appids
+        matches!(
+            appid,
+            "250820" // SteamVR
+            | "365670" // Blender
+            | "400040" // ShareX
+            | "431960" // Wallpaper Engine
+            | "228980" // Steamworks Common Redistributables
+            | "3041230" // Windrose playtest
+            | "1962700" // Subnautica 2 playtest
+        )
+    }
+
     /// Scans all libraries and returns discovered games
     pub fn scan_installed_games() -> Result<Vec<Game>, String> {
         let steam_dir = Self::find_steam_install_dir()
@@ -331,8 +358,7 @@ impl SteamScanner {
                                 .and_then(|m| m.as_str().parse::<u64>().ok());
 
                             if let (Some(appid), Some(name)) = (appid, name) {
-                                // Ignore common Steam utility tool appids (Steamworks Common Redistributables, Proton, etc.)
-                                if appid == "228980" || appid == "105600" && name.contains("Terraria Server") {
+                                if Self::is_blacklisted_app(&appid, &name) {
                                     continue;
                                 }
 

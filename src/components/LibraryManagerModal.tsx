@@ -12,6 +12,8 @@ import {
   Clock,
   Layers,
   Sparkles,
+  CheckCircle2,
+  Trash2,
 } from "lucide-react";
 
 interface LibraryManagerModalProps {
@@ -22,7 +24,8 @@ interface LibraryManagerModalProps {
   onAuthenticateManual: (idOrVanity: string) => void;
   onLogoutSteam: () => void;
   onSaveSteamIntegration: (updated: LibraryIntegration) => void;
-  onSyncSteamLibrary: () => void;
+  onSyncSteamLibrary: () => Promise<number | void>;
+  onClearLibrary: () => Promise<void>;
   isSyncing: boolean;
   isAuthenticating: boolean;
 }
@@ -31,8 +34,6 @@ type CategoryTab =
   | "steam"
   | "epic"
   | "gog"
-  | "heroic"
-  | "lutris"
   | "retroarch"
   | "standalone_emulators"
   | "manual_local"
@@ -47,12 +48,14 @@ export const LibraryManagerModal: React.FC<LibraryManagerModalProps> = ({
   onLogoutSteam,
   onSaveSteamIntegration,
   onSyncSteamLibrary,
+  onClearLibrary,
   isSyncing,
   isAuthenticating,
 }) => {
   const [activeTab, setActiveTab] = useState<CategoryTab>("steam");
   const [manualInput, setManualInput] = useState("");
   const [showManualInput, setShowManualInput] = useState(false);
+  const [syncStatusMsg, setSyncStatusMsg] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
@@ -83,6 +86,29 @@ export const LibraryManagerModal: React.FC<LibraryManagerModalProps> = ({
       onAuthenticateManual(manualInput.trim());
       setManualInput("");
       setShowManualInput(false);
+    }
+  };
+
+  const handleSyncClick = async () => {
+    setSyncStatusMsg(null);
+    try {
+      const count = await onSyncSteamLibrary();
+      setSyncStatusMsg(
+        typeof count === "number"
+          ? `Sync Complete! ${count} installed games imported into library.`
+          : "Sync Complete! Library refreshed."
+      );
+      setTimeout(() => setSyncStatusMsg(null), 5000);
+    } catch (err) {
+      setSyncStatusMsg(`Sync error: ${err}`);
+    }
+  };
+
+  const handleClearClick = async () => {
+    if (confirm("Are you sure you want to clear all imported games from OpenPlay? You can re-sync anytime.")) {
+      await onClearLibrary();
+      setSyncStatusMsg("All library games have been removed.");
+      setTimeout(() => setSyncStatusMsg(null), 4000);
     }
   };
 
@@ -256,36 +282,6 @@ export const LibraryManagerModal: React.FC<LibraryManagerModalProps> = ({
                     Soon
                   </span>
                 </button>
-
-                {/* Heroic */}
-                <button
-                  onClick={() => setActiveTab("heroic")}
-                  className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-all ${
-                    activeTab === "heroic"
-                      ? "bg-[#1f2538] text-cyan-300 font-semibold"
-                      : "text-slate-400 hover:text-slate-200 hover:bg-[#141824]"
-                  }`}
-                >
-                  <span>Heroic Games</span>
-                  <span className="text-[9px] px-1.5 py-0.2 rounded bg-slate-800 text-slate-500">
-                    Soon
-                  </span>
-                </button>
-
-                {/* Lutris */}
-                <button
-                  onClick={() => setActiveTab("lutris")}
-                  className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-all ${
-                    activeTab === "lutris"
-                      ? "bg-[#1f2538] text-cyan-300 font-semibold"
-                      : "text-slate-400 hover:text-slate-200 hover:bg-[#141824]"
-                  }`}
-                >
-                  <span>Lutris</span>
-                  <span className="text-[9px] px-1.5 py-0.2 rounded bg-slate-800 text-slate-500">
-                    Soon
-                  </span>
-                </button>
               </div>
             </div>
           </div>
@@ -293,9 +289,9 @@ export const LibraryManagerModal: React.FC<LibraryManagerModalProps> = ({
           {/* Right Main Content Pane */}
           <div className="flex-1 overflow-y-auto p-6 bg-[#0f111a]">
             {activeTab === "steam" ? (
-              <div className="max-w-2xl space-y-6 text-xs text-slate-200">
+              <div className="max-w-2xl space-y-5 text-xs text-slate-200">
                 {/* Steam Integration Header */}
-                <div className="flex items-center justify-between border-b border-[#202538] pb-4">
+                <div className="flex items-center justify-between border-b border-[#202538] pb-3">
                   <div>
                     <h3 className="text-base font-extrabold text-white flex items-center space-x-2">
                       <span>Steam Integration</span>
@@ -304,7 +300,24 @@ export const LibraryManagerModal: React.FC<LibraryManagerModalProps> = ({
                       Sync installed games, full owned library catalog, and playtime directly from Steam.
                     </p>
                   </div>
+
+                  <button
+                    onClick={handleClearClick}
+                    title="Wipe currently imported games to start completely fresh"
+                    className="flex items-center space-x-1.5 px-3 py-1.5 text-[11px] text-rose-400 hover:text-rose-300 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 rounded-lg transition-all"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Clear Library</span>
+                  </button>
                 </div>
+
+                {/* Status Alert Banner */}
+                {syncStatusMsg && (
+                  <div className="p-3 bg-emerald-500/15 border border-emerald-500/30 rounded-xl text-emerald-300 text-xs flex items-center space-x-2 animate-in fade-in duration-200">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>{syncStatusMsg}</span>
+                  </div>
+                )}
 
                 {/* 1. Account / Authentication Status Card */}
                 <div className="bg-[#151926] border border-[#23293e] rounded-xl p-4 space-y-4">
@@ -341,7 +354,7 @@ export const LibraryManagerModal: React.FC<LibraryManagerModalProps> = ({
 
                       <button
                         onClick={onLogoutSteam}
-                        className="flex items-center space-x-1.5 px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-lg transition-all font-medium"
+                        className="flex items-center space-x-1.5 px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-lg transition-all font-medium cursor-pointer"
                       >
                         <LogOut className="w-3.5 h-3.5" />
                         <span>Log Out</span>
@@ -357,7 +370,7 @@ export const LibraryManagerModal: React.FC<LibraryManagerModalProps> = ({
                         <button
                           onClick={onOpenSteamLogin}
                           disabled={isAuthenticating}
-                          className="flex items-center space-x-2 px-5 py-2.5 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white font-bold rounded-xl shadow-lg transition-all active:scale-[0.98]"
+                          className="flex items-center space-x-2 px-5 py-2.5 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white font-bold rounded-xl shadow-lg transition-all active:scale-[0.98] cursor-pointer"
                         >
                           <LogIn className="w-4 h-4" />
                           <span>{isAuthenticating ? "Opening Login..." : "Log In with Steam"}</span>
@@ -365,7 +378,7 @@ export const LibraryManagerModal: React.FC<LibraryManagerModalProps> = ({
 
                         <button
                           onClick={() => setShowManualInput(!showManualInput)}
-                          className="text-xs text-slate-400 hover:text-slate-200 underline"
+                          className="text-xs text-slate-400 hover:text-slate-200 underline cursor-pointer"
                         >
                           {showManualInput ? "Hide manual entry" : "Enter SteamID / Vanity URL manually"}
                         </button>
@@ -385,7 +398,7 @@ export const LibraryManagerModal: React.FC<LibraryManagerModalProps> = ({
                           />
                           <button
                             type="submit"
-                            className="px-4 py-2 bg-cyan-600 text-slate-950 font-bold rounded-lg text-xs hover:bg-cyan-500 transition-all"
+                            className="px-4 py-2 bg-cyan-600 text-slate-950 font-bold rounded-lg text-xs hover:bg-cyan-500 transition-all cursor-pointer"
                           >
                             Verify & Connect
                           </button>
@@ -411,7 +424,7 @@ export const LibraryManagerModal: React.FC<LibraryManagerModalProps> = ({
                             Import installed games
                           </div>
                           <div className="text-[10px] text-slate-400">
-                            Scans local storage drives for installed Steam game manifests.
+                            Scans local storage drives for installed Steam game manifests (filters out software & tools).
                           </div>
                         </div>
                       </div>
@@ -478,12 +491,12 @@ export const LibraryManagerModal: React.FC<LibraryManagerModalProps> = ({
                   </div>
 
                   <button
-                    onClick={onSyncSteamLibrary}
+                    onClick={handleSyncClick}
                     disabled={isSyncing}
-                    className="flex items-center space-x-2 px-6 py-2.5 bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-bold rounded-xl transition-all shadow-md active:scale-[0.98] disabled:opacity-50"
+                    className="flex items-center space-x-2 px-6 py-2.5 bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-bold rounded-xl transition-all shadow-md active:scale-[0.98] disabled:opacity-50 cursor-pointer"
                   >
                     <RefreshCw className={`w-4 h-4 ${isSyncing ? "animate-spin" : ""}`} />
-                    <span>{isSyncing ? "Syncing Steam..." : "Sync Steam Library"}</span>
+                    <span>{isSyncing ? "Scanning Steam Library..." : "Sync Steam Library"}</span>
                   </button>
                 </div>
               </div>
@@ -495,7 +508,7 @@ export const LibraryManagerModal: React.FC<LibraryManagerModalProps> = ({
                   {activeTab.replace("_", " ")} Integration
                 </h3>
                 <p className="text-xs text-slate-400 max-w-sm leading-relaxed">
-                  Support for this category is planned in the upcoming phases. The library architecture is already modularized to plug in scanners and store manifests seamlessly.
+                  Support for this category is planned in upcoming phases. The library architecture is already modularized to plug in scanners and store manifests seamlessly.
                 </p>
               </div>
             )}

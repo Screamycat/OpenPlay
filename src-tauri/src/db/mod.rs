@@ -268,6 +268,13 @@ impl Database {
         Ok(())
     }
 
+    pub fn clear_all_games(&self) -> Result<(), String> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM games", [])
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
     pub fn get_integration(&self, provider: &str) -> Result<LibraryIntegration, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
