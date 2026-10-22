@@ -26,6 +26,8 @@ interface TopNavProps {
   onToggleInstalledOnly: () => void;
   onScanLibrary: () => void;
   isScanning: boolean;
+  onSyncAllMetadata: () => void;
+  isSyncingMetadata: boolean;
   onOpenAddModal: () => void;
   onOpenSettings: () => void;
   gameCount: number;
@@ -42,6 +44,8 @@ export const TopNav: React.FC<TopNavProps> = ({
   onToggleInstalledOnly,
   onScanLibrary,
   isScanning,
+  onSyncAllMetadata,
+  isSyncingMetadata,
   onOpenAddModal,
   onOpenSettings,
   gameCount,
@@ -154,7 +158,7 @@ export const TopNav: React.FC<TopNavProps> = ({
       <div className="flex items-center space-x-2">
         <button
           onClick={onScanLibrary}
-          disabled={isScanning}
+          disabled={isScanning || isSyncingMetadata}
           title="Scan Local Steam Library"
           className="flex items-center space-x-1.5 px-3 py-1.5 text-xs bg-[#161a26] hover:bg-[#202638] text-slate-200 border border-[#272e44] rounded-lg transition-all disabled:opacity-50"
         >
@@ -165,6 +169,22 @@ export const TopNav: React.FC<TopNavProps> = ({
           />
           <span className="hidden md:inline font-medium">
             {isScanning ? "Scanning..." : "Scan Steam"}
+          </span>
+        </button>
+
+        <button
+          onClick={onSyncAllMetadata}
+          disabled={isScanning || isSyncingMetadata}
+          title="Download descriptions, tags & community scores from Steam for all games"
+          className="flex items-center space-x-1.5 px-3 py-1.5 text-xs bg-[#161a26] hover:bg-[#202638] text-slate-200 border border-[#272e44] rounded-lg transition-all disabled:opacity-50"
+        >
+          <RefreshCw
+            className={`w-3.5 h-3.5 text-amber-400 ${
+              isSyncingMetadata ? "animate-spin" : ""
+            }`}
+          />
+          <span className="hidden md:inline font-medium">
+            {isSyncingMetadata ? "Syncing..." : "Sync Metadata"}
           </span>
         </button>
 

@@ -10,7 +10,7 @@ use metadata::steam::SteamMetadataFetcher;
 use models::Game;
 use scanner::steam::SteamScanner;
 use std::sync::Arc;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, State};
 
 struct AppState {
     db: Arc<Database>,
@@ -49,6 +49,26 @@ async fn fetch_game_metadata(game_id: String, state: State<'_, AppState>) -> Res
     }
 
     Ok(game)
+}
+
+#[tauri::command]
+async fn sync_all_metadata(app_handle: AppHandle, state: State<'_, AppState>) -> Result<usize, String> {
+    let all = state.db.get_all_games()?;
+    let mut count = 0;
+    for mut game in all {
+        if game.source.to_lowercase() == "steam" && game.description.is_none() {
+            if let Some(ref appid) = game.source_id {
+                if let Ok(meta) = SteamMetadataFetcher::fetch_metadata_for_appid(appid).await {
+                    SteamMetadataFetcher::apply_metadata(&mut game, meta);
+                    let _ = state.db.upsert_game(&game);
+                    let _ = app_handle.emit("game-updated", &game);
+                    count += 1;
+                    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                }
+            }
+        }
+    }
+    Ok(count)
 }
 
 #[tauri::command]
@@ -96,6 +116,7 @@ pub fn run() {
             get_games,
             scan_steam_library,
             fetch_game_metadata,
+            sync_all_metadata,
             save_game,
             delete_game,
             toggle_favorite,

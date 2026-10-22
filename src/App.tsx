@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Game } from "./types/game";
@@ -19,10 +19,22 @@ export function App() {
   const [viewMode, setViewMode] = useState<ViewMode>("split");
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
   const [showInstalledOnly, setShowInstalledOnly] = useState(false);
-  const [cardWidth, setCardWidth] = useState(140);
+
+  // Default cardWidth to 108 for 7 columns, persist in localStorage
+  const [cardWidth, setCardWidth] = useState(() => {
+    const saved = localStorage.getItem("openplay_card_width");
+    return saved ? Number(saved) : 108;
+  });
+
+  // Default grid width to 58% for 7 vertical columns, persist in localStorage
+  const [gridWidthPercent, setGridWidthPercent] = useState(() => {
+    const saved = localStorage.getItem("openplay_grid_width");
+    return saved ? Number(saved) : 58;
+  });
 
   const [isLoading, setIsLoading] = useState(true);
   const [isScanning, setIsScanning] = useState(false);
+  const [isSyncingMetadata, setIsSyncingMetadata] = useState(false);
   const [isLaunchingId, setIsLaunchingId] = useState<string | null>(null);
   const [isFetchingMetaId, setIsFetchingMetaId] = useState<string | null>(null);
 
@@ -30,18 +42,54 @@ export function App() {
   const [editingGame, setEditingGame] = useState<Game | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
+  const isDraggingSplitter = useRef(false);
+
+  const handleCardWidthChange = (val: number) => {
+    setCardWidth(val);
+    localStorage.setItem("openplay_card_width", String(val));
+  };
+
+  const handleGridWidthChange = (val: number) => {
+    const clamped = Math.max(30, Math.min(75, val));
+    setGridWidthPercent(clamped);
+    localStorage.setItem("openplay_grid_width", String(clamped));
+  };
+
+  // Mouse drag handlers for resizable splitter
+  const handleSplitterMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    isDraggingSplitter.current = true;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      if (!isDraggingSplitter.current) return;
+      const newPercent = (moveEvent.clientX / window.innerWidth) * 100;
+      handleGridWidthChange(newPercent);
+    };
+
+    const handleMouseUp = () => {
+      isDraggingSplitter.current = false;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+  }, []);
+
   // Load games on initial mount
   const loadGames = async (autoScanIfEmpty = true) => {
     try {
       setIsLoading(true);
       const list = await invoke<Game[]>("get_games");
       if (list.length === 0 && autoScanIfEmpty) {
-        // Auto scan on first run!
         await handleScanLibrary();
       } else {
         setGames(list);
         if (list.length > 0 && !selectedGameId) {
-          // Prefer RetroArch if installed, otherwise first game
           const retro = list.find((g) => g.title.toLowerCase().includes("retroarch"));
           setSelectedGameId(retro ? retro.id : list[0].id);
         }
@@ -56,7 +104,6 @@ export function App() {
   useEffect(() => {
     loadGames(true);
 
-    // Listen to background process events from Tauri
     const unlistenLaunched = listen<string>("game-launched", () => {
       setIsLaunchingId(null);
     });
@@ -81,9 +128,17 @@ export function App() {
       );
     });
 
+    const unlistenUpdated = listen<Game>("game-updated", (event) => {
+      const updated = event.payload;
+      setGames((prev) =>
+        prev.map((g) => (g.id === updated.id ? { ...g, ...updated } : g))
+      );
+    });
+
     return () => {
       unlistenLaunched.then((f) => f());
       unlistenStopped.then((f) => f());
+      unlistenUpdated.then((f) => f());
     };
   }, []);
 
@@ -102,6 +157,20 @@ export function App() {
       console.error("Error scanning Steam library:", err);
     } finally {
       setIsScanning(false);
+    }
+  };
+
+  // Sync all metadata in background
+  const handleSyncAllMetadata = async () => {
+    try {
+      setIsSyncingMetadata(true);
+      await invoke("sync_all_metadata");
+      const list = await invoke<Game[]>("get_games");
+      setGames(list);
+    } catch (err) {
+      console.error("Error syncing metadata:", err);
+    } finally {
+      setIsSyncingMetadata(false);
     }
   };
 
@@ -209,7 +278,7 @@ export function App() {
   }, [games, selectedGameId]);
 
   return (
-    <div className="h-screen w-screen flex flex-col bg-[#0a0b10] text-slate-100 overflow-hidden">
+    <div className="h-screen w-screen flex flex-col bg-[#090a0f] text-slate-100 overflow-hidden">
       {/* Top Navigation Bar */}
       <TopNav
         searchQuery={searchQuery}
@@ -222,13 +291,15 @@ export function App() {
         onToggleInstalledOnly={() => setShowInstalledOnly(!showInstalledOnly)}
         onScanLibrary={handleScanLibrary}
         isScanning={isScanning}
+        onSyncAllMetadata={handleSyncAllMetadata}
+        isSyncingMetadata={isSyncingMetadata}
         onOpenAddModal={() => setIsAddModalOpen(true)}
         onOpenSettings={() => setIsSettingsOpen(true)}
         gameCount={filteredGames.length}
       />
 
       {/* Main Workspace Area */}
-      <main className="flex-1 flex overflow-hidden">
+      <main className="flex-1 flex overflow-hidden relative">
         {isLoading ? (
           <div className="flex-1 flex flex-col items-center justify-center space-y-3">
             <Loader2 className="w-8 h-8 text-cyan-400 animate-spin" />
@@ -269,10 +340,13 @@ export function App() {
             )}
           </div>
         ) : viewMode === "split" ? (
-          /* Split View (Grid on Left, Details on Right) */
-          <>
-            {/* Left Column: Poster Grid + Zoom Slider */}
-            <div className="w-[38%] min-w-[320px] max-w-[620px] border-r border-[#1e2230] flex flex-col h-full bg-[#0d0e15]">
+          /* Split View: Responsive 7-Column Grid on Left + Resizable Splitter + Compact Details on Right */
+          <div className="flex-1 flex overflow-hidden w-full h-full">
+            {/* Left Column: Poster Grid (Default 58% width, adjustable) */}
+            <div
+              style={{ width: `${gridWidthPercent}%` }}
+              className="min-w-[340px] max-w-[80%] flex flex-col h-full bg-[#0c0d14] relative z-10"
+            >
               <GameGrid
                 games={filteredGames}
                 selectedGameId={selectedGame?.id}
@@ -282,49 +356,64 @@ export function App() {
               />
               <PosterZoomSlider
                 cardWidth={cardWidth}
-                onChange={setCardWidth}
+                minWidth={80}
+                maxWidth={220}
+                onChange={handleCardWidthChange}
               />
             </div>
 
-            {/* Right Column: Game Details */}
-            {selectedGame ? (
-              <GameDetails
-                game={selectedGame}
-                onLaunch={handleLaunchGame}
-                onToggleFavorite={handleToggleFavorite}
-                onOpenEdit={(g) => setEditingGame(g)}
-                onFetchMetadata={handleFetchMetadata}
-                isLaunching={isLaunchingId === selectedGame.id}
-                isFetchingMeta={isFetchingMetaId === selectedGame.id}
-                onSaveNotes={handleSaveNotes}
-              />
-            ) : (
-              <div className="flex-1 flex items-center justify-center text-slate-500 text-xs">
-                Select a game to view details
-              </div>
-            )}
-          </>
+            {/* Draggable Vertical Splitter Divider */}
+            <div
+              onMouseDown={handleSplitterMouseDown}
+              className="w-1.5 hover:w-2 bg-[#1a1e2b] hover:bg-cyan-400 cursor-col-resize flex items-center justify-center transition-all z-20 group"
+              title="Drag to resize grid and details panes"
+            >
+              <div className="w-0.5 h-6 bg-slate-600 group-hover:bg-slate-900 rounded-full" />
+            </div>
+
+            {/* Right Column: Compact Game Details Pane */}
+            <div
+              style={{ width: `${100 - gridWidthPercent}%` }}
+              className="flex-1 flex flex-col h-full bg-[#090a0f] overflow-hidden"
+            >
+              {selectedGame ? (
+                <GameDetails
+                  game={selectedGame}
+                  onLaunch={handleLaunchGame}
+                  onToggleFavorite={handleToggleFavorite}
+                  onOpenEdit={(g) => setEditingGame(g)}
+                  onFetchMetadata={handleFetchMetadata}
+                  isLaunching={isLaunchingId === selectedGame.id}
+                  isFetchingMeta={isFetchingMetaId === selectedGame.id}
+                  onSaveNotes={handleSaveNotes}
+                />
+              ) : (
+                <div className="flex-1 flex items-center justify-center text-slate-500 text-xs">
+                  Select a game to view details
+                </div>
+              )}
+            </div>
+          </div>
         ) : viewMode === "grid" ? (
           /* Full Grid View */
-          <div className="flex-1 flex flex-col h-full bg-[#0d0e15]">
+          <div className="flex-1 flex flex-col h-full bg-[#0c0d14]">
             <GameGrid
               games={filteredGames}
               selectedGameId={selectedGame?.id}
-              onSelectGame={(g) => {
-                setSelectedGameId(g.id);
-                // When in full grid, selecting or clicking can also view
-              }}
+              onSelectGame={(g) => setSelectedGameId(g.id)}
               onLaunchGame={handleLaunchGame}
               cardWidth={cardWidth}
             />
             <PosterZoomSlider
               cardWidth={cardWidth}
-              onChange={setCardWidth}
+              minWidth={80}
+              maxWidth={220}
+              onChange={handleCardWidthChange}
             />
           </div>
         ) : (
           /* List View */
-          <div className="flex-1 overflow-y-auto p-4 bg-[#0d0e15]">
+          <div className="flex-1 overflow-y-auto p-4 bg-[#0c0d14]">
             <table className="w-full text-left text-xs text-slate-300">
               <thead className="text-[11px] uppercase tracking-wider text-slate-500 border-b border-[#1f2436]">
                 <tr>

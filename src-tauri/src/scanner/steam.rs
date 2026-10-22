@@ -70,12 +70,63 @@ impl SteamScanner {
         folders
     }
 
+    /// Reads user playtime (in seconds) from localconfig.vdf across all userdata profiles
+    pub fn get_user_playtimes(steam_dir: &Path) -> std::collections::HashMap<String, u64> {
+        let mut playtimes = std::collections::HashMap::new();
+        let userdata_dir = steam_dir.join("userdata");
+        if !userdata_dir.exists() {
+            return playtimes;
+        }
+
+        let app_re = match Regex::new(r#"^"(\d+)"$"#) {
+            Ok(r) => r,
+            Err(_) => return playtimes,
+        };
+        let playtime_re = match Regex::new(r#"^"Playtime"\s+"(\d+)"$"#) {
+            Ok(r) => r,
+            Err(_) => return playtimes,
+        };
+
+        if let Ok(entries) = fs::read_dir(&userdata_dir) {
+            for entry in entries.flatten() {
+                let localconfig = entry.path().join("config").join("localconfig.vdf");
+                if localconfig.exists() {
+                    if let Ok(content) = fs::read_to_string(&localconfig) {
+                        let mut current_appid: Option<String> = None;
+                        for line in content.lines() {
+                            let trimmed = line.trim();
+                            if let Some(cap) = app_re.captures(trimmed) {
+                                if let Some(m) = cap.get(1) {
+                                    current_appid = Some(m.as_str().to_string());
+                                }
+                            } else if trimmed == "}" {
+                                current_appid = None;
+                            } else if let Some(ref appid) = current_appid {
+                                if let Some(pt_cap) = playtime_re.captures(trimmed) {
+                                    if let Some(pt_m) = pt_cap.get(1) {
+                                        if let Ok(minutes) = pt_m.as_str().parse::<u64>() {
+                                            playtimes.insert(appid.clone(), minutes * 60);
+                                            current_appid = None;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        playtimes
+    }
+
     /// Scans all libraries and returns discovered games
     pub fn scan_installed_games() -> Result<Vec<Game>, String> {
         let steam_dir = Self::find_steam_install_dir()
             .ok_or_else(|| "Steam installation directory not found".to_string())?;
 
         let library_folders = Self::get_library_folders(&steam_dir);
+        let playtimes = Self::get_user_playtimes(&steam_dir);
         let mut games = Vec::new();
 
         let appid_re = Regex::new(r#""appid"\s+"(\d+)""#).map_err(|e| e.to_string())?;
@@ -164,6 +215,8 @@ impl SteamScanner {
                                     }
                                 });
 
+                                let initial_playtime = playtimes.get(&appid).copied().unwrap_or(0);
+
                                 let game = Game {
                                     id: format!("steam_{}", appid),
                                     title: name.clone(),
@@ -187,7 +240,7 @@ impl SteamScanner {
                                     platforms: vec!["Windows".to_string(), "Linux".to_string()],
                                     community_score: None,
                                     user_rating: None,
-                                    playtime_seconds: 0,
+                                    playtime_seconds: initial_playtime,
                                     last_played: last_played_str,
                                     date_added: Some(chrono::Local::now().format("%Y-%m-%d").to_string()),
                                     completion_status: Some("Not Played".to_string()),
@@ -296,7 +349,7 @@ mod tests {
         assert!(!games.is_empty(), "Should discover at least one installed game");
         println!("\n=== Discovered {} Steam games ===", games.len());
         for g in games.iter().take(5) {
-            println!(" - {} (ID: {}, Cover: {:?})", g.title, g.id, g.cover_image);
+            println!(" - {} (ID: {}, Playtime: {}m, Cover: {:?})", g.title, g.id, g.playtime_seconds / 60, g.cover_image);
         }
     }
 }

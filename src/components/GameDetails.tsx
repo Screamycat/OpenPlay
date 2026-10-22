@@ -68,100 +68,100 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
   };
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-[#0a0b10] overflow-hidden select-text relative">
+    <div className="flex-1 flex flex-col h-full bg-[#090a0f] overflow-hidden select-text relative">
       {/* Scrollable details container */}
       <div className="flex-1 overflow-y-auto">
-        {/* Top Hero Banner */}
-        <div className="relative min-h-[280px] lg:min-h-[340px] flex flex-col justify-end p-6 overflow-hidden">
+        {/* Top Hero Banner (Compact & Atmospheric) */}
+        <div className="relative min-h-[180px] lg:min-h-[220px] flex flex-col justify-end p-5 overflow-hidden">
           {/* Background Hero Art with layered fade */}
           {heroSrc ? (
             <img
               src={heroSrc}
               alt={game.title}
-              className="absolute inset-0 w-full h-full object-cover object-top opacity-60 pointer-events-none"
+              className="absolute inset-0 w-full h-full object-cover object-top opacity-55 pointer-events-none"
             />
           ) : (
-            <div className="absolute inset-0 bg-gradient-to-br from-indigo-950/40 via-[#0d101d] to-[#0a0b10]" />
+            <div className="absolute inset-0 bg-gradient-to-br from-indigo-950/40 via-[#0d101d] to-[#090a0f]" />
           )}
 
           {/* Gradients to blend banner into dark background */}
-          <div className="absolute inset-0 bg-gradient-to-t from-[#0a0b10] via-[#0a0b10]/60 to-transparent pointer-events-none" />
-          <div className="absolute inset-0 bg-gradient-to-r from-[#0a0b10]/80 via-transparent to-transparent pointer-events-none" />
+          <div className="absolute inset-0 bg-gradient-to-t from-[#090a0f] via-[#090a0f]/60 to-transparent pointer-events-none" />
+          <div className="absolute inset-0 bg-gradient-to-r from-[#090a0f]/85 via-[#090a0f]/30 to-transparent pointer-events-none" />
 
           {/* Banner Contents */}
-          <div className="relative z-10 max-w-4xl">
+          <div className="relative z-10 max-w-2xl">
             {/* Title / Transparent Logo */}
             {logoSrc ? (
               <img
                 src={logoSrc}
                 alt={game.title}
-                className="max-h-20 max-w-sm mb-3 object-contain drop-shadow-xl"
+                className="max-h-16 max-w-xs mb-2 object-contain drop-shadow-xl"
                 onError={(e) => {
                   (e.target as HTMLElement).style.display = "none";
                 }}
               />
             ) : null}
 
-            <h1 className="text-3xl lg:text-4xl font-extrabold text-white tracking-tight drop-shadow-md">
+            <h1 className="text-2xl lg:text-3xl font-extrabold text-white tracking-tight drop-shadow-md leading-tight">
               {game.title}
             </h1>
 
             {/* Sub-header info: Developer, Year, Platforms, Community Score */}
-            <div className="flex flex-wrap items-center gap-3 mt-2 text-xs font-medium text-slate-300">
+            <div className="flex flex-wrap items-center gap-2 mt-1.5 text-xs font-medium text-slate-300">
               {/* Star Rating / Metacritic */}
               {game.community_score && (
-                <div className="flex items-center space-x-1 bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30">
-                  <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
+                <div className="flex items-center space-x-1 bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded border border-amber-500/30 text-[11px]">
+                  <Star className="w-3 h-3 fill-amber-400 text-amber-400" />
                   <span className="font-bold">{game.community_score}</span>
                 </div>
               )}
 
               {/* Release Year */}
               {game.release_date && (
-                <span className="text-slate-400 font-semibold">
-                  {game.release_date}
+                <span className="text-slate-400 text-[11px] font-semibold">
+                  {game.release_date.slice(0, 4)}
                 </span>
               )}
 
               {/* Platform Badges */}
-              <div className="flex items-center space-x-1.5">
+              <div className="flex items-center space-x-1">
                 {game.platforms.includes("Windows") && (
                   <span className="flex items-center space-x-1 px-1.5 py-0.5 rounded bg-slate-800/80 border border-slate-700 text-slate-300 text-[10px]">
-                    <Monitor className="w-3 h-3 text-cyan-400" />
+                    <Monitor className="w-2.5 h-2.5 text-cyan-400" />
                     <span>PC (WINDOWS)</span>
                   </span>
                 )}
                 {game.platforms.includes("Linux") && (
                   <span className="flex items-center space-x-1 px-1.5 py-0.5 rounded bg-slate-800/80 border border-slate-700 text-slate-300 text-[10px]">
-                    <Cpu className="w-3 h-3 text-amber-400" />
+                    <Cpu className="w-2.5 h-2.5 text-amber-400" />
                     <span>LINUX</span>
                   </span>
                 )}
                 {game.platforms.includes("Macintosh") && (
                   <span className="flex items-center space-x-1 px-1.5 py-0.5 rounded bg-slate-800/80 border border-slate-700 text-slate-300 text-[10px]">
-                    <Apple className="w-3 h-3 text-slate-300" />
-                    <span>MACINTOSH</span>
+                    <Apple className="w-2.5 h-2.5 text-slate-300" />
+                    <span>MAC</span>
                   </span>
                 )}
               </div>
 
-              {/* Free to Play / Genre tag */}
+              {/* Genre / Tag pill */}
               {game.genres.length > 0 && (
-                <span className="px-2 py-0.5 rounded bg-blue-500/20 border border-blue-500/30 text-blue-300 text-[10px] uppercase font-bold tracking-wider">
+                <span className="px-1.5 py-0.5 rounded bg-blue-500/20 border border-blue-500/30 text-blue-300 text-[10px] uppercase font-bold tracking-wider">
                   {game.genres[0]}
                 </span>
               )}
             </div>
 
-            {/* Quick Action Links Row (Community Hub, Discussions, Store Page, PCGamingWiki) */}
-            <div className="flex flex-wrap items-center gap-2 mt-4">
+            {/* Quick Action Links Row */}
+            <div className="flex flex-wrap items-center gap-1.5 mt-3">
               {game.links.map((link) => (
                 <button
                   key={link.title}
                   onClick={() => handleOpenLink(link.url)}
-                  className="flex items-center space-x-1.5 px-2.5 py-1 text-xs bg-slate-900/80 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700/80 rounded-full transition-all shadow-sm"
+                  className="flex items-center space-x-1 px-2 py-0.8 text-[11px] bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700/80 rounded-full transition-all shadow-sm"
                 >
-                  <ExternalLink className="w-3 h-3 text-cyan-400" />
+                  <ExternalLink className="w-2.5 h-2.5 text-cyan-400" />
                   <span>{link.title}</span>
                 </button>
               ))}
@@ -170,10 +170,10 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
         </div>
 
         {/* Tab Navigation Row */}
-        <div className="px-6 border-b border-[#1f2436] flex items-center space-x-6 bg-[#0a0b10] sticky top-0 z-20">
+        <div className="px-5 border-b border-[#1a1e2b] flex items-center space-x-5 bg-[#090a0f] sticky top-0 z-20">
           <button
             onClick={() => setActiveTab("overview")}
-            className={`py-3 text-xs font-semibold uppercase tracking-wider border-b-2 transition-all ${
+            className={`py-2.5 text-xs font-semibold uppercase tracking-wider border-b-2 transition-all ${
               activeTab === "overview"
                 ? "border-cyan-400 text-cyan-300"
                 : "border-transparent text-slate-400 hover:text-slate-200"
@@ -184,7 +184,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
 
           <button
             onClick={() => setActiveTab("screenshots")}
-            className={`py-3 text-xs font-semibold uppercase tracking-wider border-b-2 transition-all flex items-center space-x-1.5 ${
+            className={`py-2.5 text-xs font-semibold uppercase tracking-wider border-b-2 transition-all flex items-center space-x-1.5 ${
               activeTab === "screenshots"
                 ? "border-cyan-400 text-cyan-300"
                 : "border-transparent text-slate-400 hover:text-slate-200"
@@ -201,7 +201,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
 
           <button
             onClick={() => setActiveTab("notes")}
-            className={`py-3 text-xs font-semibold uppercase tracking-wider border-b-2 transition-all flex items-center space-x-1.5 ${
+            className={`py-2.5 text-xs font-semibold uppercase tracking-wider border-b-2 transition-all flex items-center space-x-1.5 ${
               activeTab === "notes"
                 ? "border-cyan-400 text-cyan-300"
                 : "border-transparent text-slate-400 hover:text-slate-200"
@@ -218,30 +218,30 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
           </button>
         </div>
 
-        {/* Two-Column Details Body */}
-        <div className="p-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Main Tab Area (2 Cols on desktop) */}
-          <div className="lg:col-span-2 space-y-6">
+        {/* Two-Column Details Body (Compact, Snug) */}
+        <div className="p-5 flex flex-col xl:flex-row gap-5">
+          {/* Main Tab Content Area */}
+          <div className="flex-1 space-y-4 min-w-0">
             {activeTab === "overview" && (
-              <div className="space-y-6">
+              <div className="space-y-4">
                 {/* Description */}
                 <div>
-                  <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400 mb-2">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">
                     About the Game
                   </h3>
-                  <div className="text-sm text-slate-300 leading-relaxed font-normal bg-[#11131c] p-4 rounded-xl border border-[#1e2333]">
+                  <div className="text-xs text-slate-300 leading-relaxed font-normal bg-[#10121a] p-3.5 rounded-xl border border-[#1b202e]">
                     {game.description ? (
                       <p className="whitespace-pre-line">{game.description}</p>
                     ) : (
-                      <div className="py-6 text-center text-slate-500">
-                        <p>No description available locally.</p>
+                      <div className="py-4 text-center text-slate-500">
+                        <p>No description cached locally.</p>
                         <button
                           onClick={() => onFetchMetadata(game.id)}
                           disabled={isFetchingMeta}
                           className="mt-2 inline-flex items-center space-x-1.5 px-3 py-1 text-xs bg-cyan-600/20 text-cyan-400 border border-cyan-500/40 rounded-lg hover:bg-cyan-600/30 transition-all"
                         >
                           <Sparkles className="w-3 h-3" />
-                          <span>Fetch Steam Store Description</span>
+                          <span>Fetch Steam Description</span>
                         </button>
                       </div>
                     )}
@@ -249,10 +249,10 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                 </div>
 
                 {/* Play Stats Row */}
-                <div className="grid grid-cols-3 gap-3 p-3.5 rounded-xl bg-[#11131c] border border-[#1e2333] text-center">
+                <div className="grid grid-cols-3 gap-2.5 p-3 rounded-xl bg-[#10121a] border border-[#1b202e] text-center">
                   <div>
-                    <div className="text-[10px] uppercase font-bold text-slate-500 mb-0.5 flex items-center justify-center space-x-1">
-                      <Clock className="w-3 h-3" />
+                    <div className="text-[9px] uppercase font-bold text-slate-500 mb-0.5 flex items-center justify-center space-x-1">
+                      <Clock className="w-2.5 h-2.5" />
                       <span>Last Played</span>
                     </div>
                     <div className="text-xs font-semibold text-slate-200">
@@ -261,8 +261,8 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                   </div>
 
                   <div>
-                    <div className="text-[10px] uppercase font-bold text-slate-500 mb-0.5 flex items-center justify-center space-x-1">
-                      <Play className="w-3 h-3 text-cyan-400" />
+                    <div className="text-[9px] uppercase font-bold text-slate-500 mb-0.5 flex items-center justify-center space-x-1">
+                      <Play className="w-2.5 h-2.5 text-cyan-400" />
                       <span>Time Played</span>
                     </div>
                     <div className="text-xs font-semibold text-cyan-300">
@@ -271,8 +271,8 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                   </div>
 
                   <div>
-                    <div className="text-[10px] uppercase font-bold text-slate-500 mb-0.5 flex items-center justify-center space-x-1">
-                      <CheckCircle className="w-3 h-3 text-emerald-400" />
+                    <div className="text-[9px] uppercase font-bold text-slate-500 mb-0.5 flex items-center justify-center space-x-1">
+                      <CheckCircle className="w-2.5 h-2.5 text-emerald-400" />
                       <span>Completion</span>
                     </div>
                     <div className="text-xs font-semibold text-slate-200 uppercase">
@@ -284,9 +284,9 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
             )}
 
             {activeTab === "screenshots" && (
-              <div className="space-y-4">
+              <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">
                     Official Screenshots
                   </h3>
                   {game.screenshots.length === 0 && (
@@ -296,18 +296,18 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                       className="flex items-center space-x-1 text-xs text-cyan-400 hover:underline"
                     >
                       <Sparkles className="w-3 h-3" />
-                      <span>Download Screenshots</span>
+                      <span>Fetch Screenshots</span>
                     </button>
                   )}
                 </div>
 
                 {game.screenshots.length > 0 ? (
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-2 gap-2.5">
                     {game.screenshots.map((s, idx) => (
                       <div
                         key={idx}
                         onClick={() => setActiveScreenshot(s)}
-                        className="rounded-lg overflow-hidden border border-[#202538] hover:border-cyan-400 cursor-pointer aspect-video bg-black/40 group relative"
+                        className="rounded-lg overflow-hidden border border-[#1d2232] hover:border-cyan-400 cursor-pointer aspect-video bg-black/40 group relative"
                       >
                         <img
                           src={s}
@@ -319,58 +319,58 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                     ))}
                   </div>
                 ) : (
-                  <div className="p-8 text-center bg-[#11131c] rounded-xl border border-[#1e2333] text-slate-500 text-xs">
-                    No screenshots downloaded yet. Click "Fetch Steam Store Description" to load them.
+                  <div className="p-6 text-center bg-[#10121a] rounded-xl border border-[#1b202e] text-slate-500 text-xs">
+                    No screenshots downloaded yet. Click "Fetch Steam Description" to load them.
                   </div>
                 )}
               </div>
             )}
 
             {activeTab === "notes" && (
-              <div className="space-y-3">
-                <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400">
-                  Custom User Notes
+              <div className="space-y-2">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                  User Notes
                 </h3>
                 <textarea
                   value={userNotes}
                   onChange={(e) => setUserNotes(e.target.value)}
                   onBlur={handleNotesBlur}
-                  rows={8}
-                  placeholder="Write your notes, cheat codes, walkthrough links, or controller configurations here... (Auto-saves on blur)"
-                  className="w-full p-3.5 text-xs bg-[#11131c] text-slate-200 border border-[#1e2333] rounded-xl focus:outline-none focus:border-cyan-500/60 leading-relaxed placeholder-slate-600"
+                  rows={7}
+                  placeholder="Notes, cheats, controller layout, or tips... (Auto-saves on blur)"
+                  className="w-full p-3 text-xs bg-[#10121a] text-slate-200 border border-[#1b202e] rounded-xl focus:outline-none focus:border-cyan-500/60 leading-relaxed placeholder-slate-600"
                 />
               </div>
             )}
           </div>
 
-          {/* Right Sidebar Column (Metadata & Features) */}
-          <div className="space-y-6">
+          {/* Right Sub-Column (Metadata Sidebar, snug ~240px) */}
+          <div className="w-full xl:w-[250px] shrink-0 space-y-4">
             {/* Details Panel */}
-            <div className="bg-[#11131c] rounded-xl p-4 border border-[#1e2333] space-y-3">
-              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 border-b border-[#1f2436] pb-2">
+            <div className="bg-[#10121a] rounded-xl p-3.5 border border-[#1b202e] space-y-2.5">
+              <h4 className="text-[11px] font-bold uppercase tracking-wider text-slate-400 border-b border-[#1a1f2e] pb-1.5">
                 Details
               </h4>
 
-              <div className="space-y-2 text-xs">
+              <div className="space-y-1.5 text-[11px]">
                 {game.developer && (
-                  <div className="flex justify-between">
-                    <span className="text-slate-500 flex items-center space-x-1">
-                      <User className="w-3 h-3" />
+                  <div className="flex justify-between items-start">
+                    <span className="text-slate-500 flex items-center space-x-1 shrink-0">
+                      <User className="w-2.5 h-2.5" />
                       <span>Developer</span>
                     </span>
-                    <span className="text-slate-200 font-medium text-right">
+                    <span className="text-slate-200 font-medium text-right truncate max-w-[130px]" title={game.developer}>
                       {game.developer}
                     </span>
                   </div>
                 )}
 
                 {game.publisher && (
-                  <div className="flex justify-between">
-                    <span className="text-slate-500 flex items-center space-x-1">
-                      <Building className="w-3 h-3" />
+                  <div className="flex justify-between items-start">
+                    <span className="text-slate-500 flex items-center space-x-1 shrink-0">
+                      <Building className="w-2.5 h-2.5" />
                       <span>Publisher</span>
                     </span>
-                    <span className="text-slate-200 font-medium text-right">
+                    <span className="text-slate-200 font-medium text-right truncate max-w-[130px]" title={game.publisher}>
                       {game.publisher}
                     </span>
                   </div>
@@ -379,7 +379,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                 {game.date_added && (
                   <div className="flex justify-between">
                     <span className="text-slate-500 flex items-center space-x-1">
-                      <Calendar className="w-3 h-3" />
+                      <Calendar className="w-2.5 h-2.5" />
                       <span>Date Added</span>
                     </span>
                     <span className="text-slate-300">{game.date_added}</span>
@@ -399,7 +399,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                 {game.community_score && (
                   <div className="flex justify-between items-center">
                     <span className="text-slate-500">Community Score</span>
-                    <span className="text-xs font-bold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
+                    <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-1 py-0.2 rounded border border-emerald-500/20">
                       {game.community_score}
                     </span>
                   </div>
@@ -408,23 +408,23 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                 {game.size_on_disk && (
                   <div className="flex justify-between">
                     <span className="text-slate-500 flex items-center space-x-1">
-                      <HardDrive className="w-3 h-3" />
+                      <HardDrive className="w-2.5 h-2.5" />
                       <span>Size On Disk</span>
                     </span>
-                    <span className="text-slate-300">
+                    <span className="text-slate-300 font-mono">
                       {formatFileSize(game.size_on_disk)}
                     </span>
                   </div>
                 )}
 
                 {game.install_directory && (
-                  <div className="pt-2 border-t border-[#1f2436]">
-                    <span className="text-slate-500 block mb-1">
+                  <div className="pt-1.5 border-t border-[#1a1f2e]">
+                    <span className="text-slate-500 block mb-0.5 text-[10px]">
                       Installation Folder
                     </span>
                     <span
                       title={game.install_directory}
-                      className="text-[10px] text-slate-400 font-mono break-all line-clamp-2 block bg-[#0a0b10] p-1.5 rounded border border-[#1e2333]"
+                      className="text-[9px] text-slate-400 font-mono break-all line-clamp-2 block bg-[#090a0f] p-1 rounded border border-[#1a1f2e]"
                     >
                       {game.install_directory}
                     </span>
@@ -435,15 +435,15 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
 
             {/* Features Tags (Pills) */}
             {game.features.length > 0 && (
-              <div className="bg-[#11131c] rounded-xl p-4 border border-[#1e2333] space-y-3">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 border-b border-[#1f2436] pb-2">
+              <div className="bg-[#10121a] rounded-xl p-3.5 border border-[#1b202e] space-y-2">
+                <h4 className="text-[11px] font-bold uppercase tracking-wider text-slate-400 border-b border-[#1a1f2e] pb-1.5">
                   Features
                 </h4>
-                <div className="flex flex-wrap gap-1.5">
+                <div className="flex flex-wrap gap-1">
                   {game.features.map((feat) => (
                     <span
                       key={feat}
-                      className="text-[10px] px-2 py-0.8 rounded-full bg-[#181c2b] text-slate-300 border border-[#23293d]"
+                      className="text-[9px] px-1.5 py-0.5 rounded-full bg-[#151926] text-slate-300 border border-[#20263a]"
                     >
                       {feat}
                     </span>
@@ -456,49 +456,49 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
       </div>
 
       {/* Bottom Action / Launch Bar */}
-      <footer className="h-16 bg-[#0e1017] border-t border-[#1e2230] px-6 flex items-center justify-between select-none z-20">
-        {/* Left: Quick game actions (Favorite, Edit, Metadata Sync) */}
-        <div className="flex items-center space-x-2">
+      <footer className="h-14 bg-[#0d0e15] border-t border-[#1a1e2b] px-5 flex items-center justify-between select-none z-20">
+        {/* Left: Quick actions */}
+        <div className="flex items-center space-x-1.5">
           <button
             onClick={() => onToggleFavorite(game.id)}
             title={game.is_favorite ? "Remove from Favorites" : "Add to Favorites"}
-            className={`p-2 rounded-lg border transition-all ${
+            className={`p-1.5 rounded-lg border transition-all ${
               game.is_favorite
                 ? "bg-amber-500/20 text-amber-400 border-amber-500/40"
-                : "bg-[#151824] text-slate-400 border-[#23283a] hover:text-slate-200"
+                : "bg-[#131622] text-slate-400 border-[#202538] hover:text-slate-200"
             }`}
           >
             <Star
-              className={`w-4 h-4 ${game.is_favorite ? "fill-amber-400" : ""}`}
+              className={`w-3.5 h-3.5 ${game.is_favorite ? "fill-amber-400" : ""}`}
             />
           </button>
 
           <button
             onClick={() => onOpenEdit(game)}
             title="Edit Game Details"
-            className="p-2 rounded-lg bg-[#151824] text-slate-400 border border-[#23283a] hover:text-slate-200 hover:bg-[#1d2233] transition-all"
+            className="p-1.5 rounded-lg bg-[#131622] text-slate-400 border border-[#202538] hover:text-slate-200 hover:bg-[#1a1f30] transition-all"
           >
-            <Edit3 className="w-4 h-4" />
+            <Edit3 className="w-3.5 h-3.5" />
           </button>
 
           <button
             onClick={() => onFetchMetadata(game.id)}
             disabled={isFetchingMeta}
             title="Fetch Fresh Metadata from Steam"
-            className="p-2 rounded-lg bg-[#151824] text-slate-400 border border-[#23283a] hover:text-cyan-300 hover:bg-[#1d2233] transition-all disabled:opacity-50"
+            className="p-1.5 rounded-lg bg-[#131622] text-slate-400 border border-[#202538] hover:text-cyan-300 hover:bg-[#1a1f30] transition-all disabled:opacity-50"
           >
             <Sparkles
-              className={`w-4 h-4 ${isFetchingMeta ? "animate-spin text-cyan-400" : ""}`}
+              className={`w-3.5 h-3.5 ${isFetchingMeta ? "animate-spin text-cyan-400" : ""}`}
             />
           </button>
         </div>
 
-        {/* Right: Big Play / Launching Button */}
+        {/* Right: Big Play / Launch Button */}
         <div>
           <button
             onClick={() => onLaunch(game)}
             disabled={isLaunching}
-            className={`flex items-center space-x-2 px-8 py-2.5 rounded-lg text-sm font-bold tracking-wide transition-all shadow-lg ${
+            className={`flex items-center space-x-2 px-6 py-2 rounded-lg text-xs font-bold tracking-wide transition-all shadow-lg ${
               isLaunching
                 ? "bg-emerald-600/50 text-white cursor-wait animate-pulse"
                 : "bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 hover:shadow-emerald-500/25 hover:scale-[1.02] active:scale-[0.98]"
@@ -506,12 +506,12 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
           >
             {isLaunching ? (
               <>
-                <Loader2 className="w-4 h-4 animate-spin" />
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
                 <span>Launching...</span>
               </>
             ) : (
               <>
-                <Play className="w-4 h-4 fill-slate-950" />
+                <Play className="w-3.5 h-3.5 fill-slate-950" />
                 <span>Play</span>
               </>
             )}
