@@ -16,6 +16,7 @@ import {
 export type ViewMode = "split" | "grid" | "list";
 
 interface TopNavProps {
+  onToggleDrawer: () => void;
   searchQuery: string;
   onSearchChange: (q: string) => void;
   viewMode: ViewMode;
@@ -34,6 +35,7 @@ interface TopNavProps {
 }
 
 export const TopNav: React.FC<TopNavProps> = ({
+  onToggleDrawer,
   searchQuery,
   onSearchChange,
   viewMode,
@@ -54,15 +56,19 @@ export const TopNav: React.FC<TopNavProps> = ({
     <header className="h-14 bg-[#0e1017] border-b border-[#1e2230] px-4 flex items-center justify-between select-none z-30">
       {/* Left: Branding & Quick Filters */}
       <div className="flex items-center space-x-2">
-        <div className="flex items-center space-x-2 mr-3 px-2 py-1 bg-gradient-to-r from-blue-600/20 to-cyan-500/10 border border-blue-500/30 rounded-lg text-blue-400">
-          <Gamepad2 className="w-5 h-5 text-cyan-400" />
+        <button
+          onClick={onToggleDrawer}
+          title="Open Menu & Library Manager"
+          className="flex items-center space-x-2 mr-3 px-2.5 py-1.5 bg-gradient-to-r from-blue-600/20 to-cyan-500/10 border border-blue-500/30 hover:border-cyan-400/60 rounded-lg text-blue-400 hover:text-white transition-all group shadow-sm cursor-pointer"
+        >
+          <Gamepad2 className="w-5 h-5 text-cyan-400 group-hover:scale-105 transition-transform" />
           <span className="font-bold text-sm tracking-wide text-slate-100">
             OpenPlay
           </span>
           <span className="text-xs px-1.5 py-0.5 rounded-full bg-blue-500/20 text-cyan-300 font-semibold">
             {gameCount}
           </span>
-        </div>
+        </button>
 
         {/* Quick Filter Buttons */}
         <div className="flex items-center bg-[#151824] rounded-lg p-0.5 border border-[#23283a]">

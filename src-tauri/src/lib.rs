@@ -7,10 +7,10 @@ pub mod scanner;
 use db::Database;
 use launcher::GameLauncher;
 use metadata::steam::SteamMetadataFetcher;
-use models::Game;
+use models::{Game, LibraryIntegration};
 use scanner::steam::SteamScanner;
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State, Url, WebviewUrl, WebviewWindowBuilder};
 
 struct AppState {
     db: Arc<Database>,
@@ -22,12 +22,123 @@ fn get_games(state: State<'_, AppState>) -> Result<Vec<Game>, String> {
 }
 
 #[tauri::command]
+fn get_steam_integration(state: State<'_, AppState>) -> Result<LibraryIntegration, String> {
+    state.db.get_integration("steam")
+}
+
+#[tauri::command]
+fn save_steam_integration(integration: LibraryIntegration, state: State<'_, AppState>) -> Result<(), String> {
+    state.db.save_integration(&integration)
+}
+
+#[tauri::command]
+async fn authenticate_steam_account(id_or_vanity: String, state: State<'_, AppState>) -> Result<LibraryIntegration, String> {
+    let (steamid64, username, avatar_url) = SteamScanner::fetch_steam_profile(&id_or_vanity).await?;
+    let mut integration = state.db.get_integration("steam")?;
+    integration.account_id = Some(steamid64);
+    integration.username = Some(username);
+    integration.avatar_url = Some(avatar_url);
+    integration.is_authenticated = true;
+    integration.last_sync = Some(chrono::Local::now().format("%Y-%m-%d %H:%M").to_string());
+    state.db.save_integration(&integration)?;
+    Ok(integration)
+}
+
+#[tauri::command]
+fn logout_steam(state: State<'_, AppState>) -> Result<LibraryIntegration, String> {
+    let mut integration = state.db.get_integration("steam")?;
+    integration.is_authenticated = false;
+    integration.account_id = None;
+    integration.username = None;
+    integration.avatar_url = None;
+    state.db.save_integration(&integration)?;
+    Ok(integration)
+}
+
+#[tauri::command]
+async fn open_steam_login_window(app_handle: AppHandle) -> Result<(), String> {
+    if let Some(existing) = app_handle.get_webview_window("steam_login") {
+        let _ = existing.set_focus();
+        return Ok(());
+    }
+
+    let url: Url = "https://steamcommunity.com/login/home/?goto=".parse().map_err(|e| format!("{:?}", e))?;
+    let app_handle_clone = app_handle.clone();
+
+    WebviewWindowBuilder::new(
+        &app_handle,
+        "steam_login",
+        WebviewUrl::External(url),
+    )
+    .title("Sign In to Steam")
+    .inner_size(800.0, 640.0)
+    .center()
+    .resizable(true)
+    .on_navigation(move |nav_url| {
+        let url_str = nav_url.as_str();
+        if url_str.contains("steamcommunity.com/id/") || url_str.contains("steamcommunity.com/profiles/") {
+            let extracted = if let Some(pos) = url_str.find("steamcommunity.com/profiles/") {
+                let rest = &url_str[pos + "steamcommunity.com/profiles/".len()..];
+                rest.split('/').next().unwrap_or("").to_string()
+            } else if let Some(pos) = url_str.find("steamcommunity.com/id/") {
+                let rest = &url_str[pos + "steamcommunity.com/id/".len()..];
+                rest.split('/').next().unwrap_or("").to_string()
+            } else {
+                String::new()
+            };
+
+            if !extracted.is_empty() {
+                let _ = app_handle_clone.emit("steam-login-detected", extracted);
+                if let Some(w) = app_handle_clone.get_webview_window("steam_login") {
+                    let _ = w.close();
+                }
+            }
+        }
+        true
+    })
+    .build()
+    .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+#[tauri::command]
 async fn scan_steam_library(state: State<'_, AppState>) -> Result<usize, String> {
-    let games = SteamScanner::scan_installed_games()?;
-    let count = games.len();
-    for game in games {
+    let integration = state.db.get_integration("steam").unwrap_or_default();
+
+    // 1. Scan installed games from local disk
+    let installed_games = SteamScanner::scan_installed_games()?;
+    let mut installed_ids = std::collections::HashSet::new();
+    let mut count = installed_games.len();
+
+    for game in installed_games {
+        if let Some(ref aid) = game.source_id {
+            installed_ids.insert(aid.clone());
+        }
         let _ = state.db.upsert_game(&game);
     }
+
+    // 2. If uninstalled games enabled and account authenticated, fetch cloud-owned games
+    if integration.import_uninstalled {
+        if let Some(ref steamid) = integration.account_id {
+            if let Ok(owned_games) = SteamScanner::fetch_owned_games(steamid).await {
+                for mut owned in owned_games {
+                    if let Some(ref aid) = owned.source_id {
+                        if !installed_ids.contains(aid) {
+                            owned.is_installed = false;
+                            let _ = state.db.upsert_game(&owned);
+                            count += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let mut updated_integration = integration;
+    updated_integration.last_sync = Some(chrono::Local::now().format("%Y-%m-%d %H:%M").to_string());
+    let _ = state.db.save_integration(&updated_integration);
+
     Ok(count)
 }
 
@@ -117,6 +228,11 @@ pub fn run() {
             scan_steam_library,
             fetch_game_metadata,
             sync_all_metadata,
+            get_steam_integration,
+            save_steam_integration,
+            open_steam_login_window,
+            authenticate_steam_account,
+            logout_steam,
             save_game,
             delete_game,
             toggle_favorite,

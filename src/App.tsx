@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Game } from "./types/game";
+import { LibraryIntegration } from "./types/integration";
 import { TopNav, ViewMode } from "./components/TopNav";
 import { GameGrid } from "./components/GameGrid";
 import { GameDetails } from "./components/GameDetails";
@@ -9,6 +10,8 @@ import { PosterZoomSlider } from "./components/PosterZoomSlider";
 import { AddGameModal } from "./components/AddGameModal";
 import { EditGameModal } from "./components/EditGameModal";
 import { SettingsModal } from "./components/SettingsModal";
+import { LeftDrawer } from "./components/LeftDrawer";
+import { LibraryManagerModal } from "./components/LibraryManagerModal";
 import { Gamepad2, Loader2, Sparkles } from "lucide-react";
 import "./App.css";
 
@@ -38,9 +41,22 @@ export function App() {
   const [isLaunchingId, setIsLaunchingId] = useState<string | null>(null);
   const [isFetchingMetaId, setIsFetchingMetaId] = useState<string | null>(null);
 
+  // Modals & Drawers
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [isLibraryManagerOpen, setIsLibraryManagerOpen] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [editingGame, setEditingGame] = useState<Game | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+
+  // Steam Integration state
+  const [steamIntegration, setSteamIntegration] = useState<LibraryIntegration>({
+    provider: "steam",
+    is_authenticated: false,
+    import_installed: true,
+    import_uninstalled: false,
+    sync_playtime: true,
+  });
+  const [isAuthenticatingSteam, setIsAuthenticatingSteam] = useState(false);
 
   const isDraggingSplitter = useRef(false);
 
@@ -80,12 +96,19 @@ export function App() {
     window.addEventListener("mouseup", handleMouseUp);
   }, []);
 
-  // Load games on initial mount
-  const loadGames = async (autoScanIfEmpty = true) => {
+  // Load games and integration state on mount
+  const loadInitialData = async () => {
     try {
       setIsLoading(true);
+      // Load Steam integration
+      const integration = await invoke<LibraryIntegration>("get_steam_integration");
+      if (integration) {
+        setSteamIntegration(integration);
+      }
+
+      // Load games
       const list = await invoke<Game[]>("get_games");
-      if (list.length === 0 && autoScanIfEmpty) {
+      if (list.length === 0) {
         await handleScanLibrary();
       } else {
         setGames(list);
@@ -95,14 +118,14 @@ export function App() {
         }
       }
     } catch (err) {
-      console.error("Failed to load games from database:", err);
+      console.error("Failed to load initial data:", err);
     } finally {
       setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    loadGames(true);
+    loadInitialData();
 
     const unlistenLaunched = listen<string>("game-launched", () => {
       setIsLaunchingId(null);
@@ -135,10 +158,19 @@ export function App() {
       );
     });
 
+    // Listen for Steam login webview success
+    const unlistenSteamLogin = listen<string>("steam-login-detected", async (event) => {
+      const extracted = event.payload;
+      if (extracted) {
+        await handleAuthenticateSteamManual(extracted);
+      }
+    });
+
     return () => {
       unlistenLaunched.then((f) => f());
       unlistenStopped.then((f) => f());
       unlistenUpdated.then((f) => f());
+      unlistenSteamLogin.then((f) => f());
     };
   }, []);
 
@@ -149,6 +181,9 @@ export function App() {
       await invoke("scan_steam_library");
       const list = await invoke<Game[]>("get_games");
       setGames(list);
+      const integration = await invoke<LibraryIntegration>("get_steam_integration");
+      if (integration) setSteamIntegration(integration);
+
       if (list.length > 0 && (!selectedGameId || !list.find((g) => g.id === selectedGameId))) {
         const retro = list.find((g) => g.title.toLowerCase().includes("retroarch"));
         setSelectedGameId(retro ? retro.id : list[0].id);
@@ -157,6 +192,52 @@ export function App() {
       console.error("Error scanning Steam library:", err);
     } finally {
       setIsScanning(false);
+    }
+  };
+
+  // Steam Auth Handlers
+  const handleOpenSteamLogin = async () => {
+    try {
+      setIsAuthenticatingSteam(true);
+      await invoke("open_steam_login_window");
+    } catch (err) {
+      console.error("Failed to open Steam login window:", err);
+      alert(`Steam login error: ${err}`);
+    } finally {
+      setIsAuthenticatingSteam(false);
+    }
+  };
+
+  const handleAuthenticateSteamManual = async (idOrVanity: string) => {
+    try {
+      setIsAuthenticatingSteam(true);
+      const updated = await invoke<LibraryIntegration>("authenticate_steam_account", { idOrVanity });
+      setSteamIntegration(updated);
+      // Auto-scan to pull user's owned games if enabled
+      await handleScanLibrary();
+    } catch (err) {
+      console.error("Failed to authenticate Steam:", err);
+      alert(`Could not authenticate with Steam ID: ${err}`);
+    } finally {
+      setIsAuthenticatingSteam(false);
+    }
+  };
+
+  const handleLogoutSteam = async () => {
+    try {
+      const updated = await invoke<LibraryIntegration>("logout_steam");
+      setSteamIntegration(updated);
+    } catch (err) {
+      console.error("Failed to log out of Steam:", err);
+    }
+  };
+
+  const handleSaveSteamIntegration = async (updated: LibraryIntegration) => {
+    try {
+      await invoke("save_steam_integration", { integration: updated });
+      setSteamIntegration(updated);
+    } catch (err) {
+      console.error("Failed to save integration settings:", err);
     }
   };
 
@@ -279,8 +360,9 @@ export function App() {
 
   return (
     <div className="h-screen w-screen flex flex-col bg-[#090a0f] text-slate-100 overflow-hidden">
-      {/* Top Navigation Bar */}
+      {/* Top Navigation Bar with Drawer Toggle Button */}
       <TopNav
+        onToggleDrawer={() => setIsDrawerOpen(true)}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
         viewMode={viewMode}
@@ -317,22 +399,21 @@ export function App() {
               <p className="text-xs text-slate-400 mt-1">
                 {searchQuery
                   ? "Try adjusting your search query or clear active filters."
-                  : "Scan your local Steam library to automatically populate games, or add your games manually."}
+                  : "Open the Library Manager to connect your Steam account and scan your games."}
               </p>
             </div>
             {!searchQuery && (
               <div className="flex space-x-3">
                 <button
-                  onClick={handleScanLibrary}
-                  disabled={isScanning}
-                  className="flex items-center space-x-2 px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-bold rounded-lg text-xs transition-all shadow-md"
+                  onClick={() => setIsLibraryManagerOpen(true)}
+                  className="flex items-center space-x-2 px-5 py-2.5 bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-bold rounded-xl text-xs transition-all shadow-md"
                 >
                   <Sparkles className="w-4 h-4" />
-                  <span>Scan Local Steam</span>
+                  <span>Open Library Manager</span>
                 </button>
                 <button
                   onClick={() => setIsAddModalOpen(true)}
-                  className="px-4 py-2 bg-[#161a26] hover:bg-[#202638] text-slate-200 border border-[#272e44] rounded-lg text-xs font-medium transition-all"
+                  className="px-4 py-2.5 bg-[#161a26] hover:bg-[#202638] text-slate-200 border border-[#272e44] rounded-xl text-xs font-medium transition-all"
                 >
                   Add Manually
                 </button>
@@ -472,13 +553,40 @@ export function App() {
         )}
       </main>
 
-      {/* Modals */}
+      {/* Left Sliding Drawer */}
+      <LeftDrawer
+        isOpen={isDrawerOpen}
+        onClose={() => setIsDrawerOpen(false)}
+        onOpenLibraryManager={() => setIsLibraryManagerOpen(true)}
+        onOpenAddGame={() => setIsAddModalOpen(true)}
+        onOpenSettings={() => setIsSettingsOpen(true)}
+        viewMode={viewMode}
+        onViewModeChange={setViewMode}
+        gameCount={filteredGames.length}
+      />
+
+      {/* Library Manager Modal (Categorized Manual, Emulation, Providers) */}
+      <LibraryManagerModal
+        isOpen={isLibraryManagerOpen}
+        onClose={() => setIsLibraryManagerOpen(false)}
+        steamIntegration={steamIntegration}
+        onOpenSteamLogin={handleOpenSteamLogin}
+        onAuthenticateManual={handleAuthenticateSteamManual}
+        onLogoutSteam={handleLogoutSteam}
+        onSaveSteamIntegration={handleSaveSteamIntegration}
+        onSyncSteamLibrary={handleScanLibrary}
+        isSyncing={isScanning}
+        isAuthenticating={isAuthenticatingSteam}
+      />
+
+      {/* Add Manual Game Modal */}
       <AddGameModal
         isOpen={isAddModalOpen}
         onClose={() => setIsAddModalOpen(false)}
         onAddGame={handleAddGame}
       />
 
+      {/* Edit Game Modal */}
       <EditGameModal
         game={editingGame}
         isOpen={!!editingGame}
@@ -486,6 +594,7 @@ export function App() {
         onSave={handleSaveGame}
       />
 
+      {/* Settings Modal */}
       <SettingsModal
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}

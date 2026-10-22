@@ -120,6 +120,169 @@ impl SteamScanner {
         playtimes
     }
 
+    /// Fetches public Steam user profile information (avatar, username, steamid64) from Steam XML feed
+    pub async fn fetch_steam_profile(id_or_vanity: &str) -> Result<(String, String, String), String> {
+        let is_numeric = id_or_vanity.chars().all(|c| c.is_ascii_digit()) && id_or_vanity.len() >= 16;
+        let url = if is_numeric {
+            format!("https://steamcommunity.com/profiles/{}/?xml=1", id_or_vanity)
+        } else {
+            format!("https://steamcommunity.com/id/{}/?xml=1", id_or_vanity)
+        };
+
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(10))
+            .build()
+            .map_err(|e| e.to_string())?;
+
+        let text = client
+            .get(&url)
+            .header("User-Agent", "OpenPlay/0.1.0")
+            .send()
+            .await
+            .map_err(|e| e.to_string())?
+            .text()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let id64_re = Regex::new(r#"<steamID64>(\d+)</steamID64>"#).map_err(|e| e.to_string())?;
+        let name_re = Regex::new(r#"<steamID><!\[CDATA\[(.*?)\]\]></steamID>"#).map_err(|e| e.to_string())?;
+        let avatar_re = Regex::new(r#"<avatarFull><!\[CDATA\[(.*?)\]\]></avatarFull>"#).map_err(|e| e.to_string())?;
+
+        let steamid64 = id64_re
+            .captures(&text)
+            .and_then(|c| c.get(1))
+            .map(|m| m.as_str().to_string())
+            .unwrap_or_else(|| id_or_vanity.to_string());
+
+        let username = name_re
+            .captures(&text)
+            .and_then(|c| c.get(1))
+            .map(|m| m.as_str().to_string())
+            .unwrap_or_else(|| "Steam User".to_string());
+
+        let avatar_url = avatar_re
+            .captures(&text)
+            .and_then(|c| c.get(1))
+            .map(|m| m.as_str().to_string())
+            .unwrap_or_default();
+
+        Ok((steamid64, username, avatar_url))
+    }
+
+    /// Fetches all owned games from Steam user account (including uninstalled games)
+    pub async fn fetch_owned_games(steamid64: &str) -> Result<Vec<Game>, String> {
+        let url = format!(
+            "https://steamcommunity.com/profiles/{}/games/?tab=all&xml=1",
+            steamid64
+        );
+
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(15))
+            .build()
+            .map_err(|e| e.to_string())?;
+
+        let text = client
+            .get(&url)
+            .header("User-Agent", "OpenPlay/0.1.0")
+            .send()
+            .await
+            .map_err(|e| e.to_string())?
+            .text()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let game_block_re = Regex::new(r#"<game>([\s\S]*?)</game>"#).map_err(|e| e.to_string())?;
+        let appid_re = Regex::new(r#"<appID>(\d+)</appID>"#).map_err(|e| e.to_string())?;
+        let name_re = Regex::new(r#"<name><!\[CDATA\[(.*?)\]\]></name>"#).map_err(|e| e.to_string())?;
+        let hours_re = Regex::new(r#"<hoursOnRecord>([\d.,]+)</hoursOnRecord>"#).map_err(|e| e.to_string())?;
+
+        let mut games = Vec::new();
+
+        for cap in game_block_re.captures_iter(&text) {
+            if let Some(block) = cap.get(1) {
+                let block_str = block.as_str();
+                let appid = appid_re
+                    .captures(block_str)
+                    .and_then(|c| c.get(1))
+                    .map(|m| m.as_str().to_string());
+                let name = name_re
+                    .captures(block_str)
+                    .and_then(|c| c.get(1))
+                    .map(|m| m.as_str().to_string());
+
+                let hours = hours_re
+                    .captures(block_str)
+                    .and_then(|c| c.get(1))
+                    .and_then(|m| m.as_str().replace(',', "").parse::<f64>().ok())
+                    .unwrap_or(0.0);
+
+                if let (Some(appid), Some(name)) = (appid, name) {
+                    let cover = format!(
+                        "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/{}/library_600x900.jpg",
+                        appid
+                    );
+                    let hero = format!(
+                        "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/{}/library_hero.jpg",
+                        appid
+                    );
+                    let logo = format!(
+                        "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/{}/logo.png",
+                        appid
+                    );
+
+                    let links = vec![
+                        GameLink {
+                            title: "Store Page".to_string(),
+                            url: format!("https://store.steampowered.com/app/{}", appid),
+                        },
+                        GameLink {
+                            title: "Community Hub".to_string(),
+                            url: format!("https://steamcommunity.com/app/{}", appid),
+                        },
+                    ];
+
+                    let game = Game {
+                        id: format!("steam_{}", appid),
+                        title: name.clone(),
+                        sorting_title: Some(name),
+                        source: "Steam".to_string(),
+                        source_id: Some(appid),
+                        install_directory: None,
+                        executable_path: None,
+                        launch_arguments: None,
+                        is_installed: false, // uninstalled until matched with local
+                        is_favorite: false,
+                        cover_image: Some(cover),
+                        background_image: Some(hero),
+                        logo_image: Some(logo),
+                        icon_image: None,
+                        developer: None,
+                        publisher: None,
+                        release_date: None,
+                        genres: Vec::new(),
+                        features: Vec::new(),
+                        platforms: vec!["Windows".to_string(), "Linux".to_string()],
+                        community_score: None,
+                        user_rating: None,
+                        playtime_seconds: (hours * 3600.0) as u64,
+                        last_played: None,
+                        date_added: Some(chrono::Local::now().format("%Y-%m-%d").to_string()),
+                        completion_status: Some("Not Played".to_string()),
+                        description: None,
+                        notes: None,
+                        links,
+                        screenshots: Vec::new(),
+                        size_on_disk: None,
+                    };
+
+                    games.push(game);
+                }
+            }
+        }
+
+        Ok(games)
+    }
+
     /// Scans all libraries and returns discovered games
     pub fn scan_installed_games() -> Result<Vec<Game>, String> {
         let steam_dir = Self::find_steam_install_dir()

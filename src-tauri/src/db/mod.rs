@@ -1,4 +1,4 @@
-use crate::models::{Game, GameLink};
+use crate::models::{Game, GameLink, LibraryIntegration};
 use rusqlite::{params, Connection, Result};
 use std::fs;
 use std::path::PathBuf;
@@ -60,6 +60,21 @@ impl Database {
                 links TEXT,
                 screenshots TEXT,
                 size_on_disk INTEGER
+            )",
+            [],
+        )?;
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS integrations (
+                provider TEXT PRIMARY KEY,
+                account_id TEXT,
+                username TEXT,
+                avatar_url TEXT,
+                is_authenticated INTEGER NOT NULL DEFAULT 0,
+                import_installed INTEGER NOT NULL DEFAULT 1,
+                import_uninstalled INTEGER NOT NULL DEFAULT 0,
+                sync_playtime INTEGER NOT NULL DEFAULT 1,
+                last_sync TEXT
             )",
             [],
         )?;
@@ -250,6 +265,74 @@ impl Database {
         let conn = self.conn.lock().unwrap();
         conn.execute("DELETE FROM games WHERE id = ?1", params![id])
             .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub fn get_integration(&self, provider: &str) -> Result<LibraryIntegration, String> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare("SELECT provider, account_id, username, avatar_url, is_authenticated, import_installed, import_uninstalled, sync_playtime, last_sync FROM integrations WHERE provider = ?1")
+            .map_err(|e| e.to_string())?;
+
+        let row = stmt.query_row(params![provider], |row| {
+            let is_auth: i32 = row.get(4)?;
+            let imp_inst: i32 = row.get(5)?;
+            let imp_uninst: i32 = row.get(6)?;
+            let sync_pt: i32 = row.get(7)?;
+
+            Ok(LibraryIntegration {
+                provider: row.get(0)?,
+                account_id: row.get(1)?,
+                username: row.get(2)?,
+                avatar_url: row.get(3)?,
+                is_authenticated: is_auth != 0,
+                import_installed: imp_inst != 0,
+                import_uninstalled: imp_uninst != 0,
+                sync_playtime: sync_pt != 0,
+                last_sync: row.get(8)?,
+            })
+        });
+
+        match row {
+            Ok(integration) => Ok(integration),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(LibraryIntegration {
+                provider: provider.to_string(),
+                ..Default::default()
+            }),
+            Err(e) => Err(e.to_string()),
+        }
+    }
+
+    pub fn save_integration(&self, integration: &LibraryIntegration) -> Result<(), String> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO integrations (
+                provider, account_id, username, avatar_url, is_authenticated,
+                import_installed, import_uninstalled, sync_playtime, last_sync
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+            ON CONFLICT(provider) DO UPDATE SET
+                account_id = excluded.account_id,
+                username = excluded.username,
+                avatar_url = excluded.avatar_url,
+                is_authenticated = excluded.is_authenticated,
+                import_installed = excluded.import_installed,
+                import_uninstalled = excluded.import_uninstalled,
+                sync_playtime = excluded.sync_playtime,
+                last_sync = excluded.last_sync",
+            params![
+                integration.provider,
+                integration.account_id,
+                integration.username,
+                integration.avatar_url,
+                if integration.is_authenticated { 1 } else { 0 },
+                if integration.import_installed { 1 } else { 0 },
+                if integration.import_uninstalled { 1 } else { 0 },
+                if integration.sync_playtime { 1 } else { 0 },
+                integration.last_sync,
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+
         Ok(())
     }
 }
