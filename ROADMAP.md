@@ -5,9 +5,7 @@ Welcome to the central tracking document for **OpenPlay**. Use this document to 
 ---
 
 ## ⚡ Quick Inbox (Jot & Dump)
-> *Drop raw thoughts, ideas, or things noticed while playing here before organizing them below.*
-
-- [ ] 
+> *For raw thoughts, ideas, or things noticed while working, before organizing them below.*
 - [ ] 
 
 ---
