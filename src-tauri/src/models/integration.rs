@@ -22,7 +22,7 @@ impl Default for LibraryIntegration {
             avatar_url: None,
             is_authenticated: false,
             import_installed: true,
-            import_uninstalled: false,
+            import_uninstalled: true,
             sync_playtime: true,
             last_sync: None,
         }

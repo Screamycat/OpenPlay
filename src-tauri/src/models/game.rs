@@ -7,6 +7,13 @@ pub struct GameLink {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GameTrailer {
+    pub name: String,
+    pub thumbnail: String,
+    pub url: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Game {
     pub id: String,
     pub title: String,
@@ -18,7 +25,7 @@ pub struct Game {
     pub launch_arguments: Option<String>,
     pub is_installed: bool,
     pub is_favorite: bool,
-    pub cover_image: Option<String>,       // Vertical 600x900 poster
+    pub cover_image: Option<String>,       // Vertical 600x900 poster (supports static and animated APNG/WebP/GIF)
     pub background_image: Option<String>,  // Hero backdrop
     pub logo_image: Option<String>,        // Transparent logo
     pub icon_image: Option<String>,
@@ -29,14 +36,29 @@ pub struct Game {
     pub features: Vec<String>,
     pub platforms: Vec<String>,            // ["Windows", "Linux", "Macintosh"]
     pub community_score: Option<u32>,
+    pub critic_score: Option<u32>,         // Metacritic / Professional critic score
     pub user_rating: Option<u32>,          // 0-5
     pub playtime_seconds: u64,
     pub last_played: Option<String>,
     pub date_added: Option<String>,
     pub completion_status: Option<String>, // "Played", "Playing", "Completed", "Plan to Play", "Not Played"
-    pub description: Option<String>,
+    pub description: Option<String>,       // Rich HTML description
     pub notes: Option<String>,
     pub links: Vec<GameLink>,
     pub screenshots: Vec<String>,
+    pub trailers: Vec<GameTrailer>,
+    pub age_rating: Option<String>,        // e.g. "PEGI 18", "ESRB M"
+    pub series: Option<String>,
+    pub hltb_main: Option<f32>,            // Hours
+    pub hltb_extra: Option<f32>,           // Hours
+    pub hltb_completionist: Option<f32>,   // Hours
     pub size_on_disk: Option<u64>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub categories: Vec<String>,
+    #[serde(default)]
+    pub region: Option<String>,
+    #[serde(default)]
+    pub play_count: Option<u32>,
 }

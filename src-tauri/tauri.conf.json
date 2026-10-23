@@ -17,7 +17,8 @@
         "height": 840,
         "minWidth": 980,
         "minHeight": 640,
-        "decorations": true,
+        "decorations": false,
+        "shadow": true,
         "resizable": true,
         "fullscreen": false
       }

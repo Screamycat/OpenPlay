@@ -16,6 +16,12 @@ import {
   Trash2,
 } from "lucide-react";
 
+interface ScanResult {
+  count: number;
+  installed: number;
+  uninstalled: number;
+}
+
 interface LibraryManagerModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -24,7 +30,7 @@ interface LibraryManagerModalProps {
   onAuthenticateManual: (idOrVanity: string) => void;
   onLogoutSteam: () => void;
   onSaveSteamIntegration: (updated: LibraryIntegration) => void;
-  onSyncSteamLibrary: () => Promise<number | void>;
+  onSyncSteamLibrary: () => Promise<ScanResult | number | void>;
   onClearLibrary: () => Promise<void>;
   isSyncing: boolean;
   isAuthenticating: boolean;
@@ -92,13 +98,17 @@ export const LibraryManagerModal: React.FC<LibraryManagerModalProps> = ({
   const handleSyncClick = async () => {
     setSyncStatusMsg(null);
     try {
-      const count = await onSyncSteamLibrary();
-      setSyncStatusMsg(
-        typeof count === "number"
-          ? `Sync Complete! ${count} installed games imported into library.`
-          : "Sync Complete! Library refreshed."
-      );
-      setTimeout(() => setSyncStatusMsg(null), 5000);
+      const res = await onSyncSteamLibrary();
+      if (res && typeof res === "object" && "installed" in res) {
+        setSyncStatusMsg(
+          `Sync Complete! Found ${res.installed} installed and ${res.uninstalled} uninstalled games (${res.count} total).`
+        );
+      } else if (typeof res === "number") {
+        setSyncStatusMsg(`Sync Complete! ${res} games imported into library.`);
+      } else {
+        setSyncStatusMsg("Sync Complete! Library refreshed.");
+      }
+      setTimeout(() => setSyncStatusMsg(null), 6000);
     } catch (err) {
       setSyncStatusMsg(`Sync error: ${err}`);
     }

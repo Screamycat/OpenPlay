@@ -3,6 +3,12 @@ export interface GameLink {
   url: string;
 }
 
+export interface GameTrailer {
+  name: string;
+  thumbnail: string;
+  url: string;
+}
+
 export interface Game {
   id: string;
   title: string;
@@ -25,6 +31,7 @@ export interface Game {
   features: string[];
   platforms: string[];
   community_score?: number;
+  critic_score?: number;
   user_rating?: number;
   playtime_seconds: number;
   last_played?: string;
@@ -34,5 +41,15 @@ export interface Game {
   notes?: string;
   links: GameLink[];
   screenshots: string[];
+  trailers?: GameTrailer[];
+  age_rating?: string;
+  series?: string;
+  hltb_main?: number;
+  hltb_extra?: number;
+  hltb_completionist?: number;
   size_on_disk?: number;
+  tags?: string[];
+  categories?: string[];
+  region?: string;
+  play_count?: number;
 }

@@ -24,6 +24,7 @@ dirs = "5.0"
 uuid = { version = "1.10", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 regex = "1.10"
+sysinfo = "0.33"
 
 [profile.release]
 codegen-units = 1

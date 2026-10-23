@@ -15,13 +15,13 @@ export const PosterZoomSlider: React.FC<PosterZoomSliderProps> = ({
   onChange,
 }) => {
   return (
-    <div className="h-10 bg-[#0e1017] border-t border-[#1e2230] px-4 flex items-center justify-center space-x-2 select-none">
+    <div className="h-8 bg-transparent px-4 flex items-center justify-center space-x-2 select-none opacity-40 hover:opacity-100 transition-opacity">
       <button
         onClick={() => onChange(Math.max(minWidth, cardWidth - 20))}
-        className="text-slate-500 hover:text-slate-300 transition-colors p-1"
+        className="text-slate-400 hover:text-white transition-colors p-1 cursor-pointer"
         title="Decrease Cover Size"
       >
-        <ZoomOut className="w-3.5 h-3.5" />
+        <ZoomOut className="w-3 h-3" />
       </button>
 
       <input
@@ -31,15 +31,15 @@ export const PosterZoomSlider: React.FC<PosterZoomSliderProps> = ({
         step={10}
         value={cardWidth}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="w-36 h-1.5 bg-[#1e2335] rounded-lg appearance-none cursor-pointer accent-cyan-400"
+        className="w-32 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-white"
       />
 
       <button
         onClick={() => onChange(Math.min(maxWidth, cardWidth + 20))}
-        className="text-slate-500 hover:text-slate-300 transition-colors p-1"
+        className="text-slate-400 hover:text-white transition-colors p-1 cursor-pointer"
         title="Increase Cover Size"
       >
-        <ZoomIn className="w-3.5 h-3.5" />
+        <ZoomIn className="w-3 h-3" />
       </button>
     </div>
   );

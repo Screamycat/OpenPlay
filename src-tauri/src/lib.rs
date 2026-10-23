@@ -6,8 +6,10 @@ pub mod scanner;
 
 use db::Database;
 use launcher::GameLauncher;
-use metadata::steam::SteamMetadataFetcher;
-use models::{Game, LibraryIntegration};
+use metadata::hltb::{HltbData, HltbFetcher};
+use metadata::steam::{SteamMetadataFetcher, SteamNewsItem};
+use metadata::steamgriddb::{SteamGridDBAsset, SteamGridDBClient};
+use models::{Game, GameTrailer, LibraryIntegration};
 use scanner::steam::SteamScanner;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State, Url, WebviewUrl, WebviewWindowBuilder};
@@ -32,21 +34,25 @@ fn save_steam_integration(integration: LibraryIntegration, state: State<'_, AppS
 }
 
 #[tauri::command]
-async fn authenticate_steam_account(id_or_vanity: String, state: State<'_, AppState>) -> Result<LibraryIntegration, String> {
+async fn authenticate_steam_account(
+    id_or_vanity: String,
+    state: State<'_, AppState>,
+) -> Result<LibraryIntegration, String> {
+    let mut integration = state.db.get_integration("steam").unwrap_or_default();
     let (steamid64, username, avatar_url) = SteamScanner::fetch_steam_profile(&id_or_vanity).await?;
-    let mut integration = state.db.get_integration("steam")?;
+
+    integration.is_authenticated = true;
     integration.account_id = Some(steamid64);
     integration.username = Some(username);
-    integration.avatar_url = Some(avatar_url);
-    integration.is_authenticated = true;
-    integration.last_sync = Some(chrono::Local::now().format("%Y-%m-%d %H:%M").to_string());
+    integration.avatar_url = if avatar_url.is_empty() { None } else { Some(avatar_url) };
+
     state.db.save_integration(&integration)?;
     Ok(integration)
 }
 
 #[tauri::command]
 fn logout_steam(state: State<'_, AppState>) -> Result<LibraryIntegration, String> {
-    let mut integration = state.db.get_integration("steam")?;
+    let mut integration = state.db.get_integration("steam").unwrap_or_default();
     integration.is_authenticated = false;
     integration.account_id = None;
     integration.username = None;
@@ -126,19 +132,13 @@ async fn scan_steam_library(state: State<'_, AppState>) -> Result<ScanResult, St
         let _ = state.db.upsert_game(&game);
     }
 
-    // 2. If uninstalled games enabled and account authenticated, fetch cloud-owned games
+    // 2. If uninstalled games enabled, scan uninstalled games from localconfig history
     if integration.import_uninstalled {
-        if let Some(ref steamid) = integration.account_id {
-            if let Ok(owned_games) = SteamScanner::fetch_owned_games(steamid).await {
-                for mut owned in owned_games {
-                    if let Some(ref aid) = owned.source_id {
-                        if !installed_ids.contains(aid) {
-                            owned.is_installed = false;
-                            let _ = state.db.upsert_game(&owned);
-                            uninstalled_count += 1;
-                        }
-                    }
-                }
+        if let Some(steam_dir) = SteamScanner::find_steam_install_dir() {
+            let uninstalled_games = SteamScanner::scan_uninstalled_from_localconfig(&steam_dir, &installed_ids).await;
+            for uninstalled in uninstalled_games {
+                let _ = state.db.upsert_game(&uninstalled);
+                uninstalled_count += 1;
             }
         }
     }
@@ -147,10 +147,8 @@ async fn scan_steam_library(state: State<'_, AppState>) -> Result<ScanResult, St
     updated_integration.last_sync = Some(chrono::Local::now().format("%Y-%m-%d %H:%M").to_string());
     let _ = state.db.save_integration(&updated_integration);
 
-    let all_games = state.db.get_all_games().unwrap_or_default();
-
     Ok(ScanResult {
-        count: all_games.len(),
+        count: installed_count + uninstalled_count,
         installed: installed_count,
         uninstalled: uninstalled_count,
     })
@@ -173,11 +171,127 @@ async fn fetch_game_metadata(game_id: String, state: State<'_, AppState>) -> Res
         if let Some(ref appid) = game.source_id {
             if let Ok(meta) = SteamMetadataFetcher::fetch_metadata_for_appid(appid).await {
                 SteamMetadataFetcher::apply_metadata(&mut game, meta);
-                state.db.upsert_game(&game)?;
             }
         }
     }
 
+    // Also enrich with HowLongToBeat if not already fetched
+    if game.hltb_main.is_none() {
+        if let Some(hltb) = HltbFetcher::fetch_hltb(&game.title).await {
+            game.hltb_main = Some(hltb.main_story_hours);
+            game.hltb_extra = Some(hltb.main_extra_hours);
+            game.hltb_completionist = Some(hltb.completionist_hours);
+        }
+    }
+
+    state.db.save_game_exact(&game)?;
+    Ok(game)
+}
+
+#[tauri::command]
+async fn get_steam_current_players(appid: String) -> Result<u32, String> {
+    SteamMetadataFetcher::fetch_current_players(&appid).await
+}
+
+#[tauri::command]
+async fn get_steam_news(appid: String) -> Result<Vec<SteamNewsItem>, String> {
+    SteamMetadataFetcher::fetch_game_news(&appid).await
+}
+
+#[tauri::command]
+async fn get_store_trailers(title: String, appid: Option<String>) -> Result<Vec<GameTrailer>, String> {
+    SteamMetadataFetcher::fetch_store_trailers(&title, appid.as_deref()).await
+}
+
+#[tauri::command]
+async fn get_game_hltb(
+    game_id: Option<String>,
+    title: String,
+    state: State<'_, AppState>,
+) -> Result<Option<HltbData>, String> {
+    if let Some(hltb) = HltbFetcher::fetch_hltb(&title).await {
+        if let Some(ref gid) = game_id {
+            if let Ok(all) = state.db.get_all_games() {
+                if let Some(mut game) = all.into_iter().find(|g| g.id == *gid) {
+                    game.hltb_main = Some(hltb.main_story_hours);
+                    game.hltb_extra = Some(hltb.main_extra_hours);
+                    game.hltb_completionist = Some(hltb.completionist_hours);
+                    let _ = state.db.upsert_game(&game);
+                }
+            }
+        }
+        Ok(Some(hltb))
+    } else {
+        Ok(None)
+    }
+}
+
+#[tauri::command]
+async fn search_steamgriddb(
+    appid: String,
+    asset_type: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<SteamGridDBAsset>, String> {
+    let key = state.db.get_setting("steamgriddb_key")?
+        .ok_or_else(|| "Please configure your SteamGridDB API key in Settings".to_string())?;
+
+    if key.trim().is_empty() {
+        return Err("SteamGridDB API key is empty. Configure it in Settings.".to_string());
+    }
+
+    let game_id = SteamGridDBClient::get_game_id(&key, &appid).await?;
+    SteamGridDBClient::fetch_assets(&key, game_id, &asset_type).await
+}
+
+#[tauri::command]
+fn save_steamgriddb_key(key: String, state: State<'_, AppState>) -> Result<(), String> {
+    state.db.set_setting("steamgriddb_key", key.trim())
+}
+
+#[tauri::command]
+fn get_steamgriddb_key(state: State<'_, AppState>) -> Result<Option<String>, String> {
+    state.db.get_setting("steamgriddb_key")
+}
+
+#[tauri::command]
+fn apply_custom_artwork(
+    game_id: String,
+    cover_image: Option<String>,
+    background_image: Option<String>,
+    logo_image: Option<String>,
+    icon_image: Option<String>,
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Game, String> {
+    let all = state.db.get_all_games()?;
+    let mut game = all
+        .into_iter()
+        .find(|g| g.id == game_id)
+        .ok_or_else(|| "Game not found".to_string())?;
+
+    if let Some(c) = cover_image {
+        if !c.trim().is_empty() {
+            game.cover_image = Some(c);
+        }
+    }
+    if let Some(b) = background_image {
+        if !b.trim().is_empty() {
+            game.background_image = Some(b);
+        }
+    }
+    if let Some(l) = logo_image {
+        if !l.trim().is_empty() {
+            game.logo_image = Some(l);
+        }
+    }
+    if let Some(i) = icon_image {
+        if !i.trim().is_empty() {
+            game.icon_image = Some(i);
+        }
+    }
+
+    state.db.save_game_exact(&game)?;
+    let _ = app_handle.emit("game-updated", &game);
     Ok(game)
 }
 
@@ -186,16 +300,33 @@ async fn sync_all_metadata(app_handle: AppHandle, state: State<'_, AppState>) ->
     let all = state.db.get_all_games()?;
     let mut count = 0;
     for mut game in all {
-        if game.source.to_lowercase() == "steam" && game.description.is_none() {
+        if !game.is_installed {
+            continue;
+        }
+        let needs_meta = game.description.is_none() || game.cover_image.is_none() || game.background_image.is_none();
+        let needs_hltb = game.hltb_main.is_none();
+
+        if needs_meta && game.source.to_lowercase() == "steam" {
             if let Some(ref appid) = game.source_id {
                 if let Ok(meta) = SteamMetadataFetcher::fetch_metadata_for_appid(appid).await {
                     SteamMetadataFetcher::apply_metadata(&mut game, meta);
-                    let _ = state.db.upsert_game(&game);
-                    let _ = app_handle.emit("game-updated", &game);
-                    count += 1;
-                    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
                 }
             }
+        }
+
+        if needs_hltb {
+            if let Some(hltb) = HltbFetcher::fetch_hltb(&game.title).await {
+                game.hltb_main = Some(hltb.main_story_hours);
+                game.hltb_extra = Some(hltb.main_extra_hours);
+                game.hltb_completionist = Some(hltb.completionist_hours);
+            }
+        }
+
+        if needs_meta || needs_hltb {
+            let _ = state.db.upsert_game(&game);
+            let _ = app_handle.emit("game-updated", &game);
+            count += 1;
+            tokio::time::sleep(std::time::Duration::from_millis(150)).await;
         }
     }
     Ok(count)
@@ -203,7 +334,7 @@ async fn sync_all_metadata(app_handle: AppHandle, state: State<'_, AppState>) ->
 
 #[tauri::command]
 fn save_game(game: Game, state: State<'_, AppState>) -> Result<(), String> {
-    state.db.upsert_game(&game)
+    state.db.save_game_exact(&game)
 }
 
 #[tauri::command]
@@ -231,8 +362,72 @@ fn launch_game(game_id: String, app_handle: AppHandle, state: State<'_, AppState
         game.source,
         game.source_id,
         game.executable_path,
+        game.install_directory,
         game.launch_arguments,
     )
+}
+
+#[tauri::command]
+fn stop_game(game_id: String, app_handle: AppHandle) -> Result<(), String> {
+    GameLauncher::stop_game(app_handle, &game_id)
+}
+
+#[tauri::command]
+fn get_running_games(app_handle: AppHandle, state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    Ok(GameLauncher::get_running_games(Some(&app_handle), Some(&state.db)))
+}
+
+#[tauri::command]
+fn select_file(filter: Option<String>) -> Result<Option<String>, String> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::process::Command;
+        let filter_str = filter.unwrap_or_else(|| "Executable (*.exe)|*.exe|All files (*.*)|*.*".to_string());
+        let ps_script = format!(
+            "Add-Type -AssemblyName System.Windows.Forms; $f = New-Object System.Windows.Forms.OpenFileDialog; $f.Filter = '{}'; $f.Title = 'Select File'; if($f.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK){{ Write-Output $f.FileName }}",
+            filter_str
+        );
+        let output = Command::new("powershell")
+            .args(["-NoProfile", "-Command", &ps_script])
+            .output()
+            .map_err(|e| e.to_string())?;
+
+        let result = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if result.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(result))
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = filter;
+        Ok(None)
+    }
+}
+
+#[tauri::command]
+fn select_directory() -> Result<Option<String>, String> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::process::Command;
+        let ps_script = "Add-Type -AssemblyName System.Windows.Forms; $f = New-Object System.Windows.Forms.FolderBrowserDialog; $f.Description = 'Select Installation Folder'; if($f.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK){ Write-Output $f.SelectedPath }";
+        let output = Command::new("powershell")
+            .args(["-NoProfile", "-Command", ps_script])
+            .output()
+            .map_err(|e| e.to_string())?;
+
+        let result = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if result.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(result))
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Ok(None)
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -246,6 +441,14 @@ pub fn run() {
             get_games,
             scan_steam_library,
             fetch_game_metadata,
+            get_steam_current_players,
+            get_steam_news,
+            get_store_trailers,
+            get_game_hltb,
+            search_steamgriddb,
+            save_steamgriddb_key,
+            get_steamgriddb_key,
+            apply_custom_artwork,
             sync_all_metadata,
             get_steam_integration,
             save_steam_integration,
@@ -256,7 +459,11 @@ pub fn run() {
             save_game,
             delete_game,
             toggle_favorite,
-            launch_game
+            launch_game,
+            stop_game,
+            get_running_games,
+            select_file,
+            select_directory
         ])
         .run(tauri::generate_context!())
         .expect("error while running OpenPlay application");

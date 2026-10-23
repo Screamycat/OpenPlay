@@ -250,7 +250,7 @@ impl SteamScanner {
                         install_directory: None,
                         executable_path: None,
                         launch_arguments: None,
-                        is_installed: false, // uninstalled until matched with local
+                        is_installed: false,
                         is_favorite: false,
                         cover_image: Some(cover),
                         background_image: Some(hero),
@@ -272,7 +272,18 @@ impl SteamScanner {
                         notes: None,
                         links,
                         screenshots: Vec::new(),
+                        trailers: Vec::new(),
+                        age_rating: None,
+                        critic_score: None,
+                        series: None,
+                        hltb_main: None,
+                        hltb_extra: None,
+                        hltb_completionist: None,
                         size_on_disk: None,
+                        tags: Vec::new(),
+                        categories: Vec::new(),
+                        region: None,
+                        play_count: Some(0),
                     };
 
                     games.push(game);
@@ -308,6 +319,137 @@ impl SteamScanner {
             | "3041230" // Windrose playtest
             | "1962700" // Subnautica 2 playtest
         )
+    }
+
+    /// Fetches game title directly from Steam Storefront API, ensuring it is a game
+    pub async fn fetch_app_name(client: &reqwest::Client, appid: &str) -> Option<String> {
+        let url = format!(
+            "https://store.steampowered.com/api/appdetails?appids={}&filters=basic&l=english",
+            appid
+        );
+        let resp = client
+            .get(&url)
+            .header("User-Agent", "OpenPlay/0.1.0")
+            .send()
+            .await
+            .ok()?;
+
+        let json: serde_json::Value = resp.json().await.ok()?;
+        let app_obj = json.get(appid)?;
+        if !app_obj.get("success").and_then(|v| v.as_bool()).unwrap_or(false) {
+            return None;
+        }
+        let data = app_obj.get("data")?;
+        if let Some(app_type) = data.get("type").and_then(|v| v.as_str()) {
+            if app_type != "game" {
+                return None;
+            }
+        }
+        data.get("name").and_then(|v| v.as_str()).map(|s| s.to_string())
+    }
+
+    /// Scans uninstalled games from localconfig.vdf history
+    pub async fn scan_uninstalled_from_localconfig(
+        steam_dir: &Path,
+        installed_appids: &std::collections::HashSet<String>,
+    ) -> Vec<Game> {
+        let playtimes = Self::get_user_playtimes(steam_dir);
+        let mut uninstalled = Vec::new();
+
+        // Sort candidates by playtime descending so most played uninstalled games come first
+        let mut candidates: Vec<(String, u64)> = playtimes
+            .into_iter()
+            .filter(|(aid, _)| !installed_appids.contains(aid) && !Self::is_blacklisted_app(aid, ""))
+            .collect();
+        candidates.sort_by(|a, b| b.1.cmp(&a.1));
+
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(4))
+            .build()
+            .unwrap_or_default();
+
+        // Process top 60 candidates in parallel chunks of 8
+        for chunk in candidates.into_iter().take(60).collect::<Vec<_>>().chunks(8) {
+            let mut join_set = tokio::task::JoinSet::new();
+            for (appid, playtime_sec) in chunk {
+                let client = client.clone();
+                let aid = appid.clone();
+                let pt = *playtime_sec;
+                join_set.spawn(async move {
+                    let maybe_name = Self::fetch_app_name(&client, &aid).await;
+                    (aid, pt, maybe_name)
+                });
+            }
+
+            while let Some(res) = join_set.join_next().await {
+                if let Ok((appid, playtime_sec, Some(name))) = res {
+                    if Self::is_blacklisted_app(&appid, &name) {
+                        continue;
+                    }
+
+                    let (cover, hero, logo, icon) = Self::find_artwork(steam_dir, &appid);
+                    let links = vec![
+                        GameLink {
+                            title: "Store Page".to_string(),
+                            url: format!("https://store.steampowered.com/app/{}", appid),
+                        },
+                        GameLink {
+                            title: "Community Hub".to_string(),
+                            url: format!("https://steamcommunity.com/app/{}", appid),
+                        },
+                    ];
+
+                    let game = Game {
+                        id: format!("steam_{}", appid),
+                        title: name.clone(),
+                        sorting_title: Some(name),
+                        source: "Steam".to_string(),
+                        source_id: Some(appid),
+                        install_directory: None,
+                        executable_path: None,
+                        launch_arguments: None,
+                        is_installed: false,
+                        is_favorite: false,
+                        cover_image: cover,
+                        background_image: hero,
+                        logo_image: logo,
+                        icon_image: icon,
+                        developer: None,
+                        publisher: None,
+                        release_date: None,
+                        genres: Vec::new(),
+                        features: Vec::new(),
+                        platforms: vec!["Windows".to_string(), "Linux".to_string()],
+                        community_score: None,
+                        user_rating: None,
+                        playtime_seconds: playtime_sec,
+                        last_played: None,
+                        date_added: Some(chrono::Local::now().format("%Y-%m-%d").to_string()),
+                        completion_status: Some("Not Played".to_string()),
+                        description: None,
+                        notes: None,
+                        links,
+                        screenshots: Vec::new(),
+                        trailers: Vec::new(),
+                        age_rating: None,
+                        critic_score: None,
+                        series: None,
+                        hltb_main: None,
+                        hltb_extra: None,
+                        hltb_completionist: None,
+                        size_on_disk: None,
+                        tags: Vec::new(),
+                        categories: Vec::new(),
+                        region: None,
+                        play_count: Some(0),
+                    };
+
+                    uninstalled.push(game);
+                }
+            }
+        }
+
+        uninstalled
     }
 
     /// Scans all libraries and returns discovered games
@@ -366,7 +508,7 @@ impl SteamScanner {
                                     steamapps.join("common").join(dir).to_string_lossy().to_string()
                                 });
 
-                                let (cover, hero, logo) = Self::find_artwork(&steam_dir, &appid);
+                                let (cover, hero, logo, icon) = Self::find_artwork(&steam_dir, &appid);
 
                                 let links = vec![
                                     GameLink {
@@ -420,7 +562,7 @@ impl SteamScanner {
                                     cover_image: cover,
                                     background_image: hero,
                                     logo_image: logo,
-                                    icon_image: None,
+                                    icon_image: icon,
                                     developer: None,
                                     publisher: None,
                                     release_date: None,
@@ -437,7 +579,18 @@ impl SteamScanner {
                                     notes: None,
                                     links,
                                     screenshots: Vec::new(),
+                                    trailers: Vec::new(),
+                                    age_rating: None,
+                                    critic_score: None,
+                                    series: None,
+                                    hltb_main: None,
+                                    hltb_extra: None,
+                                    hltb_completionist: None,
                                     size_on_disk,
+                                    tags: Vec::new(),
+                                    categories: Vec::new(),
+                                    region: None,
+                                    play_count: Some(0),
                                 };
 
                                 games.push(game);
@@ -452,7 +605,7 @@ impl SteamScanner {
     }
 
     /// Finds artwork locally in appcache/librarycache or falls back to official Steam CDN
-    fn find_artwork(steam_dir: &Path, appid: &str) -> (Option<String>, Option<String>, Option<String>) {
+    fn find_artwork(steam_dir: &Path, appid: &str) -> (Option<String>, Option<String>, Option<String>, Option<String>) {
         let librarycache = steam_dir.join("appcache").join("librarycache");
 
         // 1. Try modern nested directory: librarycache/<appid>/
@@ -460,6 +613,7 @@ impl SteamScanner {
         let mut cover = None;
         let mut hero = None;
         let mut logo = None;
+        let mut icon = None;
 
         if app_dir.exists() {
             let p_cover = app_dir.join("library_600x900.jpg");
@@ -475,6 +629,21 @@ impl SteamScanner {
             let p_logo = app_dir.join("logo.png");
             if p_logo.exists() {
                 logo = Some(p_logo.to_string_lossy().to_string());
+            }
+
+            // Look for client icon file in app_dir
+            if let Ok(entries) = fs::read_dir(&app_dir) {
+                for e in entries.flatten() {
+                    let fn_str = e.file_name().to_string_lossy().to_string();
+                    if (fn_str.ends_with(".jpg") || fn_str.ends_with(".png") || fn_str.ends_with(".ico"))
+                        && !fn_str.starts_with("library_")
+                        && !fn_str.starts_with("header")
+                        && !fn_str.starts_with("logo")
+                    {
+                        icon = Some(e.path().to_string_lossy().to_string());
+                        break;
+                    }
+                }
             }
         }
 
@@ -495,6 +664,12 @@ impl SteamScanner {
             let p = librarycache.join(format!("{}_logo.png", appid));
             if p.exists() {
                 logo = Some(p.to_string_lossy().to_string());
+            }
+        }
+        if icon.is_none() {
+            let p = librarycache.join(format!("{}_icon.jpg", appid));
+            if p.exists() {
+                icon = Some(p.to_string_lossy().to_string());
             }
         }
 
@@ -518,7 +693,7 @@ impl SteamScanner {
             ))
         });
 
-        (final_cover, final_hero, final_logo)
+        (final_cover, final_hero, final_logo, icon)
     }
 }
 
@@ -541,5 +716,19 @@ mod tests {
             println!(" - {} (ID: {}, Playtime: {}m, Cover: {:?})", g.title, g.id, g.playtime_seconds / 60, g.cover_image);
         }
     }
-}
 
+    #[tokio::test]
+    async fn test_scan_uninstalled_games() {
+        let steam_dir = SteamScanner::find_steam_install_dir().unwrap();
+        let installed = SteamScanner::scan_installed_games().unwrap();
+        let installed_ids: std::collections::HashSet<String> = installed
+            .into_iter()
+            .filter_map(|g| g.source_id)
+            .collect();
+        let uninstalled = SteamScanner::scan_uninstalled_from_localconfig(&steam_dir, &installed_ids).await;
+        println!("\n=== Discovered {} uninstalled Steam games ===", uninstalled.len());
+        for g in uninstalled.iter().take(10) {
+            println!(" - {} (ID: {}, Playtime: {}m, Installed: {})", g.title, g.id, g.playtime_seconds / 60, g.is_installed);
+        }
+    }
+}

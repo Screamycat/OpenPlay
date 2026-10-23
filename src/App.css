@@ -3,20 +3,19 @@
 @layer base {
   :root {
     --bg-primary: #0a0b10;
-    --bg-secondary: #12141c;
-    --bg-card: #181b26;
-    --bg-hover: #222636;
-    --accent: #00d2ff;
-    --accent-glow: rgba(0, 210, 255, 0.25);
-    --border-color: #232838;
-    --text-primary: #f1f5f9;
+    --bg-secondary: rgba(18, 20, 28, 0.75);
+    --bg-card: rgba(22, 25, 36, 0.65);
+    --bg-hover: rgba(255, 255, 255, 0.08);
+    --accent: #ffffff;
+    --border-color: rgba(255, 255, 255, 0.08);
+    --text-primary: #f8fafc;
     --text-muted: #94a3b8;
   }
 
   body {
     background-color: var(--bg-primary);
     color: var(--text-primary);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-family: 'Roboto', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     user-select: none;
     overflow: hidden;
     margin: 0;
@@ -31,25 +30,105 @@
 }
 
 ::-webkit-scrollbar-track {
-  background: rgba(10, 11, 16, 0.4);
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #2a3045;
+  background: rgba(255, 255, 255, 0.15);
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #3e4766;
+  background: rgba(255, 255, 255, 0.3);
 }
 
-/* Glassmorphism panel styling */
+/* Playnite FusionX Glassmorphism */
 .glass-panel {
-  background: rgba(18, 20, 28, 0.85);
-  backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(10, 12, 18, 0.55);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-.glow-selected {
-  box-shadow: 0 0 0 2px #38bdf8, 0 0 16px rgba(56, 189, 248, 0.35);
+.glass-card {
+  background: rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* Playnite FusionX Corner-to-Corner Card Shine Effect (Sword Glint Animation) */
+.card-shine-container {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 20;
+}
+
+.card-shine-beam {
+  position: absolute;
+  top: -65%;
+  left: -65%;
+  width: 230%;
+  height: 230%;
+  background: linear-gradient(
+    135deg,
+    transparent 28%,
+    rgba(255, 255, 255, 0.05) 38%,
+    rgba(255, 255, 255, 0.25) 45%,
+    rgba(255, 255, 255, 0.95) 50%,
+    rgba(255, 255, 255, 0.25) 55%,
+    rgba(255, 255, 255, 0.05) 62%,
+    transparent 72%
+  );
+  filter: drop-shadow(0 0 14px rgba(255, 255, 255, 0.85));
+  transform: translate(-100%, -100%);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.group:hover .card-shine-beam {
+  transform: translate(100%, 100%);
+  opacity: 1;
+  /* Sword shine easing: gentle buildup at start, dynamic glide through blade, crisp glint off tip */
+  transition: transform 1.55s cubic-bezier(0.35, 0, 0.15, 1), opacity 0.5s ease;
+}
+
+/* Play Button Glow Effect */
+.play-btn-glow {
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.play-btn-glow:hover {
+  box-shadow: 0 0 25px rgba(255, 255, 255, 0.65), 0 0 50px rgba(255, 255, 255, 0.25);
+  transform: scale(1.02);
+}
+
+.play-btn-glow:active {
+  transform: scale(0.98);
+}
+
+.launching-pulse {
+  box-shadow: 0 0 30px rgba(255, 255, 255, 0.6), inset 0 0 15px rgba(255, 255, 255, 0.3);
+  animation: pulse 1.8s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Card Launch Animation */
+@keyframes launch-flash {
+  0% {
+    opacity: 0.9;
+    transform: scale(0.95);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(1.02);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1);
+  }
+}
+
+.animate-launch-flash {
+  animation: launch-flash 0.6s ease-out forwards;
 }
