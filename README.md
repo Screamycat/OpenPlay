@@ -19,12 +19,12 @@
 
 ## 🌟 The Vision: What Others Aren't
 
-For years, PC gamers who wanted to unify their fragmented game libraries turned to **Playnite**. We honor Playnite for pioneering open-source library management on PC. 
+For years, PC gamers who wanted to unify their fragmented game libraries turned to managers like **Playnite**. And we honor Playnite for pioneering open-source library management on PC. 
 
 However, gaming has evolved:
 - **Playnite is locked to Windows**: Because Playnite was built on Microsoft WPF/.NET Framework, it cannot run natively on Linux, SteamOS, or the Steam Deck without cumbersome wrappers.
 - **Fragmented by Extensions**: To get a basic modern experience in Playnite, users are forced to install, configure, and maintain 10+ separate plugins just for artwork, HowLongToBeat stats, video trailers, and player counts.
-- **Aging Aesthetics**: Modern operating systems and displays demand high-performance glassmorphism, responsive canvas scaling, and fluid animations.
+- **Aging Aesthetics**: Modern operating systems and displays demand high-performance, responsive canvas scaling, and fluid animations.
 
 **OpenPlay is engineered from the ground up to be the game library of the next decade:**
 A blazing-fast, cross-platform sanctuary for your entire game collection that does *more than enough* straight out of the box.
@@ -36,7 +36,7 @@ A blazing-fast, cross-platform sanctuary for your entire game collection that do
 <div align="center">
 
 ### 🖥️ Desktop Split View
-*Adaptive 7-column poster grid on the left with rich live game showcase, transparent clear logos, and animated video trailers on the right.*
+*Adaptive poster grid on the left with rich live game showcase, transparent clear logos, and animated video trailers on the right.*
 
 ```
 +-------------------------------------------------------------------------------------------------------------+
@@ -69,7 +69,7 @@ A blazing-fast, cross-platform sanctuary for your entire game collection that do
 
 ---
 
-### ⚙️ 7-Tab Comprehensive Game Properties
+### ⚙️ Comprehensive Game Properties
 *All metadata—from custom launch arguments to playtime split and native file browsers—organized so you never get overwhelmed.*
 
 *(Screenshot placeholder: `./docs/screenshots/game-settings-dialog.png`)*
