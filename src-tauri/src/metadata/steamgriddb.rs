@@ -17,6 +17,38 @@ pub struct SteamGridDBAsset {
 
 pub struct SteamGridDBClient;
 
+fn percent_encode_path_segment(input: &str) -> String {
+    let mut out = String::with_capacity(input.len() * 2);
+    for b in input.as_bytes() {
+        match *b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(*b as char);
+            }
+            _ => {
+                out.push_str(&format!("%{:02X}", b));
+            }
+        }
+    }
+    out
+}
+
+fn sanitize_title_for_search(title: &str) -> String {
+    title
+        .chars()
+        .filter(|c| !matches!(*c, '™' | '®' | '©' | '\u{FFFD}'))
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<&str>>()
+        .join(" ")
+}
+
+fn normalize_compare(s: &str) -> String {
+    s.chars()
+        .filter(|c| c.is_alphanumeric())
+        .collect::<String>()
+        .to_lowercase()
+}
+
 impl SteamGridDBClient {
     /// Resolves Steam App ID to SteamGridDB game ID
     pub async fn get_game_id(api_key: &str, steam_appid: &str) -> Result<u64, String> {
@@ -48,11 +80,141 @@ impl SteamGridDBClient {
         Ok(id)
     }
 
+    /// Searches SteamGridDB by game title (used for Epic Games, Manual games, or custom search queries)
+    pub async fn search_game_id_by_title(api_key: &str, title: &str) -> Result<u64, String> {
+        let clean = sanitize_title_for_search(title);
+        if clean.is_empty() {
+            return Err("Game title is empty; cannot search SteamGridDB".to_string());
+        }
+
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(8))
+            .build()
+            .map_err(|e| e.to_string())?;
+
+        // Build candidate search queries: full clean title first, then base title before ':' if edition suffix exists
+        let mut candidates = vec![clean.clone()];
+        if let Some((base, _)) = clean.split_once(':') {
+            let trimmed_base = base.trim();
+            if trimmed_base.len() >= 3 && trimmed_base != clean {
+                candidates.push(trimmed_base.to_string());
+            }
+        }
+        // Also try replacing ':' with space if present
+        if clean.contains(':') {
+            let no_colon = clean.replace(':', " ").split_whitespace().collect::<Vec<&str>>().join(" ");
+            if !candidates.contains(&no_colon) {
+                candidates.insert(1, no_colon);
+            }
+        }
+
+        let target_norm = normalize_compare(&clean);
+        let base_norm = clean
+            .split_once(':')
+            .map(|(b, _)| normalize_compare(b))
+            .unwrap_or_else(|| target_norm.clone());
+
+        for term in candidates {
+            let encoded = percent_encode_path_segment(&term);
+            let url = format!("https://www.steamgriddb.com/api/v2/search/autocomplete/{}", encoded);
+
+            let resp = client
+                .get(&url)
+                .header("Authorization", format!("Bearer {}", api_key))
+                .header("User-Agent", "OpenPlay/0.1.0")
+                .send()
+                .await
+                .map_err(|e| e.to_string())?;
+
+            if resp.status() == reqwest::StatusCode::UNAUTHORIZED || resp.status() == reqwest::StatusCode::FORBIDDEN {
+                return Err(format!("SteamGridDB API key rejected ({}). Check your key in Settings -> APIs & Services.", resp.status()));
+            }
+
+            if !resp.status().is_success() {
+                continue;
+            }
+
+            let json: Value = resp.json().await.map_err(|e| e.to_string())?;
+            if let Some(arr) = json.get("data").and_then(|d| d.as_array()) {
+                if arr.is_empty() {
+                    continue;
+                }
+
+                // 1. Exact normalized match on full title
+                if let Some(exact) = arr.iter().find(|item| {
+                    item.get("name")
+                        .and_then(|v| v.as_str())
+                        .map(|n| normalize_compare(n) == target_norm)
+                        .unwrap_or(false)
+                }) {
+                    if let Some(id) = exact.get("id").and_then(|v| v.as_u64()) {
+                        return Ok(id);
+                    }
+                }
+
+                // 2. Exact normalized match on base title (strips edition suffixes like ": Celebration Edition")
+                if let Some(base_match) = arr.iter().find(|item| {
+                    item.get("name")
+                        .and_then(|v| v.as_str())
+                        .map(|n| normalize_compare(n) == base_norm)
+                        .unwrap_or(false)
+                }) {
+                    if let Some(id) = base_match.get("id").and_then(|v| v.as_u64()) {
+                        return Ok(id);
+                    }
+                }
+
+                // 3. Best top autocomplete match
+                if let Some(first_id) = arr[0].get("id").and_then(|v| v.as_u64()) {
+                    return Ok(first_id);
+                }
+            }
+        }
+
+        Err(format!("No matching game found on SteamGridDB for '{}'", clean))
+    }
+
+    /// Resolves SteamGridDB game ID intelligently across Steam, Epic Games, Manual games, or custom search
+    pub async fn resolve_game_id(
+        api_key: &str,
+        source: Option<&str>,
+        appid: Option<&str>,
+        title: Option<&str>,
+    ) -> Result<u64, String> {
+        let is_steam = source
+            .map(|s| s.trim().eq_ignore_ascii_case("steam"))
+            .unwrap_or(false);
+
+        if is_steam {
+            if let Some(aid) = appid.map(|s| s.trim()).filter(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit())) {
+                match Self::get_game_id(api_key, aid).await {
+                    Ok(id) => return Ok(id),
+                    Err(_) if title.is_some() => {
+                        // Fall through to title search if Steam App ID wasn't linked on SteamGridDB yet
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+        }
+
+        if let Some(t) = title.map(|s| s.trim()).filter(|s| !s.is_empty()) {
+            return Self::search_game_id_by_title(api_key, t).await;
+        }
+
+        // Legacy fallback if caller only supplied a numeric Steam appid
+        if let Some(aid) = appid.map(|s| s.trim()).filter(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit())) {
+            return Self::get_game_id(api_key, aid).await;
+        }
+
+        Err("Cannot resolve SteamGridDB game without a valid title or Steam App ID".to_string())
+    }
+
     /// Fetches assets (grids, heroes, logos, icons) for a given game ID
     pub async fn fetch_assets(
         api_key: &str,
         game_id: u64,
         asset_type: &str, // "grids", "heroes", "logos", "icons"
+        nsfw: bool,
     ) -> Result<Vec<SteamGridDBAsset>, String> {
         let endpoint = match asset_type {
             "heroes" => "heroes",
@@ -61,16 +223,18 @@ impl SteamGridDBClient {
             _ => "grids",
         };
 
+        let nsfw_param = if nsfw { "any" } else { "false" };
+
         // For grids, request 600x900 vertical posters with both animated and static types
         let url = if endpoint == "grids" {
             format!(
-                "https://www.steamgriddb.com/api/v2/grids/game/{}?dimensions=600x900&types=animated,static",
-                game_id
+                "https://www.steamgriddb.com/api/v2/grids/game/{}?dimensions=600x900&types=animated,static&nsfw={}",
+                game_id, nsfw_param
             )
         } else {
             format!(
-                "https://www.steamgriddb.com/api/v2/{}/game/{}?types=animated,static",
-                endpoint, game_id
+                "https://www.steamgriddb.com/api/v2/{}/game/{}?types=animated,static&nsfw={}",
+                endpoint, game_id, nsfw_param
             )
         };
 

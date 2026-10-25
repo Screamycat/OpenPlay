@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Game } from "../types/game";
-import { resolveImageSrc, formatPlaytime } from "../utils/image";
+import { resolveImageSrc, formatPlaytime, formatFileSize } from "../utils/image";
 import { SteamDescription } from "./SteamDescription";
 import { HowLongToBeatWidget } from "./HowLongToBeatWidget";
 import { SteamGridDBModal } from "./SteamGridDBModal";
 import { TrailerModal, getYouTubeEmbedUrl } from "./TrailerModal";
 import { VideoPlayer } from "./VideoPlayer";
+import { AchievementsTab } from "./AchievementsTab";
+import { AchievementsQuickWidget } from "./AchievementsQuickWidget";
 import {
   Play,
   Download,
@@ -32,6 +34,8 @@ import {
   Film,
   Plus,
   Square,
+  RefreshCw,
+  Trash2,
 } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
@@ -57,7 +61,10 @@ interface GameDetailsProps {
   onStop?: (game: Game) => void;
   onToggleFavorite: (id: string) => void;
   onOpenEdit: (game: Game) => void;
+  onRemoveGame?: (game: Game) => void;
   onFetchMetadata: (id: string) => void;
+  onRefreshGame?: (id: string) => void;
+  isRefreshing?: boolean;
   isLaunching: boolean;
   isRunning?: boolean;
   isFetchingMeta: boolean;
@@ -66,6 +73,14 @@ interface GameDetailsProps {
   onOpenContextMenu?: (game: Game, x: number, y: number) => void;
   onOpenSteamGridDB?: (game: Game) => void;
   onOpenTrailers?: (game: Game) => void;
+  selectedGenres?: string[];
+  onToggleGenre?: (genre: string) => void;
+  selectedDevelopers?: string[];
+  onToggleDeveloper?: (dev: string) => void;
+  selectedSources?: string[];
+  onToggleSource?: (source: string) => void;
+  trailerAutoplay?: boolean;
+  trailerMuted?: boolean;
 }
 
 export const GameDetails: React.FC<GameDetailsProps> = ({
@@ -74,7 +89,10 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
   onStop,
   onToggleFavorite,
   onOpenEdit,
+  onRemoveGame,
   onFetchMetadata,
+  onRefreshGame,
+  isRefreshing = false,
   isLaunching,
   isRunning = false,
   isFetchingMeta,
@@ -82,6 +100,14 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
   onOpenContextMenu,
   onOpenSteamGridDB,
   onOpenTrailers,
+  selectedGenres,
+  onToggleGenre,
+  selectedDevelopers,
+  onToggleDeveloper,
+  selectedSources,
+  onToggleSource,
+  trailerAutoplay = true,
+  trailerMuted = true,
 }) => {
   const [activeTab, setActiveTab] = useState<"overview" | "achievements" | "news">("overview");
   const [isExitModalOpen, setIsExitModalOpen] = useState(false);
@@ -122,6 +148,58 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
   const logoSrc = resolveImageSrc(game.logo_image);
   const coverSrc = resolveImageSrc(game.cover_image);
   const iconSrc = resolveImageSrc(game.icon_image);
+
+  // Smooth Morphing Hero Crossfade
+  const targetHero = heroSrc ?? null;
+  const [currentHero, setCurrentHero] = useState<string | null>(targetHero);
+  const [prevHero, setPrevHero] = useState<string | null>(null);
+  const [isHeroFading, setIsHeroFading] = useState(false);
+  const settledHeroRef = useRef<string | null>(targetHero);
+  const heroTimeoutRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (targetHero === settledHeroRef.current) return;
+
+    const outgoing = settledHeroRef.current;
+    settledHeroRef.current = targetHero;
+
+    if (!targetHero) {
+      setPrevHero(outgoing);
+      setCurrentHero(null);
+      setIsHeroFading(true);
+    } else {
+      setPrevHero(outgoing);
+      setCurrentHero(targetHero);
+      setIsHeroFading(false);
+
+      const isVideo = targetHero.endsWith(".webm") || targetHero.endsWith(".mp4");
+      if (!isVideo) {
+        const img = new Image();
+        img.src = targetHero;
+        const start = () => {
+          requestAnimationFrame(() => setIsHeroFading(true));
+        };
+        if (img.complete) {
+          start();
+        } else {
+          img.onload = start;
+          img.onerror = start;
+        }
+      } else {
+        requestAnimationFrame(() => setIsHeroFading(true));
+      }
+    }
+
+    if (heroTimeoutRef.current) clearTimeout(heroTimeoutRef.current);
+    heroTimeoutRef.current = window.setTimeout(() => {
+      setPrevHero(null);
+      setIsHeroFading(false);
+    }, 800);
+
+    return () => {
+      if (heroTimeoutRef.current) clearTimeout(heroTimeoutRef.current);
+    };
+  }, [targetHero]);
 
   // Active trailer
   const trailers = game.trailers || [];
@@ -188,6 +266,15 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
       setNewsItems([]);
     }
   }, [game.id, game.source_id, game.title]);
+
+  // Keep HLTB widget synced when live refresh updates props on the same game
+  useEffect(() => {
+    setHltbData({
+      main: game.hltb_main,
+      extra: game.hltb_extra,
+      completionist: game.hltb_completionist,
+    });
+  }, [game.hltb_main, game.hltb_extra, game.hltb_completionist]);
 
   // Close context menu when clicking outside
   useEffect(() => {
@@ -264,8 +351,8 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
       >
         {/* Top Hero Header - Strictly 96/31 Aspect Ratio & 50% Opacity Mask Fading */}
         <div className="relative w-full aspect-[96/31] select-none mb-[100px]">
-          {/* Background Hero Art with Pure Alpha Mask Fading (50% Opacity All Around, Zero Black Overlays, Smooth S-Curve Transitions, Moved 10px Down) */}
-          {heroSrc ? (
+          {/* Background Hero Art with Pure Alpha Mask Fading & Seamless Dual-Layer Morphing */}
+          {(currentHero || prevHero) ? (
             <div
               className="absolute inset-0 translate-y-[10px] pointer-events-none overflow-hidden"
               style={{
@@ -276,7 +363,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
               }}
             >
               <div
-                className="w-full h-full"
+                className="w-full h-full relative"
                 style={{
                   WebkitMaskImage:
                     "linear-gradient(to bottom, transparent 0px, rgba(0,0,0,0.05) 8px, rgba(0,0,0,0.2) 18px, rgba(0,0,0,0.5) 28px, rgba(0,0,0,0.8) 40px, black 50px, black calc(100% - 100px), rgba(0,0,0,0.8) calc(100% - 80px), rgba(0,0,0,0.5) calc(100% - 55px), rgba(0,0,0,0.2) calc(100% - 35px), rgba(0,0,0,0.05) calc(100% - 15px), transparent 100%)",
@@ -284,21 +371,56 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                     "linear-gradient(to bottom, transparent 0px, rgba(0,0,0,0.05) 8px, rgba(0,0,0,0.2) 18px, rgba(0,0,0,0.5) 28px, rgba(0,0,0,0.8) 40px, black 50px, black calc(100% - 100px), rgba(0,0,0,0.8) calc(100% - 80px), rgba(0,0,0,0.5) calc(100% - 55px), rgba(0,0,0,0.2) calc(100% - 35px), rgba(0,0,0,0.05) calc(100% - 15px), transparent 100%)",
                 }}
               >
-                {heroSrc.endsWith(".webm") || heroSrc.endsWith(".mp4") ? (
-                  <video
-                    src={heroSrc}
-                    autoPlay
-                    loop
-                    muted
-                    playsInline
-                    className="w-full h-full object-cover opacity-50"
-                  />
-                ) : (
-                  <img
-                    src={heroSrc}
-                    alt={game.title}
-                    className="w-full h-full object-cover opacity-50 transition-opacity duration-300"
-                  />
+                {/* Secondary (Previous Hero Image) underneath - Fades out completely to 0 */}
+                {prevHero && (
+                  <div
+                    className={`absolute inset-0 transition-opacity duration-700 ease-out pointer-events-none ${
+                      isHeroFading ? "opacity-0" : "opacity-100"
+                    }`}
+                  >
+                    {prevHero.endsWith(".webm") || prevHero.endsWith(".mp4") ? (
+                      <video
+                        src={prevHero}
+                        autoPlay
+                        loop
+                        muted
+                        playsInline
+                        className="w-full h-full object-cover opacity-50"
+                      />
+                    ) : (
+                      <img
+                        src={prevHero}
+                        alt=""
+                        className="w-full h-full object-cover opacity-50"
+                      />
+                    )}
+                  </div>
+                )}
+
+                {/* Primary (Incoming Hero Image) morphs in on top */}
+                {currentHero && (
+                  <div
+                    className={`absolute inset-0 transition-opacity duration-700 ease-out pointer-events-none ${
+                      prevHero ? (isHeroFading ? "opacity-100" : "opacity-0") : "opacity-100"
+                    }`}
+                  >
+                    {currentHero.endsWith(".webm") || currentHero.endsWith(".mp4") ? (
+                      <video
+                        src={currentHero}
+                        autoPlay
+                        loop
+                        muted
+                        playsInline
+                        className="w-full h-full object-cover opacity-50"
+                      />
+                    ) : (
+                      <img
+                        src={currentHero}
+                        alt={game.title}
+                        className="w-full h-full object-cover opacity-50"
+                      />
+                    )}
+                  </div>
                 )}
               </div>
             </div>
@@ -306,7 +428,10 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
 
           {/* Prominent Title Logo Positioned in Top-Left (Target 500px wide, max 200px tall) */}
           {logoSrc ? (
-            <div className="absolute top-[30px] left-6 lg:top-[38px] lg:left-8 z-20 pointer-events-auto w-[500px] max-w-[calc(100%-48px)] max-h-[200px] flex items-start">
+            <div
+              key={`logo_${game.id}`}
+              className="absolute top-[30px] left-6 lg:top-[38px] lg:left-8 z-20 pointer-events-auto w-[500px] max-w-[calc(100%-48px)] max-h-[200px] flex items-start animate-game-switch"
+            >
               {logoSrc.endsWith(".webm") || logoSrc.endsWith(".mp4") ? (
                 <video
                   src={logoSrc}
@@ -330,7 +455,10 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
           ) : null}
 
           {/* Foreground Header Content: Shifted ~100px Down from Bottom of Hero */}
-          <div className="absolute inset-0 translate-y-[100px] px-6 lg:px-8 pb-4 flex items-end justify-between gap-6 z-10 pointer-events-none">
+          <div
+            key={`header_${game.id}`}
+            className="absolute inset-0 translate-y-[100px] px-6 lg:px-8 pb-4 flex items-end justify-between gap-6 z-10 pointer-events-none animate-game-switch"
+          >
             {/* Left Column: Title + Ratings + Genres */}
             <div className="flex-1 min-w-0 space-y-2 pointer-events-auto">
               {/* Game Title with Client Icon */}
@@ -392,16 +520,26 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                 )}
               </div>
 
-              {/* Genre Pills Row - Translucent with subtle line border */}
+              {/* Genre Pills Row - Translucent with subtle line border & click-to-filter */}
               <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
-                {game.genres.slice(0, 4).map((g) => (
-                  <span
-                    key={g}
-                    className="px-2.5 py-0.5 rounded-md bg-black/25 backdrop-blur-md border border-white/15 text-white text-[10px] font-extrabold uppercase tracking-wider shadow-sm"
-                  >
-                    {g}
-                  </span>
-                ))}
+                {game.genres.slice(0, 4).map((g) => {
+                  const isSelected = selectedGenres?.includes(g);
+                  return (
+                    <button
+                      key={g}
+                      type="button"
+                      onClick={() => onToggleGenre?.(g)}
+                      title={`Filter by ${g}`}
+                      className={`px-2.5 py-0.5 rounded-md text-[10px] font-extrabold uppercase tracking-wider shadow-sm transition-all cursor-pointer ${
+                        isSelected
+                          ? "bg-white text-zinc-950 font-black ring-1 ring-white"
+                          : "bg-black/25 backdrop-blur-md border border-white/15 text-white hover:bg-white/15 hover:border-white/30"
+                      }`}
+                    >
+                      {g}
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
@@ -515,7 +653,11 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                 {/* Video Trailer Container */}
                 <div className="relative rounded-xl overflow-hidden border border-white/10 shadow-xl bg-black/60 backdrop-blur-sm aspect-video flex items-center justify-center group">
                   {(() => {
-                    const ytEmbed = getYouTubeEmbedUrl(activeTrailer.url, true, true);
+                    const ytEmbed = getYouTubeEmbedUrl(
+                      activeTrailer.url,
+                      trailerAutoplay,
+                      trailerMuted
+                    );
                     if (ytEmbed) {
                       return (
                         <iframe
@@ -533,8 +675,8 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                         src={activeTrailer.url}
                         poster={activeTrailer.thumbnail}
                         controls
-                        autoPlay={true}
-                        muted={true}
+                        autoPlay={trailerAutoplay}
+                        muted={trailerMuted}
                         className="w-full h-full object-cover rounded-xl"
                       />
                     );
@@ -646,33 +788,14 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                 <div className="space-y-4">
                   <SteamDescription
                     html={game.description}
-                    fallbackText="Click 'Refresh Store & HLTB' to load rich store description from Steam."
+                    fallbackText="No description available yet. Open Game Properties -> Download Metadata to fetch rich store details."
                   />
                 </div>
               )}
 
-              {/* Tab 2: Achievements (Clean placeholder for future robust system) */}
+              {/* Tab 2: Achievements (Full Showcase) */}
               {activeTab === "achievements" && (
-                <div className="p-8 bg-black/30 backdrop-blur-md border border-white/10 rounded-2xl text-center space-y-3">
-                  <div className="w-12 h-12 mx-auto rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-slate-300">
-                    <Award className="w-6 h-6" />
-                  </div>
-                  <h4 className="text-base font-bold text-white tracking-wide">Achievements</h4>
-                  <p className="text-xs text-slate-400 max-w-md mx-auto leading-relaxed">
-                    A comprehensive achievement tracking system is planned for OpenPlay to view unlocked trophies, completion percentages, and secret milestones.
-                  </p>
-                  {steamAppId && (
-                    <button
-                      onClick={() =>
-                        handleOpenLink(`https://steamcommunity.com/stats/${steamAppId}/achievements`)
-                      }
-                      className="inline-flex items-center space-x-2 px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-200 hover:text-white border border-white/10 text-xs font-semibold transition-all cursor-pointer mt-2"
-                    >
-                      <span>View Steam Community Achievements</span>
-                      <ExternalLink className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                </div>
+                <AchievementsTab game={game} />
               )}
 
               {/* Tab 3: News & Changelogs */}
@@ -782,9 +905,24 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                     <User className="w-3 h-3 text-slate-400" />
                     <span>Developer</span>
                   </span>
-                  <span className="px-2 py-0.5 rounded bg-white/5 border border-white/10 text-slate-200 font-semibold truncate text-right max-w-[140px]">
-                    {game.developer || "—"}
-                  </span>
+                  {game.developer ? (
+                    <button
+                      type="button"
+                      onClick={() => onToggleDeveloper?.(game.developer!)}
+                      title={`Filter by ${game.developer}`}
+                      className={`px-2 py-0.5 rounded border text-[11px] truncate text-right max-w-[140px] transition-all cursor-pointer ${
+                        selectedDevelopers?.includes(game.developer)
+                          ? "bg-white text-zinc-950 font-bold border-white"
+                          : "bg-white/5 border-white/10 text-slate-200 hover:bg-white/15 hover:text-white"
+                      }`}
+                    >
+                      {game.developer}
+                    </button>
+                  ) : (
+                    <span className="px-2 py-0.5 rounded bg-white/5 border border-white/10 text-slate-400 truncate text-right max-w-[140px]">
+                      —
+                    </span>
+                  )}
                 </div>
 
                 {/* Publisher */}
@@ -827,9 +965,22 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                     <span>Recent Activity</span>
                   </span>
                   <span className="text-slate-300 font-mono text-right truncate">
-                    {game.last_played || "Never"}
+                    {game.last_played || (game.playtime_seconds > 0 ? "Played (Date unknown)" : "Never")}
                   </span>
                 </div>
+
+                {/* Size on Disk */}
+                {game.size_on_disk && game.size_on_disk > 0 && (
+                  <div className="flex items-center justify-between gap-2 min-w-0">
+                    <span className="text-slate-400 flex items-center space-x-1.5 shrink-0">
+                      <HardDrive className="w-3 h-3 text-slate-400" />
+                      <span>Size on Disk</span>
+                    </span>
+                    <span className="text-slate-300 font-mono text-right truncate">
+                      {formatFileSize(game.size_on_disk)}
+                    </span>
+                  </div>
+                )}
 
                 {/* Source */}
                 <div className="flex items-center justify-between gap-2 min-w-0">
@@ -837,9 +988,18 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                     <HardDrive className="w-3 h-3 text-slate-400" />
                     <span>Source</span>
                   </span>
-                  <span className="text-slate-200 font-semibold text-right">
+                  <button
+                    type="button"
+                    onClick={() => onToggleSource?.(game.source)}
+                    title={`Filter by ${game.source}`}
+                    className={`px-2 py-0.5 rounded border text-[11px] font-semibold text-right transition-all cursor-pointer ${
+                      selectedSources?.includes(game.source)
+                        ? "bg-white text-zinc-950 font-bold border-white"
+                        : "bg-white/5 border-white/10 text-slate-200 hover:bg-white/15 hover:text-white"
+                    }`}
+                  >
                     {game.source}
-                  </span>
+                  </button>
                 </div>
 
                 {/* Library */}
@@ -848,10 +1008,49 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                     <HardDrive className="w-3 h-3 text-slate-400" />
                     <span>Library</span>
                   </span>
-                  <span className="text-slate-200 font-semibold text-right">
+                  <button
+                    type="button"
+                    onClick={() => onToggleSource?.(game.source)}
+                    title={`Filter by ${game.source}`}
+                    className={`px-2 py-0.5 rounded border text-[11px] font-semibold text-right transition-all cursor-pointer ${
+                      selectedSources?.includes(game.source)
+                        ? "bg-white text-zinc-950 font-bold border-white"
+                        : "bg-white/5 border-white/10 text-slate-200 hover:bg-white/15 hover:text-white"
+                    }`}
+                  >
                     {game.source}
-                  </span>
+                  </button>
                 </div>
+
+                {/* Genres & Tags */}
+                {game.genres && game.genres.length > 0 && (
+                  <div className="pt-2 border-t border-white/10 space-y-1.5">
+                    <div className="text-slate-400 text-[10px] flex items-center space-x-1">
+                      <Tag className="w-3 h-3 text-slate-400" />
+                      <span>Genres & Tags</span>
+                    </div>
+                    <div className="flex flex-wrap gap-1">
+                      {game.genres.map((g) => {
+                        const isSelected = selectedGenres?.includes(g);
+                        return (
+                          <button
+                            key={g}
+                            type="button"
+                            onClick={() => onToggleGenre?.(g)}
+                            title={`Filter by ${g}`}
+                            className={`px-2 py-0.5 rounded text-[10px] font-medium transition-all cursor-pointer ${
+                              isSelected
+                                ? "bg-white text-zinc-950 font-bold ring-1 ring-white"
+                                : "bg-white/5 border border-white/10 text-slate-300 hover:bg-white/15 hover:text-white"
+                            }`}
+                          >
+                            {g}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
 
                 {/* Community Score */}
                 <div className="flex items-center justify-between gap-2 min-w-0">
@@ -889,6 +1088,12 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                 )}
               </div>
             </div>
+
+            {/* 3. Quick Achievements Showcase Widget */}
+            <AchievementsQuickWidget
+              game={game}
+              onOpenFullAchievements={() => setActiveTab("achievements")}
+            />
           </div>
         </div>
       </div>
@@ -896,14 +1101,17 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
       {/* Floating Bottom Stats & Action Launch Bar - Exactly matching Playnite FusionX: No Black Box, No Border Line, Scaled Controls (~200x48 Play button, w-12 buttons, large stats) */}
       <div className="absolute bottom-0 inset-x-0 h-20 px-6 lg:px-8 pb-4 flex items-end justify-between select-none z-30 pointer-events-none bg-transparent">
         {/* Left Side: Stats (Completion Status, Last Played, Time Played - Clean and Scaled to Match Bottom Bar Enlargement) */}
-        <div className="flex items-center space-x-10 text-slate-300 pointer-events-auto">
+        <div
+          key={`stats_${game.id}`}
+          className="flex items-center space-x-10 text-slate-300 pointer-events-auto animate-game-switch"
+        >
           {/* Completion Status */}
           <div className="flex items-center space-x-3">
             <CheckCircle2 className="w-6 h-6 text-slate-400 shrink-0" />
             <div>
               <div className="text-xs text-slate-400 uppercase font-bold tracking-wider">Completion Status</div>
               <div className="font-extrabold text-slate-100 text-base">
-                {game.completion_status || (game.last_played ? "Playing" : "Not Played")}
+                {game.completion_status || (game.last_played || game.playtime_seconds > 0 ? "Played" : "Not Played")}
               </div>
             </div>
           </div>
@@ -914,7 +1122,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
             <div>
               <div className="text-xs text-slate-400 uppercase font-bold tracking-wider">Last Played</div>
               <div className="font-extrabold text-slate-100 font-mono text-base">
-                {game.last_played || "Never"}
+                {game.last_played || (game.playtime_seconds > 0 ? "Played (Date unknown)" : "Never")}
               </div>
             </div>
           </div>
@@ -977,17 +1185,6 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
               <div className="absolute bottom-full right-0 mb-3 w-56 bg-[#131625]/95 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl p-1.5 z-50 text-xs space-y-0.5 animate-in fade-in slide-in-from-bottom-2 duration-150">
                 <button
                   onClick={() => {
-                    setIsSteamGridDBOpen(true);
-                    setIsActionMenuOpen(false);
-                  }}
-                  className="w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl text-left text-slate-200 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
-                >
-                  <Sparkles className="w-4 h-4 text-white shrink-0" />
-                  <span>Change Artwork (SteamGridDB)</span>
-                </button>
-
-                <button
-                  onClick={() => {
                     setIsTrailerModalOpen(true);
                     setIsActionMenuOpen(false);
                   }}
@@ -1014,14 +1211,22 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
 
                 <button
                   onClick={() => {
-                    onFetchMetadata(game.id);
+                    if (onRefreshGame) {
+                      onRefreshGame(game.id);
+                    } else {
+                      onFetchMetadata(game.id);
+                    }
                     setIsActionMenuOpen(false);
                   }}
-                  disabled={isFetchingMeta}
+                  disabled={isRefreshing || isFetchingMeta}
                   className="w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl text-left text-slate-200 hover:text-white hover:bg-white/10 transition-colors cursor-pointer disabled:opacity-50"
                 >
-                  <Sparkles className={`w-4 h-4 text-emerald-400 shrink-0 ${isFetchingMeta ? "animate-spin" : ""}`} />
-                  <span>Refresh Store & HLTB</span>
+                  <RefreshCw
+                    className={`w-4 h-4 text-emerald-400 shrink-0 ${
+                      isRefreshing || isFetchingMeta ? "animate-spin" : ""
+                    }`}
+                  />
+                  <span>{isRefreshing || isFetchingMeta ? "Refreshing..." : "Refresh"}</span>
                 </button>
 
                 <div className="my-1 border-t border-white/10" />
@@ -1049,6 +1254,27 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                     <span>Open Game Folder</span>
                   </button>
                 )}
+
+                {(!["steam", "epic", "gog", "battle.net", "ea app", "ubisoft connect", "xbox"].includes(
+                  game.source.toLowerCase()
+                ) ||
+                  game.source.toLowerCase() === "local" ||
+                  game.source.toLowerCase() === "manual") &&
+                  onRemoveGame && (
+                    <>
+                      <div className="my-1 border-t border-white/10" />
+                      <button
+                        onClick={() => {
+                          setIsActionMenuOpen(false);
+                          onRemoveGame(game);
+                        }}
+                        className="w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl text-left text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors cursor-pointer"
+                      >
+                        <Trash2 className="w-4 h-4 text-red-400 shrink-0" />
+                        <span>Remove Game</span>
+                      </button>
+                    </>
+                  )}
               </div>
             )}
           </div>
@@ -1108,7 +1334,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
       {isExitModalOpen && (
         <div
           onClick={() => setIsExitModalOpen(false)}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 animate-in fade-in duration-150"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 backdrop-blur-sm p-4 animate-in fade-in duration-150"
         >
           <div
             onClick={(e) => e.stopPropagation()}

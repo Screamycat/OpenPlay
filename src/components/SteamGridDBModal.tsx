@@ -9,6 +9,7 @@ import {
   X,
   Key,
   Film,
+  Search,
 } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
@@ -56,6 +57,12 @@ export const SteamGridDBModal: React.FC<SteamGridDBModalProps> = ({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [applyingUrl, setApplyingUrl] = useState<string | null>(null);
   const [recentlyAppliedUrl, setRecentlyAppliedUrl] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState(game.title);
+
+  // Sync searchQuery when game changes
+  useEffect(() => {
+    setSearchQuery(game.title);
+  }, [game.id, game.title]);
 
   // Check if API key exists on mount
   useEffect(() => {
@@ -72,19 +79,22 @@ export const SteamGridDBModal: React.FC<SteamGridDBModalProps> = ({
       .catch(() => setHasApiKey(false));
   }, [isOpen]);
 
-  // Fetch assets whenever assetType changes and API key is present
+  // Fetch assets whenever assetType or game changes and API key is present
   useEffect(() => {
-    if (!isOpen || !hasApiKey || !game.source_id) return;
-    loadAssets(assetType);
-  }, [isOpen, hasApiKey, assetType, game.source_id]);
+    if (!isOpen || !hasApiKey) return;
+    loadAssets(assetType, searchQuery);
+  }, [isOpen, hasApiKey, assetType, game.id]);
 
-  const loadAssets = async (type: string) => {
-    if (!game.source_id) return;
+  const loadAssets = async (type: string, customTitle?: string) => {
+    const effectiveTitle = (customTitle ?? searchQuery).trim() || game.title;
+    const isDefaultTitle = effectiveTitle.toLowerCase() === game.title.trim().toLowerCase();
     try {
       setIsLoading(true);
       setErrorMsg(null);
       const res = await invoke<SteamGridDBAsset[]>("search_steamgriddb", {
-        appid: game.source_id,
+        appid: isDefaultTitle ? game.source_id || "" : "",
+        source: isDefaultTitle ? game.source : "Custom",
+        title: effectiveTitle,
         assetType: type,
       });
       setAssets(res);
@@ -189,8 +199,14 @@ export const SteamGridDBModal: React.FC<SteamGridDBModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-[#10131d] border border-[#23293e] rounded-2xl w-full max-w-5xl h-[720px] shadow-2xl flex flex-col overflow-hidden">
+    <div
+      onClick={onClose}
+      className="fixed inset-0 z-50 bg-black/45 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="bg-[#10131d]/95 backdrop-blur-2xl border border-[#23293e] rounded-2xl w-full max-w-5xl h-[720px] shadow-2xl flex flex-col overflow-hidden"
+      >
         {/* Modal Header */}
         <div className="h-14 px-6 border-b border-[#20263a] flex items-center justify-between bg-[#0e1017] shrink-0">
           <div className="flex items-center space-x-2.5">
@@ -306,18 +322,37 @@ export const SteamGridDBModal: React.FC<SteamGridDBModalProps> = ({
                 </button>
               </div>
 
-              {/* Animated Only Filter Toggle */}
-              <button
-                onClick={() => setAnimatedOnly(!animatedOnly)}
-                className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all cursor-pointer ${
-                  animatedOnly
-                    ? "bg-amber-500/20 text-amber-300 border-amber-500/40"
-                    : "bg-[#141825] text-slate-400 border-[#242b3e] hover:text-slate-200"
-                }`}
-              >
-                <Film className="w-3.5 h-3.5" />
-                <span>Animated Only</span>
-              </button>
+              {/* Search & Animated Only Filter Controls */}
+              <div className="flex items-center space-x-2">
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    loadAssets(assetType, searchQuery);
+                  }}
+                  className="relative w-48 sm:w-56"
+                >
+                  <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Search SteamGridDB..."
+                    className="w-full pl-8 pr-3 py-1.5 bg-[#141825] border border-[#242b3e] focus:border-cyan-500/60 rounded-xl text-xs text-slate-200 placeholder-slate-500 focus:outline-none"
+                  />
+                </form>
+
+                <button
+                  onClick={() => setAnimatedOnly(!animatedOnly)}
+                  className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all cursor-pointer shrink-0 ${
+                    animatedOnly
+                      ? "bg-amber-500/20 text-amber-300 border-amber-500/40"
+                      : "bg-[#141825] text-slate-400 border-[#242b3e] hover:text-slate-200"
+                  }`}
+                >
+                  <Film className="w-3.5 h-3.5" />
+                  <span>Animated Only</span>
+                </button>
+              </div>
             </div>
 
             {/* Assets Grid Content */}
@@ -406,10 +441,16 @@ export const SteamGridDBModal: React.FC<SteamGridDBModalProps> = ({
                             </div>
                           )}
 
-                          {/* Score Badge */}
-                          <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded-md bg-black/70 backdrop-blur-xs text-slate-200 text-[10px] font-bold z-10">
-                            +{asset.score}
-                          </div>
+                          {/* Score Badge (SteamGridDB community upvotes - only shown when upvoted) */}
+                          {asset.score > 0 && (
+                            <div
+                              title={`${asset.score} community upvotes on SteamGridDB`}
+                              className="absolute top-2 right-2 px-1.5 py-0.5 rounded-md bg-black/75 backdrop-blur-xs text-zinc-200 text-[10px] font-semibold z-10 border border-white/10 flex items-center space-x-0.5 shadow-sm"
+                            >
+                              <span className="text-[9px] opacity-80">▲</span>
+                              <span>{asset.score}</span>
+                            </div>
+                          )}
 
                           {/* Hover Overlay Button */}
                           <div className="absolute inset-0 bg-black/75 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center p-3 z-20">

@@ -11,6 +11,8 @@ pub struct LibraryIntegration {
     pub import_uninstalled: bool,
     pub sync_playtime: bool,
     pub last_sync: Option<String>,
+    pub access_token: Option<String>,
+    pub refresh_token: Option<String>,
 }
 
 impl Default for LibraryIntegration {
@@ -25,6 +27,8 @@ impl Default for LibraryIntegration {
             import_uninstalled: true,
             sync_playtime: true,
             last_sync: None,
+            access_token: None,
+            refresh_token: None,
         }
     }
 }

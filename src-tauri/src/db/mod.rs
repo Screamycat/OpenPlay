@@ -1,4 +1,7 @@
-use crate::models::{Game, GameLink, GameTrailer, LibraryIntegration};
+use crate::models::{
+    Achievement, AppConfig, Game, GameAchievementSummary, GameLink, GameTrailer, HunterProfile,
+    LibraryIntegration,
+};
 use rusqlite::{params, Connection, Result};
 use std::fs;
 use std::path::PathBuf;
@@ -88,6 +91,10 @@ impl Database {
         let _ = conn.execute("ALTER TABLE games ADD COLUMN region TEXT", []);
         let _ = conn.execute("ALTER TABLE games ADD COLUMN play_count INTEGER", []);
 
+        // Normalize date_added formats to clean YYYY-MM-DD and strip broken replacement chars in titles
+        let _ = conn.execute("UPDATE games SET date_added = SUBSTR(date_added, 1, 10) WHERE date_added LIKE '%T%'", []);
+        let _ = conn.execute("UPDATE games SET title = REPLACE(title, char(65533), '') WHERE title LIKE '%' || char(65533) || '%'", []);
+
         conn.execute(
             "CREATE TABLE IF NOT EXISTS integrations (
                 provider TEXT PRIMARY KEY,
@@ -98,10 +105,15 @@ impl Database {
                 import_installed INTEGER NOT NULL DEFAULT 1,
                 import_uninstalled INTEGER NOT NULL DEFAULT 1,
                 sync_playtime INTEGER NOT NULL DEFAULT 1,
-                last_sync TEXT
+                last_sync TEXT,
+                access_token TEXT,
+                refresh_token TEXT
             )",
             [],
         )?;
+
+        let _ = conn.execute("ALTER TABLE integrations ADD COLUMN access_token TEXT", []);
+        let _ = conn.execute("ALTER TABLE integrations ADD COLUMN refresh_token TEXT", []);
 
         conn.execute(
             "CREATE TABLE IF NOT EXISTS settings (
@@ -110,6 +122,28 @@ impl Database {
             )",
             [],
         )?;
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS achievements (
+                game_id TEXT NOT NULL,
+                api_name TEXT NOT NULL,
+                display_name TEXT NOT NULL,
+                description TEXT,
+                icon_url TEXT NOT NULL,
+                icon_gray_url TEXT,
+                is_unlocked INTEGER NOT NULL DEFAULT 0,
+                unlock_time TEXT,
+                rarity_percentage REAL DEFAULT 0.0,
+                is_secret INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (game_id, api_name)
+            )",
+            [],
+        )?;
+
+        let _ = conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_achievements_game_id ON achievements(game_id)",
+            [],
+        );
 
         Ok(())
     }
@@ -269,6 +303,7 @@ impl Database {
                 community_score = COALESCE(excluded.community_score, games.community_score),
                 playtime_seconds = CASE WHEN excluded.playtime_seconds > 0 THEN excluded.playtime_seconds ELSE games.playtime_seconds END,
                 last_played = COALESCE(excluded.last_played, games.last_played),
+                date_added = COALESCE(games.date_added, excluded.date_added),
                 description = CASE WHEN games.description IS NOT NULL AND trim(games.description) != '' THEN games.description ELSE excluded.description END,
                 links = CASE WHEN excluded.links != '[]' THEN excluded.links ELSE games.links END,
                 screenshots = CASE WHEN excluded.screenshots != '[]' THEN excluded.screenshots ELSE games.screenshots END,
@@ -344,7 +379,7 @@ impl Database {
         let tags_json = serde_json::to_string(&game.tags).unwrap_or_else(|_| "[]".to_string());
         let categories_json = serde_json::to_string(&game.categories).unwrap_or_else(|_| "[]".to_string());
 
-        conn.execute(
+        let rows_affected = conn.execute(
             "UPDATE games SET
                 title = ?1,
                 sorting_title = ?2,
@@ -433,6 +468,12 @@ impl Database {
                 game.id,
             ],
         ).map_err(|e| e.to_string())?;
+
+        if rows_affected == 0 {
+            drop(conn);
+            return self.upsert_game(game);
+        }
+
         Ok(())
     }
 
@@ -483,7 +524,7 @@ impl Database {
     pub fn get_integration(&self, provider: &str) -> Result<LibraryIntegration, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
-            .prepare("SELECT provider, account_id, username, avatar_url, is_authenticated, import_installed, import_uninstalled, sync_playtime, last_sync FROM integrations WHERE provider = ?1")
+            .prepare("SELECT provider, account_id, username, avatar_url, is_authenticated, import_installed, import_uninstalled, sync_playtime, last_sync, access_token, refresh_token FROM integrations WHERE provider = ?1")
             .map_err(|e| e.to_string())?;
 
         let row = stmt.query_row(params![provider], |row| {
@@ -502,6 +543,8 @@ impl Database {
                 import_uninstalled: imp_uninst != 0,
                 sync_playtime: sync_pt != 0,
                 last_sync: row.get(8)?,
+                access_token: row.get(9)?,
+                refresh_token: row.get(10)?,
             })
         });
 
@@ -520,8 +563,9 @@ impl Database {
         conn.execute(
             "INSERT INTO integrations (
                 provider, account_id, username, avatar_url, is_authenticated,
-                import_installed, import_uninstalled, sync_playtime, last_sync
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                import_installed, import_uninstalled, sync_playtime, last_sync,
+                access_token, refresh_token
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
             ON CONFLICT(provider) DO UPDATE SET
                 account_id = excluded.account_id,
                 username = excluded.username,
@@ -530,7 +574,9 @@ impl Database {
                 import_installed = excluded.import_installed,
                 import_uninstalled = excluded.import_uninstalled,
                 sync_playtime = excluded.sync_playtime,
-                last_sync = excluded.last_sync",
+                last_sync = excluded.last_sync,
+                access_token = excluded.access_token,
+                refresh_token = excluded.refresh_token",
             params![
                 integration.provider,
                 integration.account_id,
@@ -541,6 +587,8 @@ impl Database {
                 if integration.import_uninstalled { 1 } else { 0 },
                 if integration.sync_playtime { 1 } else { 0 },
                 integration.last_sync,
+                integration.access_token,
+                integration.refresh_token,
             ],
         )
         .map_err(|e| e.to_string())?;
@@ -569,5 +617,258 @@ impl Database {
         )
         .map_err(|e| e.to_string())?;
         Ok(())
+    }
+
+    pub fn get_app_config(&self) -> Result<AppConfig, String> {
+        let raw = self.get_setting("app_config")?;
+        let mut cfg: AppConfig = match raw {
+            Some(json) => serde_json::from_str(&json).unwrap_or_default(),
+            None => {
+                let sgdb_key = self.get_setting("steamgriddb_key")?;
+                let mut c = AppConfig::default();
+                c.steamgriddb_api_key = sgdb_key;
+                c
+            }
+        };
+
+        // Ensure user defaults are set if missing
+        if cfg.auto_scan_on_startup.is_none() {
+            cfg.auto_scan_on_startup = Some(true);
+        }
+        if cfg.trailer_autoplay.is_none() {
+            cfg.trailer_autoplay = Some(true);
+        }
+        if cfg.trailer_muted.is_none() {
+            cfg.trailer_muted = Some(true);
+        }
+
+        Ok(cfg)
+    }
+
+    pub fn save_app_config(&self, config: &AppConfig) -> Result<(), String> {
+        let json = serde_json::to_string(config).map_err(|e| e.to_string())?;
+        self.set_setting("app_config", &json)?;
+        if let Some(ref key) = config.steamgriddb_api_key {
+            let _ = self.set_setting("steamgriddb_key", key);
+        }
+        Ok(())
+    }
+
+    pub fn save_game_achievements(&self, game_id: &str, achievements: &[Achievement]) -> Result<(), String> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
+
+        for ach in achievements {
+            tx.execute(
+                "INSERT INTO achievements (
+                    game_id, api_name, display_name, description, icon_url, icon_gray_url,
+                    is_unlocked, unlock_time, rarity_percentage, is_secret
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                ON CONFLICT(game_id, api_name) DO UPDATE SET
+                    display_name = excluded.display_name,
+                    description = excluded.description,
+                    icon_url = excluded.icon_url,
+                    icon_gray_url = excluded.icon_gray_url,
+                    is_unlocked = excluded.is_unlocked,
+                    unlock_time = excluded.unlock_time,
+                    rarity_percentage = excluded.rarity_percentage,
+                    is_secret = excluded.is_secret",
+                params![
+                    game_id,
+                    ach.api_name,
+                    ach.display_name,
+                    ach.description,
+                    ach.icon_url,
+                    ach.icon_gray_url,
+                    ach.is_unlocked as i32,
+                    ach.unlock_time,
+                    ach.rarity_percentage,
+                    ach.is_secret as i32,
+                ],
+            ).map_err(|e| e.to_string())?;
+        }
+
+        tx.commit().map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub fn get_game_achievements(&self, game_id: &str) -> Result<Vec<Achievement>, String> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT game_id, api_name, display_name, description, icon_url, icon_gray_url,
+                    is_unlocked, unlock_time, rarity_percentage, is_secret
+             FROM achievements
+             WHERE game_id = ?1
+             ORDER BY is_unlocked DESC, rarity_percentage ASC, display_name ASC"
+        ).map_err(|e| e.to_string())?;
+
+        let rows = stmt.query_map(params![game_id], |row| {
+            Ok(Achievement {
+                game_id: row.get(0)?,
+                api_name: row.get(1)?,
+                display_name: row.get(2)?,
+                description: row.get(3)?,
+                icon_url: row.get(4)?,
+                icon_gray_url: row.get(5)?,
+                is_unlocked: row.get::<_, i32>(6)? != 0,
+                unlock_time: row.get(7)?,
+                rarity_percentage: row.get(8)?,
+                is_secret: row.get::<_, i32>(9)? != 0,
+            })
+        }).map_err(|e| e.to_string())?;
+
+        let mut list = Vec::new();
+        for item in rows {
+            list.push(item.map_err(|e| e.to_string())?);
+        }
+        Ok(list)
+    }
+
+    pub fn get_game_achievement_summary(&self, game: &Game) -> Result<GameAchievementSummary, String> {
+        let achievements = self.get_game_achievements(&game.id)?;
+        let total = achievements.len();
+        let mut unlocked_list: Vec<Achievement> = achievements.iter().filter(|a| a.is_unlocked).cloned().collect();
+        let unlocked = unlocked_list.len();
+        let completion_percentage = if total > 0 {
+            (unlocked as f64 / total as f64) * 100.0
+        } else {
+            0.0
+        };
+        let is_perfect = total > 0 && unlocked == total;
+
+        // Sort unlocked by unlock_time descending
+        unlocked_list.sort_by(|a, b| b.unlock_time.cmp(&a.unlock_time));
+        let latest_unlocked = unlocked_list.first().cloned();
+        let recent_unlocked = if unlocked_list.len() > 1 {
+            unlocked_list.into_iter().skip(1).take(4).collect()
+        } else {
+            Vec::new()
+        };
+
+        // Upcoming locked: sort locked achievements by rarity percentage descending (easiest next unlocks first)
+        let mut locked_list: Vec<Achievement> = achievements.iter().filter(|a| !a.is_unlocked).cloned().collect();
+        locked_list.sort_by(|a, b| b.rarity_percentage.partial_cmp(&a.rarity_percentage).unwrap_or(std::cmp::Ordering::Equal));
+        let upcoming_locked = locked_list.into_iter().take(5).collect();
+
+        Ok(GameAchievementSummary {
+            game_id: game.id.clone(),
+            game_title: game.title.clone(),
+            cover_image: game.cover_image.clone(),
+            total_achievements: total,
+            unlocked_achievements: unlocked,
+            completion_percentage,
+            is_perfect,
+            latest_unlocked,
+            recent_unlocked,
+            upcoming_locked,
+        })
+    }
+
+    pub fn get_hunter_profile(&self, all_games: &[Game]) -> Result<HunterProfile, String> {
+        let mut total_score: u64 = 0;
+        let mut total_achievements_count: usize = 0;
+        let mut unlocked_achievements_count: usize = 0;
+        let mut perfect_games_count: usize = 0;
+        let mut all_unlocked_achievements: Vec<Achievement> = Vec::new();
+        let mut games_summaries: Vec<GameAchievementSummary> = Vec::new();
+        let mut games_with_achievements_count: usize = 0;
+        let mut total_completion_sum: f64 = 0.0;
+
+        for game in all_games {
+            let summary = self.get_game_achievement_summary(game)?;
+            if summary.total_achievements > 0 {
+                games_with_achievements_count += 1;
+                total_completion_sum += summary.completion_percentage;
+                total_achievements_count += summary.total_achievements;
+                unlocked_achievements_count += summary.unlocked_achievements;
+
+                if summary.is_perfect {
+                    perfect_games_count += 1;
+                    total_score += 250; // Perfect game bonus!
+                }
+
+                // Add points for each unlocked achievement based on rarity
+                let achs = self.get_game_achievements(&game.id)?;
+                for ach in achs {
+                    if ach.is_unlocked {
+                        let pts = if ach.rarity_percentage < 10.0 {
+                            100 // Ultra Rare
+                        } else if ach.rarity_percentage < 20.0 {
+                            50  // Rare
+                        } else if ach.rarity_percentage < 50.0 {
+                            25  // Uncommon
+                        } else {
+                            10  // Common
+                        };
+                        total_score += pts;
+                        all_unlocked_achievements.push(ach);
+                    }
+                }
+
+                games_summaries.push(summary);
+            }
+        }
+
+        // Sort all unlocked by global rarity percentage ascending (rarest first)
+        all_unlocked_achievements.sort_by(|a, b| {
+            a.rarity_percentage
+                .partial_cmp(&b.rarity_percentage)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let rarest_achievements = all_unlocked_achievements.into_iter().take(5).collect();
+
+        // Almost there games: completion percentage between 70.0% and 99.9%
+        let mut almost_there_games: Vec<GameAchievementSummary> = games_summaries
+            .iter()
+            .filter(|s| s.completion_percentage >= 70.0 && s.completion_percentage < 100.0)
+            .cloned()
+            .collect();
+        almost_there_games.sort_by(|a, b| {
+            b.completion_percentage
+                .partial_cmp(&a.completion_percentage)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        // Calculate Level
+        // Level curve: Level 1 = 0 pts. Level N requires (N - 1)^2 * 120 pts
+        let level = ((total_score as f64 / 120.0).sqrt() as u32) + 1;
+        let current_level_xp = ((level - 1) as f64).powi(2) as u64 * 120;
+        let next_level_xp = (level as f64).powi(2) as u64 * 120;
+        let level_progress_percent = if next_level_xp > current_level_xp {
+            (((total_score.saturating_sub(current_level_xp)) as f64)
+                / ((next_level_xp - current_level_xp) as f64)
+                * 100.0)
+                .clamp(0.0, 100.0)
+        } else {
+            100.0
+        };
+
+        let average_completion_percent = if games_with_achievements_count > 0 {
+            total_completion_sum / games_with_achievements_count as f64
+        } else {
+            0.0
+        };
+
+        // Sort game summaries by completion_percentage descending
+        games_summaries.sort_by(|a, b| {
+            b.completion_percentage
+                .partial_cmp(&a.completion_percentage)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        Ok(HunterProfile {
+            level,
+            total_score,
+            current_level_xp,
+            next_level_xp,
+            level_progress_percent,
+            total_achievements_count,
+            unlocked_achievements_count,
+            average_completion_percent,
+            perfect_games_count,
+            rarest_achievements,
+            almost_there_games,
+            games_summaries,
+        })
     }
 }

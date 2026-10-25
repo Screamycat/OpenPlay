@@ -1,7 +1,9 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { Game, GameLink } from "../types/game";
+import { resolveImageSrc, formatFileSize } from "../utils/image";
+import { MetadataDiffModal, MetadataComparison } from "./MetadataDiffModal";
 import {
   X,
   Save,
@@ -14,7 +16,6 @@ import {
   Link2,
   FolderOpen,
   FileCode,
-  ExternalLink,
   Plus,
   Trash2,
   Copy,
@@ -24,6 +25,23 @@ import {
   Calendar,
   Hash,
   Gamepad2,
+  Building,
+  Building2,
+  Globe,
+  ShieldAlert,
+  Star,
+  Award,
+  Users,
+  Repeat,
+  Monitor,
+  Layers,
+  Terminal,
+  CheckCircle2,
+  ArrowUpDown,
+  PenTool,
+  Upload,
+  Search,
+  Loader2,
 } from "lucide-react";
 
 interface EditGameModalProps {
@@ -32,6 +50,7 @@ interface EditGameModalProps {
   onClose: () => void;
   onSave: (updated: Game) => void;
   onOpenSteamGridDB?: (game: Game) => void;
+  onRemoveGame?: (game: Game) => void;
 }
 
 type TabKey =
@@ -43,19 +62,145 @@ type TabKey =
   | "artwork"
   | "links";
 
+interface ArtworkPreviewItemProps {
+  label: string;
+  recommendedSize: string;
+  value: string;
+  onChange: (val: string) => void;
+  aspectRatio: "poster" | "hero" | "logo" | "icon";
+  onBrowse: () => void;
+  placeholderText: string;
+}
+
+const ArtworkPreviewItem: React.FC<ArtworkPreviewItemProps> = ({
+  label,
+  recommendedSize,
+  value,
+  onChange,
+  aspectRatio,
+  onBrowse,
+  placeholderText,
+}) => {
+  const [imgError, setImgError] = useState(false);
+  const resolved = resolveImageSrc(value);
+
+  useEffect(() => {
+    setImgError(false);
+  }, [value]);
+
+  const isVideo =
+    value &&
+    (value.toLowerCase().endsWith(".mp4") || value.toLowerCase().endsWith(".webm"));
+
+  return (
+    <div className="p-3.5 bg-white/[0.03] border border-white/10 rounded-2xl space-y-2.5 transition-colors hover:border-white/15">
+      <div className="flex items-center justify-between">
+        <label className="text-zinc-300 font-medium text-xs flex items-center space-x-1.5">
+          <Image className="w-3.5 h-3.5 text-zinc-400" />
+          <span>{label}</span>
+          <span className="text-[10px] text-zinc-500 font-normal">({recommendedSize})</span>
+        </label>
+        {value && (
+          <button
+            type="button"
+            onClick={() => onChange("")}
+            className="text-[10px] text-zinc-400 hover:text-rose-400 transition-colors cursor-pointer"
+          >
+            Clear Art
+          </button>
+        )}
+      </div>
+
+      <div className="flex items-start space-x-3.5">
+        {/* Preview Container */}
+        <div
+          className={`shrink-0 rounded-xl overflow-hidden border border-white/10 bg-black/50 flex items-center justify-center relative shadow-sm ${
+            aspectRatio === "poster"
+              ? "w-16 h-24"
+              : aspectRatio === "hero"
+              ? "w-32 h-18"
+              : aspectRatio === "logo"
+              ? "w-28 h-14 bg-[radial-gradient(#ffffff20_1px,transparent_1px)] [background-size:6px_6px]"
+              : "w-12 h-12 bg-[radial-gradient(#ffffff20_1px,transparent_1px)] [background-size:6px_6px]"
+          }`}
+        >
+          {value && resolved && !imgError ? (
+            isVideo ? (
+              <video
+                src={resolved}
+                autoPlay
+                loop
+                muted
+                playsInline
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <img
+                src={resolved}
+                alt={label}
+                onError={() => setImgError(true)}
+                className={`w-full h-full ${
+                  aspectRatio === "logo" || aspectRatio === "icon"
+                    ? "object-contain p-1"
+                    : "object-cover"
+                }`}
+              />
+            )
+          ) : (
+            <div className="flex flex-col items-center justify-center text-zinc-500 text-[10px] p-1 text-center">
+              {imgError ? (
+                <span className="text-rose-400/80 text-[9px] font-medium leading-tight">
+                  Load Error
+                </span>
+              ) : (
+                <span className="opacity-40 text-[10px]">{placeholderText}</span>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Input & Browse Button */}
+        <div className="flex-1 space-y-1.5 min-w-0">
+          <div className="flex items-center space-x-2">
+            <input
+              type="text"
+              value={value}
+              onChange={(e) => onChange(e.target.value)}
+              className="flex-1 px-3 py-2 bg-white/[0.04] hover:bg-white/[0.06] border border-white/10 rounded-xl text-white font-mono text-[11px] focus:outline-none focus:border-white/30 focus:bg-white/[0.08] transition-all truncate"
+              placeholder="https://... or C:\..."
+            />
+            <button
+              type="button"
+              onClick={onBrowse}
+              title="Browse local artwork file"
+              className="px-3 py-2 bg-white/10 hover:bg-white/15 text-white rounded-xl text-xs font-medium flex items-center space-x-1.5 cursor-pointer shrink-0 border border-white/10 transition-colors"
+            >
+              <Upload className="w-3.5 h-3.5 text-zinc-300" />
+              <span>Browse...</span>
+            </button>
+          </div>
+          <span className="text-[10px] text-zinc-500 block truncate">
+            Supports local file paths, web URLs, transparent PNGs, and looping WebM/MP4 videos.
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 export const EditGameModal: React.FC<EditGameModalProps> = ({
   game,
   isOpen,
   onClose,
   onSave,
   onOpenSteamGridDB,
+  onRemoveGame,
 }) => {
   if (!isOpen || !game) return null;
 
   const [activeTab, setActiveTab] = useState<TabKey>("general");
-  const [copiedId, setCopiedId] = useState(false);
 
-  // Tab 1: General
+  // Tab 1: General Form State
   const [title, setTitle] = useState(game.title || "");
   const [sortingTitle, setSortingTitle] = useState(game.sorting_title || "");
   const [developer, setDeveloper] = useState(game.developer || "");
@@ -65,16 +210,13 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
   const [ageRating, setAgeRating] = useState(game.age_rating || "");
   const [region, setRegion] = useState(game.region || "");
 
-  // Tab 2: Installation & Launch
+  // Tab 2: Installation & Execution
   const [source, setSource] = useState(game.source || "Manual");
   const [sourceId, setSourceId] = useState(game.source_id || "");
   const [isInstalled, setIsInstalled] = useState(game.is_installed ?? true);
   const [installDirectory, setInstallDirectory] = useState(game.install_directory || "");
   const [executablePath, setExecutablePath] = useState(game.executable_path || "");
   const [launchArguments, setLaunchArguments] = useState(game.launch_arguments || "");
-  const [sizeOnDiskMB, setSizeOnDiskMB] = useState(
-    game.size_on_disk ? Math.round(game.size_on_disk / (1024 * 1024)) : 0
-  );
 
   // Tab 3: Tags & Categorization
   const [completionStatus, setCompletionStatus] = useState(
@@ -84,26 +226,28 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
   const [categories, setCategories] = useState<string[]>(game.categories || []);
   const [features, setFeatures] = useState<string[]>(game.features || []);
   const [tags, setTags] = useState<string[]>(game.tags || []);
-  const [platforms, setPlatforms] = useState<string[]>(
-    game.platforms && game.platforms.length > 0 ? game.platforms : ["Windows"]
-  );
+  const [platforms, setPlatforms] = useState<string[]>(game.platforms || []);
 
   // Tab 4: Scores & Playtime
   const [userRating, setUserRating] = useState<number | "">(
-    game.user_rating !== undefined && game.user_rating !== null ? game.user_rating : ""
+    game.user_rating !== undefined ? game.user_rating : ""
   );
   const [criticScore, setCriticScore] = useState<number | "">(
-    game.critic_score !== undefined && game.critic_score !== null ? game.critic_score : ""
+    game.critic_score !== undefined ? game.critic_score : ""
   );
   const [communityScore, setCommunityScore] = useState<number | "">(
-    game.community_score !== undefined && game.community_score !== null ? game.community_score : ""
+    game.community_score !== undefined ? game.community_score : ""
   );
-  const totalMinutes = Math.round(game.playtime_seconds / 60);
-  const [playtimeHours, setPlaytimeHours] = useState(Math.floor(totalMinutes / 60));
-  const [playtimeMins, setPlaytimeMins] = useState(totalMinutes % 60);
+  const [playtimeHours, setPlaytimeHours] = useState(
+    Math.floor((game.playtime_seconds || 0) / 3600)
+  );
+  const [playtimeMins, setPlaytimeMins] = useState(
+    Math.floor(((game.playtime_seconds || 0) % 3600) / 60)
+  );
   const [playCount, setPlayCount] = useState<number>(game.play_count || 0);
   const [lastPlayed, setLastPlayed] = useState(game.last_played || "");
   const [dateAdded, setDateAdded] = useState(game.date_added || "");
+  const [copiedId, setCopiedId] = useState(false);
 
   // Tab 5: Description & Notes
   const [description, setDescription] = useState(game.description || "");
@@ -119,6 +263,49 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
   const [links, setLinks] = useState<GameLink[]>(game.links || []);
   const [newLinkTitle, setNewLinkTitle] = useState("");
   const [newLinkUrl, setNewLinkUrl] = useState("");
+
+  // Metadata Downloader & Diff State
+  const [isProviderPickerOpen, setIsProviderPickerOpen] = useState(false);
+  const [selectedProvider, setSelectedProvider] = useState<"steam" | "epic" | "igdb">("steam");
+  const [searchTitle, setSearchTitle] = useState("");
+  const [isFetchingProviderMeta, setIsFetchingProviderMeta] = useState(false);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+  const [metadataDiff, setMetadataDiff] = useState<MetadataComparison | null>(null);
+
+  const handleFetchMetadataFromProvider = async () => {
+    try {
+      setIsFetchingProviderMeta(true);
+      setFetchError(null);
+      const res = await invoke<MetadataComparison>("fetch_metadata_from_source", {
+        title: searchTitle.trim() || title.trim(),
+        provider: selectedProvider,
+        gameId: game.id,
+      });
+      setMetadataDiff(res);
+      setIsProviderPickerOpen(false);
+    } catch (err: any) {
+      setFetchError(typeof err === "string" ? err : err.message || "Failed to fetch metadata");
+    } finally {
+      setIsFetchingProviderMeta(false);
+    }
+  };
+
+  const handleApplyMetadataDiff = (applied: Partial<Game>) => {
+    if (applied.title !== undefined) setTitle(applied.title);
+    if (applied.description !== undefined) setDescription(applied.description);
+    if (applied.developer !== undefined) setDeveloper(applied.developer);
+    if (applied.publisher !== undefined) setPublisher(applied.publisher);
+    if (applied.release_date !== undefined) setReleaseDate(applied.release_date);
+    if (applied.genres !== undefined) setGenres(applied.genres);
+    if (applied.features !== undefined) setFeatures(applied.features);
+    if (applied.critic_score !== undefined) setCriticScore(applied.critic_score);
+    if (applied.community_score !== undefined) setCommunityScore(applied.community_score);
+    if (applied.age_rating !== undefined) setAgeRating(applied.age_rating);
+    if (applied.series !== undefined) setSeries(applied.series);
+    if (applied.cover_image !== undefined) setCoverImage(applied.cover_image);
+    if (applied.background_image !== undefined) setBackgroundImage(applied.background_image);
+    if (applied.links !== undefined) setLinks(applied.links);
+  };
 
   // Tag input temporary buffer
   const [tagInput, setTagInput] = useState<{ [key: string]: string }>({});
@@ -150,6 +337,20 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
       }
     } catch (e) {
       console.warn("Browse file error:", e);
+    }
+  };
+
+  const handleBrowseArtwork = async (onSelected: (path: string) => void) => {
+    try {
+      const selected = await invoke<string | null>("select_file", {
+        filter:
+          "Artwork Files (*.png;*.jpg;*.jpeg;*.webp;*.gif;*.webm;*.mp4)|*.png;*.jpg;*.jpeg;*.webp;*.gif;*.webm;*.mp4|All files (*.*)|*.*",
+      });
+      if (selected) {
+        onSelected(selected);
+      }
+    } catch (e) {
+      console.warn("Browse artwork error:", e);
     }
   };
 
@@ -201,7 +402,7 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
       install_directory: installDirectory.trim() || undefined,
       executable_path: executablePath.trim() || undefined,
       launch_arguments: launchArguments.trim() || undefined,
-      size_on_disk: sizeOnDiskMB > 0 ? sizeOnDiskMB * 1024 * 1024 : undefined,
+      size_on_disk: game.size_on_disk,
 
       completion_status: completionStatus,
       genres,
@@ -233,7 +434,6 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
     onClose();
   };
 
-  // Generic tag chip adder / remover
   const addTagItem = (
     field: "genres" | "categories" | "features" | "tags" | "platforms",
     value: string
@@ -241,10 +441,13 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
     const trimmed = value.trim();
     if (!trimmed) return;
     if (field === "genres" && !genres.includes(trimmed)) setGenres([...genres, trimmed]);
-    if (field === "categories" && !categories.includes(trimmed)) setCategories([...categories, trimmed]);
-    if (field === "features" && !features.includes(trimmed)) setFeatures([...features, trimmed]);
+    if (field === "categories" && !categories.includes(trimmed))
+      setCategories([...categories, trimmed]);
+    if (field === "features" && !features.includes(trimmed))
+      setFeatures([...features, trimmed]);
     if (field === "tags" && !tags.includes(trimmed)) setTags([...tags, trimmed]);
-    if (field === "platforms" && !platforms.includes(trimmed)) setPlatforms([...platforms, trimmed]);
+    if (field === "platforms" && !platforms.includes(trimmed))
+      setPlatforms([...platforms, trimmed]);
     setTagInput((prev) => ({ ...prev, [field]: "" }));
   };
 
@@ -259,248 +462,218 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
     if (field === "platforms") setPlatforms(platforms.filter((x) => x !== value));
   };
 
+  const resolvedHeaderCover = resolveImageSrc(coverImage);
+
+  // Tabs configuration - subtle monochrome icons and clean glass active state
+  const tabs: Array<{
+    key: TabKey;
+    label: string;
+    icon: React.ComponentType<{ className?: string }>;
+  }> = [
+    { key: "general", label: "General", icon: Info },
+    { key: "installation", label: "Installation & Launch", icon: HardDrive },
+    { key: "tags", label: "Categorization & Tags", icon: Tag },
+    { key: "scores", label: "Scores & Playtime", icon: Trophy },
+    { key: "description", label: "Description & Notes", icon: FileText },
+    { key: "artwork", label: "Artwork & Media", icon: Image },
+    { key: "links", label: "Links", icon: Link2 },
+  ];
+
   return (
     <div
       onClick={onClose}
-      className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-150 select-none"
+      className="fixed inset-0 z-50 bg-black/45 backdrop-blur-sm flex items-center justify-center p-4 select-none animate-in fade-in duration-150"
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="bg-[#0f121d]/95 backdrop-blur-2xl border border-white/10 rounded-2xl w-full max-w-4xl h-[700px] max-h-[92vh] shadow-2xl flex flex-col overflow-hidden text-xs text-slate-200"
+        className="bg-[#0e0e11]/85 backdrop-blur-2xl border border-white/10 rounded-2xl w-full max-w-4xl h-[720px] max-h-[92vh] shadow-[0_20px_60px_rgba(0,0,0,0.85)] flex flex-col overflow-hidden text-xs text-zinc-200"
       >
         {/* Top Header */}
-        <div className="px-6 py-4 border-b border-white/10 flex items-center justify-between bg-black/30 shrink-0">
-          <div className="flex items-center space-x-3 min-w-0">
-            {coverImage ? (
-              <img
-                src={coverImage}
-                alt=""
-                className="w-8 h-10 object-cover rounded shadow-md border border-white/10 shrink-0"
-              />
-            ) : (
-              <div className="w-8 h-10 rounded bg-white/5 border border-white/10 flex items-center justify-center text-slate-400 shrink-0">
-                <Gamepad2 className="w-4 h-4" />
-              </div>
-            )}
+        <div className="px-6 py-3.5 border-b border-white/10 flex items-center justify-between bg-white/[0.03] backdrop-blur-sm shrink-0">
+          <div className="flex items-center space-x-3.5 min-w-0">
+            <div className="w-9 h-12 rounded-lg bg-black/40 border border-white/10 overflow-hidden shrink-0 shadow-sm flex items-center justify-center">
+              {coverImage && resolvedHeaderCover ? (
+                <img src={resolvedHeaderCover} alt="" className="w-full h-full object-cover" />
+              ) : (
+                <Gamepad2 className="w-5 h-5 text-zinc-400" />
+              )}
+            </div>
             <div className="min-w-0">
               <div className="flex items-center space-x-2">
                 <h2 className="text-base font-bold text-white truncate max-w-md">
                   {title || "Untitled Game"}
                 </h2>
-                <span className="px-2 py-0.5 rounded-full bg-white/10 text-slate-300 text-[10px] font-semibold border border-white/10">
+                <span className="px-2 py-0.5 rounded-full bg-white/10 text-zinc-300 text-[10px] font-medium border border-white/10">
                   {source}
                 </span>
+                {isInstalled && (
+                  <span className="px-2 py-0.5 rounded-full bg-white/10 text-zinc-300 text-[10px] font-medium border border-white/10">
+                    Installed
+                  </span>
+                )}
               </div>
-              <p className="text-[11px] text-slate-400">Game Properties & Settings</p>
+              <p className="text-[11px] text-zinc-400">Game Properties & Metadata</p>
             </div>
           </div>
 
           <button
             onClick={onClose}
-            className="w-8 h-8 rounded-full bg-white/5 hover:bg-white/15 text-slate-400 hover:text-white flex items-center justify-center transition-colors cursor-pointer"
+            className="w-8 h-8 rounded-full bg-white/5 hover:bg-white/15 text-zinc-400 hover:text-white flex items-center justify-center transition-colors cursor-pointer border border-white/5"
           >
-            <X className="w-4 h-4" />
+            <X className="w-4 h-4 text-zinc-400" />
           </button>
         </div>
 
         {/* Modal Body: Left Sidebar Tabs + Right Scrollable Form Pane */}
         <div className="flex-1 flex overflow-hidden">
           {/* Left Tabs Sidebar (~210px) */}
-          <div className="w-52 border-r border-white/10 bg-black/20 p-2 space-y-1 shrink-0 overflow-y-auto">
-            <button
-              type="button"
-              onClick={() => setActiveTab("general")}
-              className={`w-full flex items-center space-x-2.5 px-3 py-2.5 rounded-xl text-left text-xs transition-all cursor-pointer ${
-                activeTab === "general"
-                  ? "bg-white/15 text-white font-bold shadow-md border-l-2 border-cyan-400"
-                  : "text-slate-400 hover:text-slate-200 hover:bg-white/5"
-              }`}
-            >
-              <Info className="w-4 h-4 text-cyan-400 shrink-0" />
-              <span>General</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setActiveTab("installation")}
-              className={`w-full flex items-center space-x-2.5 px-3 py-2.5 rounded-xl text-left text-xs transition-all cursor-pointer ${
-                activeTab === "installation"
-                  ? "bg-white/15 text-white font-bold shadow-md border-l-2 border-cyan-400"
-                  : "text-slate-400 hover:text-slate-200 hover:bg-white/5"
-              }`}
-            >
-              <HardDrive className="w-4 h-4 text-emerald-400 shrink-0" />
-              <span>Installation & Launch</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setActiveTab("tags")}
-              className={`w-full flex items-center space-x-2.5 px-3 py-2.5 rounded-xl text-left text-xs transition-all cursor-pointer ${
-                activeTab === "tags"
-                  ? "bg-white/15 text-white font-bold shadow-md border-l-2 border-cyan-400"
-                  : "text-slate-400 hover:text-slate-200 hover:bg-white/5"
-              }`}
-            >
-              <Tag className="w-4 h-4 text-amber-400 shrink-0" />
-              <span>Categorization & Tags</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setActiveTab("scores")}
-              className={`w-full flex items-center space-x-2.5 px-3 py-2.5 rounded-xl text-left text-xs transition-all cursor-pointer ${
-                activeTab === "scores"
-                  ? "bg-white/15 text-white font-bold shadow-md border-l-2 border-cyan-400"
-                  : "text-slate-400 hover:text-slate-200 hover:bg-white/5"
-              }`}
-            >
-              <Trophy className="w-4 h-4 text-yellow-400 shrink-0" />
-              <span>Scores & Playtime</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setActiveTab("description")}
-              className={`w-full flex items-center space-x-2.5 px-3 py-2.5 rounded-xl text-left text-xs transition-all cursor-pointer ${
-                activeTab === "description"
-                  ? "bg-white/15 text-white font-bold shadow-md border-l-2 border-cyan-400"
-                  : "text-slate-400 hover:text-slate-200 hover:bg-white/5"
-              }`}
-            >
-              <FileText className="w-4 h-4 text-purple-400 shrink-0" />
-              <span>Description & Notes</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setActiveTab("artwork")}
-              className={`w-full flex items-center space-x-2.5 px-3 py-2.5 rounded-xl text-left text-xs transition-all cursor-pointer ${
-                activeTab === "artwork"
-                  ? "bg-white/15 text-white font-bold shadow-md border-l-2 border-cyan-400"
-                  : "text-slate-400 hover:text-slate-200 hover:bg-white/5"
-              }`}
-            >
-              <Image className="w-4 h-4 text-rose-400 shrink-0" />
-              <span>Artwork & Media</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setActiveTab("links")}
-              className={`w-full flex items-center space-x-2.5 px-3 py-2.5 rounded-xl text-left text-xs transition-all cursor-pointer ${
-                activeTab === "links"
-                  ? "bg-white/15 text-white font-bold shadow-md border-l-2 border-cyan-400"
-                  : "text-slate-400 hover:text-slate-200 hover:bg-white/5"
-              }`}
-            >
-              <Link2 className="w-4 h-4 text-blue-400 shrink-0" />
-              <span>Links</span>
-            </button>
+          <div className="w-52 border-r border-white/10 bg-white/[0.02] p-2.5 space-y-1 shrink-0 overflow-y-auto">
+            {tabs.map((tab) => {
+              const Icon = tab.icon;
+              const isActive = activeTab === tab.key;
+              return (
+                <button
+                  key={tab.key}
+                  type="button"
+                  onClick={() => setActiveTab(tab.key)}
+                  className={`w-full flex items-center space-x-2.5 px-3 py-2.5 rounded-xl text-left text-xs transition-all cursor-pointer ${
+                    isActive
+                      ? "bg-white/15 text-white font-semibold border border-white/15 shadow-sm"
+                      : "text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.05]"
+                  }`}
+                >
+                  <Icon
+                    className={`w-4 h-4 shrink-0 transition-colors ${
+                      isActive ? "text-white" : "text-zinc-400"
+                    }`}
+                  />
+                  <span className="font-medium">{tab.label}</span>
+                </button>
+              );
+            })}
           </div>
 
           {/* Right Content Pane */}
           <form
             id="edit-game-form"
             onSubmit={handleSave}
-            className="flex-1 overflow-y-auto p-6 space-y-6"
+            className="flex-1 overflow-y-auto p-6 space-y-6 bg-transparent"
           >
             {/* TAB 1: GENERAL */}
             {activeTab === "general" && (
               <div className="space-y-4 animate-in fade-in duration-100">
                 <div className="border-b border-white/10 pb-2 flex items-center justify-between">
-                  <h3 className="text-sm font-bold text-white flex items-center space-x-2">
-                    <Info className="w-4 h-4 text-cyan-400" />
+                  <h3 className="text-sm font-semibold text-white flex items-center space-x-2">
+                    <Info className="w-4 h-4 text-zinc-400" />
                     <span>General Metadata</span>
                   </h3>
-                  <span className="text-[11px] text-slate-400">Core game identification</span>
+                  <span className="text-[11px] text-zinc-400">Core game identification</span>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {/* Title */}
                   <div className="sm:col-span-2">
-                    <label className="block text-slate-300 font-semibold mb-1">
-                      Title <span className="text-rose-400">*</span>
+                    <label className="block text-zinc-300 font-medium mb-1 flex items-center space-x-1.5">
+                      <Gamepad2 className="w-3.5 h-3.5 text-zinc-400" />
+                      <span>
+                        Title <span className="text-rose-400">*</span>
+                      </span>
                     </label>
                     <input
                       type="text"
                       required
                       value={title}
                       onChange={(e) => setTitle(e.target.value)}
-                      className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-xl text-white focus:outline-none focus:border-cyan-400 transition-colors"
+                      className="w-full px-3 py-2 bg-white/[0.04] hover:bg-white/[0.06] border border-white/10 rounded-xl text-white focus:outline-none focus:border-white/30 focus:bg-white/[0.08] transition-all"
                       placeholder="e.g. Terraria"
                     />
                   </div>
 
                   {/* Sorting Title */}
                   <div className="sm:col-span-2">
-                    <label className="block text-slate-300 font-semibold mb-1">
-                      Sorting Title
+                    <label className="block text-zinc-300 font-medium mb-1 flex items-center space-x-1.5">
+                      <ArrowUpDown className="w-3.5 h-3.5 text-zinc-400" />
+                      <span>Sorting Title</span>
                     </label>
                     <input
                       type="text"
                       value={sortingTitle}
                       onChange={(e) => setSortingTitle(e.target.value)}
-                      className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-xl text-white focus:outline-none focus:border-cyan-400 transition-colors"
+                      className="w-full px-3 py-2 bg-white/[0.04] hover:bg-white/[0.06] border border-white/10 rounded-xl text-white focus:outline-none focus:border-white/30 focus:bg-white/[0.08] transition-all"
                       placeholder="Overrides library alphabetical sorting (e.g. 'Witcher 3, The')"
                     />
                   </div>
 
                   {/* Developer */}
                   <div>
-                    <label className="block text-slate-300 font-semibold mb-1">Developer</label>
+                    <label className="block text-zinc-300 font-medium mb-1 flex items-center space-x-1.5">
+                      <Building className="w-3.5 h-3.5 text-zinc-400" />
+                      <span>Developer</span>
+                    </label>
                     <input
                       type="text"
                       value={developer}
                       onChange={(e) => setDeveloper(e.target.value)}
-                      className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-xl text-white focus:outline-none focus:border-cyan-400 transition-colors"
+                      className="w-full px-3 py-2 bg-white/[0.04] hover:bg-white/[0.06] border border-white/10 rounded-xl text-white focus:outline-none focus:border-white/30 focus:bg-white/[0.08] transition-all"
                       placeholder="e.g. Re-Logic"
                     />
                   </div>
 
                   {/* Publisher */}
                   <div>
-                    <label className="block text-slate-300 font-semibold mb-1">Publisher</label>
+                    <label className="block text-zinc-300 font-medium mb-1 flex items-center space-x-1.5">
+                      <Building2 className="w-3.5 h-3.5 text-zinc-400" />
+                      <span>Publisher</span>
+                    </label>
                     <input
                       type="text"
                       value={publisher}
                       onChange={(e) => setPublisher(e.target.value)}
-                      className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-xl text-white focus:outline-none focus:border-cyan-400 transition-colors"
+                      className="w-full px-3 py-2 bg-white/[0.04] hover:bg-white/[0.06] border border-white/10 rounded-xl text-white focus:outline-none focus:border-white/30 focus:bg-white/[0.08] transition-all"
                       placeholder="e.g. 505 Games"
                     />
                   </div>
 
                   {/* Release Date */}
                   <div>
-                    <label className="block text-slate-300 font-semibold mb-1">Release Date</label>
+                    <label className="block text-zinc-300 font-medium mb-1 flex items-center space-x-1.5">
+                      <Calendar className="w-3.5 h-3.5 text-zinc-400" />
+                      <span>Release Date</span>
+                    </label>
                     <input
                       type="text"
                       value={releaseDate}
                       onChange={(e) => setReleaseDate(e.target.value)}
-                      className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-xl text-white focus:outline-none focus:border-cyan-400 transition-colors font-mono"
+                      className="w-full px-3 py-2 bg-white/[0.04] hover:bg-white/[0.06] border border-white/10 rounded-xl text-white focus:outline-none focus:border-white/30 focus:bg-white/[0.08] transition-all font-mono"
                       placeholder="YYYY-MM-DD (e.g. 2011-05-16)"
                     />
                   </div>
 
                   {/* Series */}
                   <div>
-                    <label className="block text-slate-300 font-semibold mb-1">Series</label>
+                    <label className="block text-zinc-300 font-medium mb-1 flex items-center space-x-1.5">
+                      <Layers className="w-3.5 h-3.5 text-zinc-400" />
+                      <span>Series</span>
+                    </label>
                     <input
                       type="text"
                       value={series}
                       onChange={(e) => setSeries(e.target.value)}
-                      className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-xl text-white focus:outline-none focus:border-cyan-400 transition-colors"
+                      className="w-full px-3 py-2 bg-white/[0.04] hover:bg-white/[0.06] border border-white/10 rounded-xl text-white focus:outline-none focus:border-white/30 focus:bg-white/[0.08] transition-all"
                       placeholder="e.g. Terraria, Elder Scrolls"
                     />
                   </div>
 
                   {/* Age Rating */}
                   <div>
-                    <label className="block text-slate-300 font-semibold mb-1">Age Rating</label>
+                    <label className="block text-zinc-300 font-medium mb-1 flex items-center space-x-1.5">
+                      <ShieldAlert className="w-3.5 h-3.5 text-zinc-400" />
+                      <span>Age Rating</span>
+                    </label>
                     <select
                       value={ageRating}
                       onChange={(e) => setAgeRating(e.target.value)}
-                      className="w-full px-3 py-2 bg-[#121624] border border-white/10 rounded-xl text-white focus:outline-none focus:border-cyan-400 transition-colors"
+                      className="w-full px-3 py-2 bg-[#18181b] border border-white/10 rounded-xl text-white focus:outline-none focus:border-white/30 transition-all cursor-pointer"
                     >
                       <option value="">Not Rated</option>
                       <option value="ESRB Everyone">ESRB: Everyone (E)</option>
@@ -517,11 +690,14 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
 
                   {/* Region */}
                   <div>
-                    <label className="block text-slate-300 font-semibold mb-1">Region</label>
+                    <label className="block text-zinc-300 font-medium mb-1 flex items-center space-x-1.5">
+                      <Globe className="w-3.5 h-3.5 text-zinc-400" />
+                      <span>Region</span>
+                    </label>
                     <select
                       value={region}
                       onChange={(e) => setRegion(e.target.value)}
-                      className="w-full px-3 py-2 bg-[#121624] border border-white/10 rounded-xl text-white focus:outline-none focus:border-cyan-400 transition-colors"
+                      className="w-full px-3 py-2 bg-[#18181b] border border-white/10 rounded-xl text-white focus:outline-none focus:border-white/30 transition-all cursor-pointer"
                     >
                       <option value="">Worldwide / Global</option>
                       <option value="North America">North America (NTSC-U)</option>
@@ -538,24 +714,25 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
             {activeTab === "installation" && (
               <div className="space-y-4 animate-in fade-in duration-100">
                 <div className="border-b border-white/10 pb-2 flex items-center justify-between">
-                  <h3 className="text-sm font-bold text-white flex items-center space-x-2">
-                    <HardDrive className="w-4 h-4 text-emerald-400" />
+                  <h3 className="text-sm font-semibold text-white flex items-center space-x-2">
+                    <HardDrive className="w-4 h-4 text-zinc-400" />
                     <span>Installation & Execution</span>
                   </h3>
-                  <span className="text-[11px] text-slate-400">Path & executable routing</span>
+                  <span className="text-[11px] text-zinc-400">Path & executable routing</span>
                 </div>
 
                 <div className="space-y-4">
                   {/* Source / Provider & Status */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-slate-300 font-semibold mb-1">
-                        Library Source
+                      <label className="block text-zinc-300 font-medium mb-1 flex items-center space-x-1.5">
+                        <Layers className="w-3.5 h-3.5 text-zinc-400" />
+                        <span>Library Source</span>
                       </label>
                       <select
                         value={source}
                         onChange={(e) => setSource(e.target.value)}
-                        className="w-full px-3 py-2 bg-[#121624] border border-white/10 rounded-xl text-white focus:outline-none focus:border-cyan-400 transition-colors"
+                        className="w-full px-3 py-2 bg-[#18181b] border border-white/10 rounded-xl text-white focus:outline-none focus:border-white/30 transition-all cursor-pointer"
                       >
                         <option value="Steam">Steam</option>
                         <option value="Manual">Manual Executable</option>
@@ -569,52 +746,53 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
                     </div>
 
                     <div>
-                      <label className="block text-slate-300 font-semibold mb-1">
-                        Installation Status
+                      <label className="block text-zinc-300 font-medium mb-1 flex items-center space-x-1.5">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-zinc-400" />
+                        <span>Installation Status</span>
                       </label>
-                      <label className="flex items-center space-x-3 px-3 py-2 bg-black/40 border border-white/10 rounded-xl cursor-pointer hover:bg-black/60 transition-colors">
+                      <label className="flex items-center space-x-3 px-3 py-2 bg-white/[0.04] hover:bg-white/[0.06] border border-white/10 rounded-xl cursor-pointer transition-colors">
                         <input
                           type="checkbox"
                           checked={isInstalled}
                           onChange={(e) => setIsInstalled(e.target.checked)}
-                          className="w-4 h-4 accent-emerald-500 rounded cursor-pointer"
+                          className="w-4 h-4 accent-white rounded cursor-pointer"
                         />
-                        <span className="font-semibold text-white">Installed Locally</span>
+                        <span className="font-medium text-white">Installed Locally</span>
                       </label>
                     </div>
                   </div>
 
                   {/* Installation Folder */}
                   <div>
-                    <label className="block text-slate-300 font-semibold mb-1">
-                      Installation Folder
+                    <label className="block text-zinc-300 font-medium mb-1 flex items-center space-x-1.5">
+                      <FolderOpen className="w-3.5 h-3.5 text-zinc-400" />
+                      <span>Installation Folder</span>
                     </label>
                     <div className="flex items-center space-x-2">
                       <input
                         type="text"
                         value={installDirectory}
                         onChange={(e) => setInstallDirectory(e.target.value)}
-                        className="flex-1 px-3 py-2 bg-black/40 border border-white/10 rounded-xl text-white font-mono text-[11px] focus:outline-none focus:border-cyan-400 transition-colors truncate"
+                        className="flex-1 px-3 py-2 bg-white/[0.04] hover:bg-white/[0.06] border border-white/10 rounded-xl text-white font-mono text-[11px] focus:outline-none focus:border-white/30 focus:bg-white/[0.08] transition-all truncate"
                         placeholder="C:\Program Files (x86)\Steam\steamapps\common\..."
                       />
                       <button
                         type="button"
                         onClick={handleBrowseDirectory}
-                        title="Browse local folder"
-                        className="px-3 py-2 bg-white/10 hover:bg-white/15 text-white border border-white/15 rounded-xl font-semibold flex items-center space-x-1.5 transition-colors cursor-pointer shrink-0"
+                        title="Browse for folder"
+                        className="px-3 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-medium flex items-center space-x-1.5 cursor-pointer shrink-0 transition-colors border border-white/10"
                       >
-                        <FolderOpen className="w-3.5 h-3.5" />
+                        <FolderOpen className="w-3.5 h-3.5 text-zinc-300" />
                         <span>Browse...</span>
                       </button>
                       {installDirectory && (
                         <button
                           type="button"
                           onClick={() => handleOpenFolder(installDirectory)}
-                          title="Open in Windows Explorer"
-                          className="px-3 py-2 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 rounded-xl font-semibold flex items-center space-x-1 transition-colors cursor-pointer shrink-0"
+                          title="Open folder in File Explorer"
+                          className="px-3 py-2 bg-white/5 hover:bg-white/15 text-zinc-300 hover:text-white rounded-xl text-xs cursor-pointer shrink-0 transition-colors border border-white/10"
                         >
-                          <ExternalLink className="w-3.5 h-3.5" />
-                          <span>Open</span>
+                          Open
                         </button>
                       )}
                     </div>
@@ -622,65 +800,69 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
 
                   {/* Executable Path */}
                   <div>
-                    <label className="block text-slate-300 font-semibold mb-1">
-                      Target Executable Path
+                    <label className="block text-zinc-300 font-medium mb-1 flex items-center space-x-1.5">
+                      <FileCode className="w-3.5 h-3.5 text-zinc-400" />
+                      <span>Executable Path (.exe)</span>
                     </label>
                     <div className="flex items-center space-x-2">
                       <input
                         type="text"
                         value={executablePath}
                         onChange={(e) => setExecutablePath(e.target.value)}
-                        className="flex-1 px-3 py-2 bg-black/40 border border-white/10 rounded-xl text-white font-mono text-[11px] focus:outline-none focus:border-cyan-400 transition-colors truncate"
-                        placeholder="C:\Games\Terraria\Terraria.exe (optional for Steam games)"
+                        className="flex-1 px-3 py-2 bg-white/[0.04] hover:bg-white/[0.06] border border-white/10 rounded-xl text-white font-mono text-[11px] focus:outline-none focus:border-white/30 focus:bg-white/[0.08] transition-all truncate"
+                        placeholder="e.g. C:\Games\Terraria\Terraria.exe"
                       />
                       <button
                         type="button"
                         onClick={handleBrowseFile}
                         title="Browse executable file"
-                        className="px-3 py-2 bg-white/10 hover:bg-white/15 text-white border border-white/15 rounded-xl font-semibold flex items-center space-x-1.5 transition-colors cursor-pointer shrink-0"
+                        className="px-3 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-medium flex items-center space-x-1.5 cursor-pointer shrink-0 transition-colors border border-white/10"
                       >
-                        <FileCode className="w-3.5 h-3.5" />
-                        <span>Browse...</span>
+                        <FileCode className="w-3.5 h-3.5 text-zinc-300" />
+                        <span>Select .exe</span>
                       </button>
                     </div>
                   </div>
 
                   {/* Launch Arguments / Options */}
                   <div>
-                    <label className="block text-slate-300 font-semibold mb-1">
-                      Launch Arguments / Options
+                    <label className="block text-zinc-300 font-medium mb-1 flex items-center space-x-1.5">
+                      <Terminal className="w-3.5 h-3.5 text-zinc-400" />
+                      <span>Launch Arguments / Options</span>
                     </label>
                     <input
                       type="text"
                       value={launchArguments}
                       onChange={(e) => setLaunchArguments(e.target.value)}
-                      className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-xl text-white font-mono text-[11px] focus:outline-none focus:border-cyan-400 transition-colors"
+                      className="w-full px-3 py-2 bg-white/[0.04] hover:bg-white/[0.06] border border-white/10 rounded-xl text-white font-mono text-[11px] focus:outline-none focus:border-white/30 focus:bg-white/[0.08] transition-all"
                       placeholder="-windowed -novid +exec autoexec.cfg"
                     />
-                    <span className="text-[10px] text-slate-400 mt-1 block">
-                      Arguments passed directly to the binary at launch.
+                    <span className="text-[10px] text-zinc-500 mt-1 block">
+                      Arguments passed directly to the binary or launcher command at startup.
                     </span>
                   </div>
 
-                  {/* Size on Disk */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-slate-300 font-semibold mb-1">
-                        Size on Disk (MB)
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        value={sizeOnDiskMB || ""}
-                        onChange={(e) => setSizeOnDiskMB(Number(e.target.value))}
-                        className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-xl text-white font-mono focus:outline-none focus:border-cyan-400 transition-colors"
-                        placeholder="e.g. 520"
-                      />
-                      {sizeOnDiskMB > 1024 && (
-                        <span className="text-[10px] text-slate-400 mt-0.5 block">
-                          ≈ {(sizeOnDiskMB / 1024).toFixed(2)} GB
-                        </span>
-                      )}
+                  {/* Size on Disk (Read-Only Hardware Display) */}
+                  <div className="pt-2">
+                    <div className="p-3.5 bg-white/[0.03] border border-white/10 rounded-2xl flex items-center justify-between">
+                      <div className="flex items-center space-x-3">
+                        <div className="w-9 h-9 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-zinc-300 shadow-sm">
+                          <HardDrive className="w-4 h-4 text-zinc-400" />
+                        </div>
+                        <div>
+                          <span className="text-[10px] uppercase tracking-wider font-semibold text-zinc-400 block">
+                            Size on Disk (Read-Only)
+                          </span>
+                          <span className="text-sm font-semibold font-mono text-white">
+                            {game.size_on_disk && game.size_on_disk > 0
+                              ? formatFileSize(game.size_on_disk)
+                              : "Not measured / Unknown"}
+                          </span>
+                        </div>
+                      </div>
+                      <span className="text-[10px] text-zinc-500 max-w-xs text-right">
+                        Calculated automatically from game installation directory.
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -691,49 +873,52 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
             {activeTab === "tags" && (
               <div className="space-y-4 animate-in fade-in duration-100">
                 <div className="border-b border-white/10 pb-2 flex items-center justify-between">
-                  <h3 className="text-sm font-bold text-white flex items-center space-x-2">
-                    <Tag className="w-4 h-4 text-amber-400" />
+                  <h3 className="text-sm font-semibold text-white flex items-center space-x-2">
+                    <Tag className="w-4 h-4 text-zinc-400" />
                     <span>Categorization & Tags</span>
                   </h3>
-                  <span className="text-[11px] text-slate-400">Genres, features, and platform tags</span>
+                  <span className="text-[11px] text-zinc-400">Genres, features, and platform tags</span>
                 </div>
 
                 {/* Completion Status */}
                 <div>
-                  <label className="block text-slate-300 font-semibold mb-1">
-                    Completion Status
+                  <label className="block text-zinc-300 font-medium mb-1 flex items-center space-x-1.5">
+                    <Trophy className="w-3.5 h-3.5 text-zinc-400" />
+                    <span>Completion Status</span>
                   </label>
                   <select
                     value={completionStatus}
                     onChange={(e) => setCompletionStatus(e.target.value)}
-                    className="w-full sm:w-1/2 px-3 py-2 bg-[#121624] border border-white/10 rounded-xl text-white focus:outline-none focus:border-cyan-400 transition-colors"
+                    className="w-full px-3 py-2 bg-[#18181b] border border-white/10 rounded-xl text-white focus:outline-none focus:border-white/30 transition-all cursor-pointer"
                   >
                     <option value="Not Played">Not Played</option>
-                    <option value="Playing">Playing</option>
-                    <option value="Played">Played</option>
-                    <option value="Completed">Completed</option>
-                    <option value="100% Completed">100% Completed</option>
+                    <option value="Playing">Playing (Active)</option>
+                    <option value="Beaten">Beaten (Main Story)</option>
+                    <option value="Completed">Completed (100%)</option>
                     <option value="On Hold">On Hold</option>
-                    <option value="Abandoned">Abandoned</option>
-                    <option value="Plan to Play">Plan to Play</option>
+                    <option value="Dropped">Dropped</option>
+                    <option value="Endless">Endless / Multiplayer</option>
                   </select>
                 </div>
 
                 {/* Genres */}
                 <div>
-                  <label className="block text-slate-300 font-semibold mb-1">Genres</label>
-                  <div className="p-2.5 bg-black/40 border border-white/10 rounded-xl space-y-2">
+                  <label className="block text-zinc-300 font-medium mb-1 flex items-center space-x-1.5">
+                    <Tag className="w-3.5 h-3.5 text-zinc-400" />
+                    <span>Genres</span>
+                  </label>
+                  <div className="p-3 bg-white/[0.03] border border-white/10 rounded-xl space-y-2">
                     <div className="flex flex-wrap gap-1.5">
                       {genres.map((g) => (
                         <span
                           key={g}
-                          className="px-2.5 py-1 rounded-lg bg-cyan-950/70 text-cyan-200 border border-cyan-500/30 text-xs font-semibold flex items-center space-x-1"
+                          className="px-2.5 py-1 rounded-lg bg-white/10 text-zinc-200 border border-white/10 text-xs font-medium flex items-center space-x-1"
                         >
                           <span>{g}</span>
                           <button
                             type="button"
                             onClick={() => removeTagItem("genres", g)}
-                            className="hover:text-white cursor-pointer ml-1"
+                            className="hover:text-white cursor-pointer ml-1 text-zinc-400"
                           >
                             ×
                           </button>
@@ -752,50 +937,62 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
                           }
                         }}
                         placeholder="Add genre and press Enter..."
-                        className="flex-1 px-2.5 py-1 bg-white/5 border border-white/10 rounded-lg text-white text-xs focus:outline-none focus:border-cyan-400"
+                        className="flex-1 px-3 py-1.5 bg-white/[0.04] hover:bg-white/[0.06] border border-white/10 rounded-lg text-white text-xs focus:outline-none focus:border-white/30"
                       />
                       <button
                         type="button"
                         onClick={() => addTagItem("genres", tagInput.genres || "")}
-                        className="px-3 py-1 bg-white/10 hover:bg-white/20 text-white rounded-lg text-xs font-semibold cursor-pointer"
+                        className="px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white rounded-lg text-xs font-medium cursor-pointer border border-white/10 transition-colors"
                       >
                         Add
                       </button>
                     </div>
                     {/* Quick presets */}
                     <div className="flex flex-wrap gap-1 pt-1">
-                      {["Action", "Adventure", "RPG", "Indie", "Strategy", "Simulation", "Shooter", "Platformer", "Sandbox", "Puzzle"].map(
-                        (preset) => (
-                          <button
-                            type="button"
-                            key={preset}
-                            onClick={() => addTagItem("genres", preset)}
-                            disabled={genres.includes(preset)}
-                            className="text-[10px] px-2 py-0.5 rounded bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white disabled:opacity-30 cursor-pointer"
-                          >
-                            + {preset}
-                          </button>
-                        )
-                      )}
+                      {[
+                        "Action",
+                        "Adventure",
+                        "RPG",
+                        "Indie",
+                        "Strategy",
+                        "Simulation",
+                        "Shooter",
+                        "Platformer",
+                        "Sandbox",
+                        "Puzzle",
+                      ].map((preset) => (
+                        <button
+                          type="button"
+                          key={preset}
+                          onClick={() => addTagItem("genres", preset)}
+                          disabled={genres.includes(preset)}
+                          className="text-[10px] px-2 py-0.5 rounded bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white disabled:opacity-30 cursor-pointer transition-colors"
+                        >
+                          + {preset}
+                        </button>
+                      ))}
                     </div>
                   </div>
                 </div>
 
                 {/* Platforms */}
                 <div>
-                  <label className="block text-slate-300 font-semibold mb-1">Platforms</label>
-                  <div className="p-2.5 bg-black/40 border border-white/10 rounded-xl space-y-2">
+                  <label className="block text-zinc-300 font-medium mb-1 flex items-center space-x-1.5">
+                    <Monitor className="w-3.5 h-3.5 text-zinc-400" />
+                    <span>Platforms</span>
+                  </label>
+                  <div className="p-3 bg-white/[0.03] border border-white/10 rounded-xl space-y-2">
                     <div className="flex flex-wrap gap-1.5">
                       {platforms.map((p) => (
                         <span
                           key={p}
-                          className="px-2.5 py-1 rounded-lg bg-emerald-950/70 text-emerald-200 border border-emerald-500/30 text-xs font-semibold flex items-center space-x-1"
+                          className="px-2.5 py-1 rounded-lg bg-white/10 text-zinc-200 border border-white/10 text-xs font-medium flex items-center space-x-1"
                         >
                           <span>{p}</span>
                           <button
                             type="button"
                             onClick={() => removeTagItem("platforms", p)}
-                            className="hover:text-white cursor-pointer ml-1"
+                            className="hover:text-white cursor-pointer ml-1 text-zinc-400"
                           >
                             ×
                           </button>
@@ -803,39 +1000,48 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
                       ))}
                     </div>
                     <div className="flex flex-wrap gap-1 pt-1">
-                      {["Windows", "Linux", "Macintosh", "Steam Deck", "PlayStation", "Xbox", "Nintendo Switch"].map(
-                        (preset) => (
-                          <button
-                            type="button"
-                            key={preset}
-                            onClick={() => addTagItem("platforms", preset)}
-                            disabled={platforms.includes(preset)}
-                            className="text-[10px] px-2 py-0.5 rounded bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white disabled:opacity-30 cursor-pointer"
-                          >
-                            + {preset}
-                          </button>
-                        )
-                      )}
+                      {[
+                        "Windows",
+                        "Linux",
+                        "Macintosh",
+                        "Steam Deck",
+                        "PlayStation",
+                        "Xbox",
+                        "Nintendo Switch",
+                      ].map((preset) => (
+                        <button
+                          type="button"
+                          key={preset}
+                          onClick={() => addTagItem("platforms", preset)}
+                          disabled={platforms.includes(preset)}
+                          className="text-[10px] px-2 py-0.5 rounded bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white disabled:opacity-30 cursor-pointer transition-colors"
+                        >
+                          + {preset}
+                        </button>
+                      ))}
                     </div>
                   </div>
                 </div>
 
-                {/* Features & Categories */}
+                {/* Features & Tags */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-slate-300 font-semibold mb-1">Features</label>
-                    <div className="p-2.5 bg-black/40 border border-white/10 rounded-xl space-y-2">
+                    <label className="block text-zinc-300 font-medium mb-1 flex items-center space-x-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-zinc-400" />
+                      <span>Features</span>
+                    </label>
+                    <div className="p-3 bg-white/[0.03] border border-white/10 rounded-xl space-y-2">
                       <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto">
                         {features.map((f) => (
                           <span
                             key={f}
-                            className="px-2 py-0.5 rounded bg-white/10 text-slate-200 text-[11px] flex items-center space-x-1"
+                            className="px-2 py-0.5 rounded bg-white/10 text-zinc-200 text-[11px] flex items-center space-x-1"
                           >
                             <span>{f}</span>
                             <button
                               type="button"
                               onClick={() => removeTagItem("features", f)}
-                              className="hover:text-white ml-1 cursor-pointer"
+                              className="hover:text-white ml-1 cursor-pointer text-zinc-400"
                             >
                               ×
                             </button>
@@ -846,7 +1052,9 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
                         <input
                           type="text"
                           value={tagInput.features || ""}
-                          onChange={(e) => setTagInput({ ...tagInput, features: e.target.value })}
+                          onChange={(e) =>
+                            setTagInput({ ...tagInput, features: e.target.value })
+                          }
                           onKeyDown={(e) => {
                             if (e.key === "Enter") {
                               e.preventDefault();
@@ -854,12 +1062,12 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
                             }
                           }}
                           placeholder="e.g. Single-player..."
-                          className="flex-1 px-2 py-1 bg-white/5 border border-white/10 rounded-lg text-white text-xs focus:outline-none"
+                          className="flex-1 px-2.5 py-1 bg-white/[0.04] hover:bg-white/[0.06] border border-white/10 rounded-lg text-white text-xs focus:outline-none"
                         />
                         <button
                           type="button"
                           onClick={() => addTagItem("features", tagInput.features || "")}
-                          className="px-2 py-1 bg-white/10 text-white rounded-lg text-xs cursor-pointer"
+                          className="px-2.5 py-1 bg-white/10 text-white rounded-lg text-xs cursor-pointer hover:bg-white/15"
                         >
                           Add
                         </button>
@@ -868,19 +1076,22 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
                   </div>
 
                   <div>
-                    <label className="block text-slate-300 font-semibold mb-1">Tags</label>
-                    <div className="p-2.5 bg-black/40 border border-white/10 rounded-xl space-y-2">
+                    <label className="block text-zinc-300 font-medium mb-1 flex items-center space-x-1.5">
+                      <Hash className="w-3.5 h-3.5 text-zinc-400" />
+                      <span>Tags</span>
+                    </label>
+                    <div className="p-3 bg-white/[0.03] border border-white/10 rounded-xl space-y-2">
                       <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto">
                         {tags.map((t) => (
                           <span
                             key={t}
-                            className="px-2 py-0.5 rounded bg-white/10 text-slate-200 text-[11px] flex items-center space-x-1"
+                            className="px-2 py-0.5 rounded bg-white/10 text-zinc-200 text-[11px] flex items-center space-x-1"
                           >
                             <span>{t}</span>
                             <button
                               type="button"
                               onClick={() => removeTagItem("tags", t)}
-                              className="hover:text-white ml-1 cursor-pointer"
+                              className="hover:text-white ml-1 cursor-pointer text-zinc-400"
                             >
                               ×
                             </button>
@@ -899,12 +1110,12 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
                             }
                           }}
                           placeholder="e.g. Pixel Graphics..."
-                          className="flex-1 px-2 py-1 bg-white/5 border border-white/10 rounded-lg text-white text-xs focus:outline-none"
+                          className="flex-1 px-2.5 py-1 bg-white/[0.04] hover:bg-white/[0.06] border border-white/10 rounded-lg text-white text-xs focus:outline-none"
                         />
                         <button
                           type="button"
                           onClick={() => addTagItem("tags", tagInput.tags || "")}
-                          className="px-2 py-1 bg-white/10 text-white rounded-lg text-xs cursor-pointer"
+                          className="px-2.5 py-1 bg-white/10 text-white rounded-lg text-xs cursor-pointer hover:bg-white/15"
                         >
                           Add
                         </button>
@@ -919,56 +1130,65 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
             {activeTab === "scores" && (
               <div className="space-y-4 animate-in fade-in duration-100">
                 <div className="border-b border-white/10 pb-2 flex items-center justify-between">
-                  <h3 className="text-sm font-bold text-white flex items-center space-x-2">
-                    <Trophy className="w-4 h-4 text-yellow-400" />
+                  <h3 className="text-sm font-semibold text-white flex items-center space-x-2">
+                    <Trophy className="w-4 h-4 text-zinc-400" />
                     <span>Scores, Stats & Identifiers</span>
                   </h3>
-                  <span className="text-[11px] text-slate-400">Playtime history and game IDs</span>
+                  <span className="text-[11px] text-zinc-400">Playtime history and game IDs</span>
                 </div>
 
                 {/* Score Cards (User, Critic, Community) */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div className="p-3 bg-black/40 border border-white/10 rounded-xl space-y-1">
-                    <label className="block text-[11px] font-bold text-amber-300 uppercase tracking-wider">
-                      User Score (0-100)
+                  <div className="p-3 bg-white/[0.03] border border-white/10 rounded-xl space-y-1.5">
+                    <label className="block text-[11px] font-semibold text-zinc-300 uppercase tracking-wider flex items-center space-x-1.5">
+                      <Star className="w-3.5 h-3.5 text-zinc-400" />
+                      <span>User Score (0-100)</span>
                     </label>
                     <input
                       type="number"
                       min="0"
                       max="100"
                       value={userRating}
-                      onChange={(e) => setUserRating(e.target.value === "" ? "" : Number(e.target.value))}
-                      className="w-full px-3 py-1.5 bg-white/5 border border-white/10 rounded-lg text-white font-mono text-sm font-bold focus:outline-none focus:border-amber-400"
+                      onChange={(e) =>
+                        setUserRating(e.target.value === "" ? "" : Number(e.target.value))
+                      }
+                      className="w-full px-3 py-1.5 bg-white/[0.04] hover:bg-white/[0.06] border border-white/10 rounded-lg text-white font-mono text-sm font-semibold focus:outline-none focus:border-white/30"
                       placeholder="e.g. 95"
                     />
                   </div>
 
-                  <div className="p-3 bg-black/40 border border-white/10 rounded-xl space-y-1">
-                    <label className="block text-[11px] font-bold text-emerald-300 uppercase tracking-wider">
-                      Critic Score (0-100)
+                  <div className="p-3 bg-white/[0.03] border border-white/10 rounded-xl space-y-1.5">
+                    <label className="block text-[11px] font-semibold text-zinc-300 uppercase tracking-wider flex items-center space-x-1.5">
+                      <Award className="w-3.5 h-3.5 text-zinc-400" />
+                      <span>Critic Score (0-100)</span>
                     </label>
                     <input
                       type="number"
                       min="0"
                       max="100"
                       value={criticScore}
-                      onChange={(e) => setCriticScore(e.target.value === "" ? "" : Number(e.target.value))}
-                      className="w-full px-3 py-1.5 bg-white/5 border border-white/10 rounded-lg text-white font-mono text-sm font-bold focus:outline-none focus:border-emerald-400"
+                      onChange={(e) =>
+                        setCriticScore(e.target.value === "" ? "" : Number(e.target.value))
+                      }
+                      className="w-full px-3 py-1.5 bg-white/[0.04] hover:bg-white/[0.06] border border-white/10 rounded-lg text-white font-mono text-sm font-semibold focus:outline-none focus:border-white/30"
                       placeholder="e.g. 83"
                     />
                   </div>
 
-                  <div className="p-3 bg-black/40 border border-white/10 rounded-xl space-y-1">
-                    <label className="block text-[11px] font-bold text-cyan-300 uppercase tracking-wider">
-                      Community Score (0-100)
+                  <div className="p-3 bg-white/[0.03] border border-white/10 rounded-xl space-y-1.5">
+                    <label className="block text-[11px] font-semibold text-zinc-300 uppercase tracking-wider flex items-center space-x-1.5">
+                      <Users className="w-3.5 h-3.5 text-zinc-400" />
+                      <span>Community Score (0-100)</span>
                     </label>
                     <input
                       type="number"
                       min="0"
                       max="100"
                       value={communityScore}
-                      onChange={(e) => setCommunityScore(e.target.value === "" ? "" : Number(e.target.value))}
-                      className="w-full px-3 py-1.5 bg-white/5 border border-white/10 rounded-lg text-white font-mono text-sm font-bold focus:outline-none focus:border-cyan-400"
+                      onChange={(e) =>
+                        setCommunityScore(e.target.value === "" ? "" : Number(e.target.value))
+                      }
+                      className="w-full px-3 py-1.5 bg-white/[0.04] hover:bg-white/[0.06] border border-white/10 rounded-lg text-white font-mono text-sm font-semibold focus:outline-none focus:border-white/30"
                       placeholder="e.g. 97"
                     />
                   </div>
@@ -977,45 +1197,48 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
                 {/* Playtime & Count */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
                   <div>
-                    <label className="block text-slate-300 font-semibold mb-1 flex items-center space-x-1.5">
-                      <Clock className="w-3.5 h-3.5 text-cyan-400" />
+                    <label className="block text-zinc-300 font-medium mb-1 flex items-center space-x-1.5">
+                      <Clock className="w-3.5 h-3.5 text-zinc-400" />
                       <span>Total Playtime</span>
                     </label>
                     <div className="flex items-center space-x-2">
-                      <div className="flex-1 flex items-center bg-black/40 border border-white/10 rounded-xl px-2.5 py-1.5">
+                      <div className="flex-1 flex items-center bg-white/[0.04] border border-white/10 rounded-xl px-2.5 py-1.5">
                         <input
                           type="number"
                           min="0"
                           value={playtimeHours}
                           onChange={(e) => setPlaytimeHours(Math.max(0, Number(e.target.value)))}
-                          className="w-16 bg-transparent text-white font-mono font-bold text-sm focus:outline-none"
+                          className="w-16 bg-transparent text-white font-mono font-semibold text-sm focus:outline-none"
                         />
-                        <span className="text-[11px] text-slate-400 ml-1">hrs</span>
+                        <span className="text-[11px] text-zinc-400 ml-1">hrs</span>
                       </div>
-                      <div className="flex-1 flex items-center bg-black/40 border border-white/10 rounded-xl px-2.5 py-1.5">
+                      <div className="flex-1 flex items-center bg-white/[0.04] border border-white/10 rounded-xl px-2.5 py-1.5">
                         <input
                           type="number"
                           min="0"
                           max="59"
                           value={playtimeMins}
-                          onChange={(e) => setPlaytimeMins(Math.max(0, Math.min(59, Number(e.target.value))))}
-                          className="w-16 bg-transparent text-white font-mono font-bold text-sm focus:outline-none"
+                          onChange={(e) =>
+                            setPlaytimeMins(Math.max(0, Math.min(59, Number(e.target.value))))
+                          }
+                          className="w-16 bg-transparent text-white font-mono font-semibold text-sm focus:outline-none"
                         />
-                        <span className="text-[11px] text-slate-400 ml-1">mins</span>
+                        <span className="text-[11px] text-zinc-400 ml-1">mins</span>
                       </div>
                     </div>
                   </div>
 
                   <div>
-                    <label className="block text-slate-300 font-semibold mb-1">
-                      Play Count (Sessions)
+                    <label className="block text-zinc-300 font-medium mb-1 flex items-center space-x-1.5">
+                      <Repeat className="w-3.5 h-3.5 text-zinc-400" />
+                      <span>Play Count (Sessions)</span>
                     </label>
                     <input
                       type="number"
                       min="0"
                       value={playCount}
                       onChange={(e) => setPlayCount(Math.max(0, Number(e.target.value)))}
-                      className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-xl text-white font-mono focus:outline-none focus:border-cyan-400 transition-colors"
+                      className="w-full px-3 py-2 bg-white/[0.04] hover:bg-white/[0.06] border border-white/10 rounded-xl text-white font-mono focus:outline-none focus:border-white/30"
                       placeholder="e.g. 12"
                     />
                   </div>
@@ -1024,29 +1247,29 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
                 {/* Dates: Last Played & Date Added */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-slate-300 font-semibold mb-1 flex items-center space-x-1.5">
-                      <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                    <label className="block text-zinc-300 font-medium mb-1 flex items-center space-x-1.5">
+                      <Calendar className="w-3.5 h-3.5 text-zinc-400" />
                       <span>Last Played Date</span>
                     </label>
                     <input
                       type="text"
                       value={lastPlayed}
                       onChange={(e) => setLastPlayed(e.target.value)}
-                      className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-xl text-white font-mono focus:outline-none focus:border-cyan-400 transition-colors"
+                      className="w-full px-3 py-2 bg-white/[0.04] hover:bg-white/[0.06] border border-white/10 rounded-xl text-white font-mono focus:outline-none focus:border-white/30"
                       placeholder="YYYY-MM-DD HH:MM (e.g. 2026-10-23 18:00)"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-slate-300 font-semibold mb-1 flex items-center space-x-1.5">
-                      <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                    <label className="block text-zinc-300 font-medium mb-1 flex items-center space-x-1.5">
+                      <Calendar className="w-3.5 h-3.5 text-zinc-400" />
                       <span>Date Added</span>
                     </label>
                     <input
                       type="text"
                       value={dateAdded}
                       onChange={(e) => setDateAdded(e.target.value)}
-                      className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-xl text-white font-mono focus:outline-none focus:border-cyan-400 transition-colors"
+                      className="w-full px-3 py-2 bg-white/[0.04] hover:bg-white/[0.06] border border-white/10 rounded-xl text-white font-mono focus:outline-none focus:border-white/30"
                       placeholder="YYYY-MM-DD"
                     />
                   </div>
@@ -1056,22 +1279,22 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
                 <div className="pt-2 border-t border-white/10 space-y-2">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-slate-400 text-[11px] font-semibold mb-1 flex items-center space-x-1">
-                        <Hash className="w-3 h-3 text-cyan-400" />
+                      <label className="block text-zinc-400 text-[11px] font-semibold mb-1 flex items-center space-x-1">
+                        <Hash className="w-3 h-3 text-zinc-400" />
                         <span>Source / Store App ID</span>
                       </label>
                       <input
                         type="text"
                         value={sourceId}
                         onChange={(e) => setSourceId(e.target.value)}
-                        className="w-full px-3 py-1.5 bg-black/40 border border-white/10 rounded-lg text-white font-mono text-xs focus:outline-none"
+                        className="w-full px-3 py-1.5 bg-white/[0.04] hover:bg-white/[0.06] border border-white/10 rounded-lg text-white font-mono text-xs focus:outline-none"
                         placeholder="e.g. 105600"
                       />
                     </div>
 
                     <div>
-                      <label className="block text-slate-400 text-[11px] font-semibold mb-1 flex items-center space-x-1">
-                        <Hash className="w-3 h-3 text-slate-400" />
+                      <label className="block text-zinc-400 text-[11px] font-semibold mb-1 flex items-center space-x-1">
+                        <Hash className="w-3 h-3 text-zinc-400" />
                         <span>OpenPlay Database ID</span>
                       </label>
                       <div className="flex items-center space-x-2">
@@ -1079,7 +1302,7 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
                           type="text"
                           readOnly
                           value={game.id}
-                          className="flex-1 px-3 py-1.5 bg-black/25 border border-white/5 rounded-lg text-slate-400 font-mono text-xs cursor-default truncate"
+                          className="flex-1 px-3 py-1.5 bg-black/40 border border-white/5 rounded-lg text-zinc-400 font-mono text-xs cursor-default truncate"
                         />
                         <button
                           type="button"
@@ -1087,7 +1310,11 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
                           title="Copy ID to clipboard"
                           className="px-2.5 py-1.5 bg-white/10 hover:bg-white/15 text-white rounded-lg text-xs flex items-center space-x-1 cursor-pointer"
                         >
-                          {copiedId ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                          {copiedId ? (
+                            <Check className="w-3.5 h-3.5 text-white" />
+                          ) : (
+                            <Copy className="w-3.5 h-3.5 text-zinc-300" />
+                          )}
                           <span>{copiedId ? "Copied" : "Copy"}</span>
                         </button>
                       </div>
@@ -1101,35 +1328,37 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
             {activeTab === "description" && (
               <div className="space-y-4 animate-in fade-in duration-100">
                 <div className="border-b border-white/10 pb-2 flex items-center justify-between">
-                  <h3 className="text-sm font-bold text-white flex items-center space-x-2">
-                    <FileText className="w-4 h-4 text-purple-400" />
+                  <h3 className="text-sm font-semibold text-white flex items-center space-x-2">
+                    <FileText className="w-4 h-4 text-zinc-400" />
                     <span>Description & Notes</span>
                   </h3>
-                  <span className="text-[11px] text-slate-400">Synopsis and personal notes</span>
+                  <span className="text-[11px] text-zinc-400">Synopsis and personal notes</span>
                 </div>
 
                 <div>
-                  <label className="block text-slate-300 font-semibold mb-1">
-                    Game Description / Synopsis
+                  <label className="block text-zinc-300 font-medium mb-1 flex items-center space-x-1.5">
+                    <FileText className="w-3.5 h-3.5 text-zinc-400" />
+                    <span>Game Description / Synopsis</span>
                   </label>
                   <textarea
                     rows={6}
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
-                    className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-xl text-white text-xs leading-relaxed focus:outline-none focus:border-cyan-400 transition-colors"
+                    className="w-full px-3 py-2 bg-white/[0.04] hover:bg-white/[0.06] border border-white/10 rounded-xl text-white text-xs leading-relaxed focus:outline-none focus:border-white/30"
                     placeholder="Game overview and storyline..."
                   />
                 </div>
 
                 <div>
-                  <label className="block text-slate-300 font-semibold mb-1">
-                    Personal Game Notes / Cheat Codes / Walkthrough Tips
+                  <label className="block text-zinc-300 font-medium mb-1 flex items-center space-x-1.5">
+                    <PenTool className="w-3.5 h-3.5 text-zinc-400" />
+                    <span>Personal Game Notes / Cheat Codes / Walkthrough Tips</span>
                   </label>
                   <textarea
                     rows={4}
                     value={notes}
                     onChange={(e) => setNotes(e.target.value)}
-                    className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-xl text-white text-xs leading-relaxed focus:outline-none focus:border-cyan-400 transition-colors"
+                    className="w-full px-3 py-2 bg-white/[0.04] hover:bg-white/[0.06] border border-white/10 rounded-xl text-white text-xs leading-relaxed focus:outline-none focus:border-white/30"
                     placeholder="Add personal notes, controller settings, build guides, or keybindings..."
                   />
                 </div>
@@ -1140,17 +1369,17 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
             {activeTab === "artwork" && (
               <div className="space-y-4 animate-in fade-in duration-100">
                 <div className="border-b border-white/10 pb-2 flex items-center justify-between">
-                  <h3 className="text-sm font-bold text-white flex items-center space-x-2">
-                    <Image className="w-4 h-4 text-rose-400" />
+                  <h3 className="text-sm font-semibold text-white flex items-center space-x-2">
+                    <Image className="w-4 h-4 text-zinc-400" />
                     <span>Artwork & Assets</span>
                   </h3>
                   {onOpenSteamGridDB && (
                     <button
                       type="button"
                       onClick={() => onOpenSteamGridDB(game)}
-                      className="px-2.5 py-1 rounded-lg bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 border border-cyan-500/30 text-xs font-semibold flex items-center space-x-1 cursor-pointer"
+                      className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/15 text-zinc-200 border border-white/10 text-xs font-medium flex items-center space-x-1.5 cursor-pointer transition-colors"
                     >
-                      <Sparkles className="w-3.5 h-3.5" />
+                      <Sparkles className="w-3.5 h-3.5 text-zinc-400" />
                       <span>Search SteamGridDB</span>
                     </button>
                   )}
@@ -1158,112 +1387,48 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
 
                 <div className="space-y-4">
                   {/* Cover Poster */}
-                  <div>
-                    <label className="block text-slate-300 font-semibold mb-1">
-                      Cover Poster URL / Local Path (600×900)
-                    </label>
-                    <div className="flex items-center space-x-3">
-                      {coverImage ? (
-                        <img
-                          src={coverImage}
-                          alt="Cover"
-                          className="w-12 h-18 object-cover rounded-lg border border-white/15 shrink-0 shadow-md"
-                        />
-                      ) : (
-                        <div className="w-12 h-18 rounded-lg bg-black/40 border border-white/10 flex items-center justify-center text-slate-500 shrink-0">
-                          No Art
-                        </div>
-                      )}
-                      <input
-                        type="text"
-                        value={coverImage}
-                        onChange={(e) => setCoverImage(e.target.value)}
-                        className="flex-1 px-3 py-2 bg-black/40 border border-white/10 rounded-xl text-white font-mono text-[11px] focus:outline-none focus:border-cyan-400"
-                        placeholder="https://... or C:\..."
-                      />
-                    </div>
-                  </div>
+                  <ArtworkPreviewItem
+                    label="Cover Poster (Vertical Grid)"
+                    recommendedSize="600 × 900"
+                    value={coverImage}
+                    onChange={setCoverImage}
+                    aspectRatio="poster"
+                    onBrowse={() => handleBrowseArtwork(setCoverImage)}
+                    placeholderText="No Poster"
+                  />
 
                   {/* Background Hero */}
-                  <div>
-                    <label className="block text-slate-300 font-semibold mb-1">
-                      Background Hero URL / Path (1920×620)
-                    </label>
-                    <div className="flex items-center space-x-3">
-                      {backgroundImage ? (
-                        <img
-                          src={backgroundImage}
-                          alt="Hero"
-                          className="w-24 h-14 object-cover rounded-lg border border-white/15 shrink-0 shadow-md"
-                        />
-                      ) : (
-                        <div className="w-24 h-14 rounded-lg bg-black/40 border border-white/10 flex items-center justify-center text-slate-500 shrink-0">
-                          No Hero
-                        </div>
-                      )}
-                      <input
-                        type="text"
-                        value={backgroundImage}
-                        onChange={(e) => setBackgroundImage(e.target.value)}
-                        className="flex-1 px-3 py-2 bg-black/40 border border-white/10 rounded-xl text-white font-mono text-[11px] focus:outline-none focus:border-cyan-400"
-                        placeholder="https://... or C:\..."
-                      />
-                    </div>
-                  </div>
+                  <ArtworkPreviewItem
+                    label="Background Hero (Banner)"
+                    recommendedSize="1920 × 620"
+                    value={backgroundImage}
+                    onChange={setBackgroundImage}
+                    aspectRatio="hero"
+                    onBrowse={() => handleBrowseArtwork(setBackgroundImage)}
+                    placeholderText="No Hero"
+                  />
 
-                  {/* Logo Image */}
-                  <div>
-                    <label className="block text-slate-300 font-semibold mb-1">
-                      Clear Logo URL / Path (Transparent PNG)
-                    </label>
-                    <div className="flex items-center space-x-3">
-                      {logoImage ? (
-                        <img
-                          src={logoImage}
-                          alt="Logo"
-                          className="w-24 h-12 object-contain bg-black/40 p-1 rounded-lg border border-white/15 shrink-0 shadow-md"
-                        />
-                      ) : (
-                        <div className="w-24 h-12 rounded-lg bg-black/40 border border-white/10 flex items-center justify-center text-slate-500 shrink-0">
-                          No Logo
-                        </div>
-                      )}
-                      <input
-                        type="text"
-                        value={logoImage}
-                        onChange={(e) => setLogoImage(e.target.value)}
-                        className="flex-1 px-3 py-2 bg-black/40 border border-white/10 rounded-xl text-white font-mono text-[11px] focus:outline-none focus:border-cyan-400"
-                        placeholder="https://... or C:\..."
-                      />
-                    </div>
-                  </div>
+                  {/* Transparent Logo */}
+                  <ArtworkPreviewItem
+                    label="Clear Logo (Transparent Title Art)"
+                    recommendedSize="Transparent PNG"
+                    value={logoImage}
+                    onChange={setLogoImage}
+                    aspectRatio="logo"
+                    onBrowse={() => handleBrowseArtwork(setLogoImage)}
+                    placeholderText="No Logo"
+                  />
 
-                  {/* Icon Image */}
-                  <div>
-                    <label className="block text-slate-300 font-semibold mb-1">
-                      Icon URL / Path
-                    </label>
-                    <div className="flex items-center space-x-3">
-                      {iconImage ? (
-                        <img
-                          src={iconImage}
-                          alt="Icon"
-                          className="w-8 h-8 object-contain rounded border border-white/15 shrink-0 shadow-md"
-                        />
-                      ) : (
-                        <div className="w-8 h-8 rounded bg-black/40 border border-white/10 flex items-center justify-center text-slate-500 shrink-0">
-                          Icon
-                        </div>
-                      )}
-                      <input
-                        type="text"
-                        value={iconImage}
-                        onChange={(e) => setIconImage(e.target.value)}
-                        className="flex-1 px-3 py-2 bg-black/40 border border-white/10 rounded-xl text-white font-mono text-[11px] focus:outline-none focus:border-cyan-400"
-                        placeholder="https://... or C:\..."
-                      />
-                    </div>
-                  </div>
+                  {/* Icon */}
+                  <ArtworkPreviewItem
+                    label="App / Game Icon"
+                    recommendedSize="32 × 32 or Square PNG/ICO"
+                    value={iconImage}
+                    onChange={setIconImage}
+                    aspectRatio="icon"
+                    onBrowse={() => handleBrowseArtwork(setIconImage)}
+                    placeholderText="No Icon"
+                  />
                 </div>
               </div>
             )}
@@ -1272,11 +1437,13 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
             {activeTab === "links" && (
               <div className="space-y-4 animate-in fade-in duration-100">
                 <div className="border-b border-white/10 pb-2 flex items-center justify-between">
-                  <h3 className="text-sm font-bold text-white flex items-center space-x-2">
-                    <Link2 className="w-4 h-4 text-blue-400" />
+                  <h3 className="text-sm font-semibold text-white flex items-center space-x-2">
+                    <Link2 className="w-4 h-4 text-zinc-400" />
                     <span>Game Links</span>
                   </h3>
-                  <span className="text-[11px] text-slate-400">Store pages, wikis, and community hubs</span>
+                  <span className="text-[11px] text-zinc-400">
+                    Store pages, wikis, and community hubs
+                  </span>
                 </div>
 
                 {/* Existing Links List */}
@@ -1284,7 +1451,7 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
                   {links.map((link, idx) => (
                     <div
                       key={idx}
-                      className="flex items-center space-x-2.5 p-2 bg-black/40 border border-white/10 rounded-xl"
+                      className="flex items-center space-x-2.5 p-2 bg-white/[0.03] border border-white/10 rounded-xl"
                     >
                       <input
                         type="text"
@@ -1294,7 +1461,7 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
                           updated[idx].title = e.target.value;
                           setLinks(updated);
                         }}
-                        className="w-36 px-2.5 py-1 bg-white/5 border border-white/10 rounded-lg text-white text-xs font-semibold"
+                        className="w-36 px-2.5 py-1 bg-black/40 border border-white/10 rounded-lg text-white text-xs font-medium"
                         placeholder="Title"
                       />
                       <input
@@ -1305,56 +1472,54 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
                           updated[idx].url = e.target.value;
                           setLinks(updated);
                         }}
-                        className="flex-1 px-2.5 py-1 bg-white/5 border border-white/10 rounded-lg text-white font-mono text-xs"
-                        placeholder="https://..."
+                        className="flex-1 px-2.5 py-1 bg-black/40 border border-white/10 rounded-lg text-white font-mono text-xs"
+                        placeholder="URL"
                       />
                       <button
                         type="button"
-                        onClick={() => openUrl(link.url)}
-                        title="Open in Browser"
-                        className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-white/10 cursor-pointer"
-                      >
-                        <ExternalLink className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        type="button"
                         onClick={() => handleRemoveLink(idx)}
-                        title="Delete link"
-                        className="p-1.5 text-rose-400 hover:text-rose-300 rounded-lg hover:bg-rose-500/10 cursor-pointer"
+                        className="p-1 text-zinc-400 hover:text-rose-400 rounded cursor-pointer transition-colors"
+                        title="Remove link"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     </div>
                   ))}
+
                   {links.length === 0 && (
-                    <p className="text-slate-500 text-xs italic py-2">No custom links added yet.</p>
+                    <p className="text-xs text-zinc-500 py-2 italic text-center">
+                      No custom links configured. Add official store, wiki, or discord links below.
+                    </p>
                   )}
                 </div>
 
                 {/* Add New Link */}
-                <div className="pt-2 border-t border-white/10 space-y-2">
-                  <label className="block text-slate-300 font-semibold text-xs">Add New Link</label>
+                <div className="pt-2 border-t border-white/10">
+                  <label className="block text-zinc-300 font-medium mb-1 flex items-center space-x-1.5">
+                    <Plus className="w-3.5 h-3.5 text-zinc-400" />
+                    <span>Add New Link</span>
+                  </label>
                   <div className="flex items-center space-x-2">
                     <input
                       type="text"
                       value={newLinkTitle}
                       onChange={(e) => setNewLinkTitle(e.target.value)}
                       placeholder="Title (e.g. Official Wiki)"
-                      className="w-40 px-3 py-1.5 bg-black/40 border border-white/10 rounded-xl text-white text-xs focus:outline-none"
+                      className="w-40 px-3 py-1.5 bg-white/[0.04] hover:bg-white/[0.06] border border-white/10 rounded-xl text-white text-xs focus:outline-none"
                     />
                     <input
                       type="text"
                       value={newLinkUrl}
                       onChange={(e) => setNewLinkUrl(e.target.value)}
                       placeholder="https://..."
-                      className="flex-1 px-3 py-1.5 bg-black/40 border border-white/10 rounded-xl text-white font-mono text-xs focus:outline-none"
+                      className="flex-1 px-3 py-1.5 bg-white/[0.04] hover:bg-white/[0.06] border border-white/10 rounded-xl text-white font-mono text-xs focus:outline-none"
                     />
                     <button
                       type="button"
                       onClick={handleAddLink}
-                      className="px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-semibold flex items-center space-x-1 cursor-pointer shrink-0"
+                      className="px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-medium flex items-center space-x-1 cursor-pointer shrink-0 border border-white/10 transition-colors"
                     >
-                      <Plus className="w-3.5 h-3.5" />
+                      <Plus className="w-3.5 h-3.5 text-zinc-300" />
                       <span>Add</span>
                     </button>
                   </div>
@@ -1365,29 +1530,178 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
         </div>
 
         {/* Modal Footer */}
-        <div className="px-6 py-3.5 border-t border-white/10 bg-black/30 flex items-center justify-between shrink-0">
-          <span className="text-[11px] text-slate-400">
-            Changes will be updated in your database and UI immediately.
-          </span>
+        <div className="px-6 py-3.5 border-t border-white/10 bg-white/[0.03] backdrop-blur-sm flex items-center justify-between shrink-0">
+          {/* Left Side: Metadata Source Picker Button */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => {
+                setSearchTitle(title);
+                setFetchError(null);
+                setIsProviderPickerOpen((p) => !p);
+              }}
+              className="px-3.5 py-2 rounded-xl bg-purple-500/15 hover:bg-purple-500/25 border border-purple-500/30 text-purple-200 hover:text-white text-xs font-semibold flex items-center space-x-1.5 transition-all cursor-pointer shadow-sm active:scale-95"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+              <span>Download Metadata</span>
+            </button>
+
+            {isProviderPickerOpen && (
+              <div className="absolute left-0 bottom-full mb-2 w-80 bg-[#0e1017]/98 border border-white/10 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.85)] p-3.5 z-50 space-y-3 backdrop-blur-2xl animate-in fade-in zoom-in-95 duration-150">
+                <div className="flex items-center justify-between border-b border-white/5 pb-2">
+                  <span className="text-xs font-bold text-white flex items-center space-x-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+                    <span>Choose Metadata Source</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setIsProviderPickerOpen(false)}
+                    className="p-1 text-zinc-400 hover:text-white rounded-lg hover:bg-white/10"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-3 gap-1.5 p-1 bg-white/[0.04] rounded-xl border border-white/5">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedProvider("steam")}
+                    className={`py-1.5 text-xs font-medium rounded-lg transition-all cursor-pointer ${
+                      selectedProvider === "steam"
+                        ? "bg-purple-600 text-white shadow font-bold"
+                        : "text-zinc-400 hover:text-white hover:bg-white/5"
+                    }`}
+                  >
+                    Steam
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedProvider("epic")}
+                    className={`py-1.5 text-xs font-medium rounded-lg transition-all cursor-pointer ${
+                      selectedProvider === "epic"
+                        ? "bg-purple-600 text-white shadow font-bold"
+                        : "text-zinc-400 hover:text-white hover:bg-white/5"
+                    }`}
+                  >
+                    Epic Games
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedProvider("igdb")}
+                    className={`py-1.5 text-xs font-medium rounded-lg transition-all cursor-pointer ${
+                      selectedProvider === "igdb"
+                        ? "bg-purple-600 text-white shadow font-bold"
+                        : "text-zinc-400 hover:text-white hover:bg-white/5"
+                    }`}
+                  >
+                    IGDB
+                  </button>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">Search Query</label>
+                  <input
+                    type="text"
+                    value={searchTitle}
+                    onChange={(e) => setSearchTitle(e.target.value)}
+                    placeholder="Game title to search..."
+                    className="w-full px-3 py-1.5 bg-black/40 border border-white/10 rounded-xl text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-purple-500"
+                  />
+                </div>
+
+                {fetchError && (
+                  <div className="text-[11px] text-rose-300 bg-rose-500/10 border border-rose-500/20 p-2 rounded-lg leading-tight">
+                    {fetchError}
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  disabled={isFetchingProviderMeta || !searchTitle.trim()}
+                  onClick={handleFetchMetadataFromProvider}
+                  className="w-full py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded-xl text-xs font-bold transition-all disabled:opacity-50 flex items-center justify-center space-x-1.5 cursor-pointer shadow-md active:scale-98"
+                >
+                  {isFetchingProviderMeta ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Searching {selectedProvider.toUpperCase()}...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Search className="w-3.5 h-3.5" />
+                      <span>Search & Compare</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Right Side: Remove Local Game, Cancel & Save Changes */}
           <div className="flex items-center space-x-2.5">
+            {game &&
+              (!["steam", "epic", "gog", "battle.net", "ea app", "ubisoft connect", "xbox"].includes(
+                game.source.toLowerCase()
+              ) ||
+                game.source.toLowerCase() === "local" ||
+                game.source.toLowerCase() === "manual") &&
+              onRemoveGame && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onRemoveGame(game);
+                  }}
+                  className="px-3.5 py-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 text-xs font-semibold transition-all border border-red-500/20 flex items-center space-x-1.5 cursor-pointer mr-2"
+                >
+                  <Trash2 className="w-3.5 h-3.5 text-red-400" />
+                  <span>Remove Game</span>
+                </button>
+              )}
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white text-xs font-semibold transition-colors cursor-pointer"
+              className="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-white text-xs font-medium transition-colors cursor-pointer border border-white/5"
             >
               Cancel
             </button>
             <button
               type="submit"
               form="edit-game-form"
-              className="px-5 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 text-xs font-bold transition-all shadow-lg shadow-cyan-950/50 flex items-center space-x-1.5 cursor-pointer"
+              className="px-5 py-2 rounded-xl bg-white hover:bg-zinc-200 text-zinc-950 text-xs font-bold transition-all shadow-lg shadow-white/10 flex items-center space-x-1.5 cursor-pointer"
             >
-              <Save className="w-3.5 h-3.5 text-slate-950" />
+              <Save className="w-3.5 h-3.5 text-zinc-950" />
               <span>Save Changes</span>
             </button>
           </div>
         </div>
       </div>
+
+      {/* Metadata Diff & Selection Modal */}
+      {metadataDiff && (
+        <MetadataDiffModal
+          isOpen={!!metadataDiff}
+          onClose={() => setMetadataDiff(null)}
+          currentGame={{
+            title,
+            description,
+            developer,
+            publisher,
+            release_date: releaseDate,
+            genres,
+            features,
+            critic_score: criticScore !== "" ? Number(criticScore) : undefined,
+            community_score: communityScore !== "" ? Number(communityScore) : undefined,
+            age_rating: ageRating,
+            series,
+            cover_image: coverImage,
+            background_image: backgroundImage,
+            links,
+          }}
+          incoming={metadataDiff}
+          onApply={handleApplyMetadataDiff}
+        />
+      )}
     </div>
   );
 };

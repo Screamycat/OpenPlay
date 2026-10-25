@@ -173,6 +173,14 @@ impl GameLauncher {
                 if let Some(ref dir) = install_directory {
                     candidate_exes = get_candidate_executables(dir);
                 }
+                if let Some(ref exe) = executable_path {
+                    if let Some(name) = Path::new(exe).file_name() {
+                        let name_str = name.to_string_lossy().to_lowercase();
+                        if !candidate_exes.contains(&name_str) {
+                            candidate_exes.push(name_str);
+                        }
+                    }
+                }
 
                 let start_time = Instant::now();
 
@@ -263,6 +271,132 @@ impl GameLauncher {
                 return Ok(now_str);
             } else {
                 return Err("Missing Steam App ID".to_string());
+            }
+        }
+
+        if source.to_lowercase() == "epic" {
+            if let Some(app_name) = source_id {
+                let epic_url = format!("com.epicgames.launcher://apps/{}?action=launch&silent=true", app_name);
+
+                #[cfg(target_os = "windows")]
+                {
+                    Command::new("cmd")
+                        .args(["/C", "start", "", &epic_url])
+                        .spawn()
+                        .map_err(|e| format!("Failed to launch Epic game: {}", e))?;
+                }
+
+                #[cfg(not(target_os = "windows"))]
+                {
+                    if let Some(ref exe) = executable_path {
+                        Command::new(exe).spawn().map_err(|e| e.to_string())?;
+                    }
+                }
+
+                let _ = db.update_playtime(&game_id, 0, &now_str);
+                let _ = app_handle.emit(
+                    "game-launched",
+                    serde_json::json!({
+                        "id": &game_id,
+                        "last_played": &now_str,
+                    }),
+                );
+
+                let mut candidate_exes = Vec::new();
+                if let Some(ref dir) = install_directory {
+                    candidate_exes = get_candidate_executables(dir);
+                }
+                if let Some(ref exe) = executable_path {
+                    if let Some(name) = Path::new(exe).file_name() {
+                        let name_str = name.to_string_lossy().to_lowercase();
+                        if !candidate_exes.contains(&name_str) {
+                            candidate_exes.push(name_str);
+                        }
+                    }
+                }
+
+                let start_time = Instant::now();
+
+                {
+                    let mut map = running_games_map().lock().unwrap();
+                    map.insert(
+                        game_id.clone(),
+                        RunningGameInfo {
+                            game_id: game_id.clone(),
+                            pids: Vec::new(),
+                            candidate_exes: candidate_exes.clone(),
+                            install_directory: install_directory.clone(),
+                            start_time,
+                        },
+                    );
+                }
+                let _ = app_handle.emit("game-running", serde_json::json!({ "id": &game_id }));
+
+                let app_handle_clone = app_handle.clone();
+                let db_clone = db.clone();
+                let gid = game_id.clone();
+                let inst_dir = install_directory.clone();
+                let candidate_exes_clone = candidate_exes.clone();
+
+                std::thread::spawn(move || {
+                    let mut sys = sysinfo::System::new();
+                    let mut has_started = false;
+                    let mut consecutive_missing = 0;
+
+                    for tick in 0..1000000 {
+                        std::thread::sleep(std::time::Duration::from_millis(1500));
+
+                        {
+                            let map = running_games_map().lock().unwrap();
+                            if !map.contains_key(&gid) {
+                                return;
+                            }
+                        }
+
+                        sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+                        let active_pids = find_active_pids_for_game(
+                            &sys,
+                            &candidate_exes_clone,
+                            inst_dir.as_deref(),
+                        );
+
+                        if !active_pids.is_empty() {
+                            has_started = true;
+                            consecutive_missing = 0;
+                            let mut map = running_games_map().lock().unwrap();
+                            if let Some(info) = map.get_mut(&gid) {
+                                info.pids = active_pids;
+                            }
+                        } else if has_started {
+                            consecutive_missing += 1;
+                            if consecutive_missing >= 2 {
+                                break;
+                            }
+                        } else if tick >= 30 {
+                            break;
+                        }
+                    }
+
+                    {
+                        let mut map = running_games_map().lock().unwrap();
+                        map.remove(&gid);
+                    }
+                    let elapsed = start_time.elapsed().as_secs();
+                    let end_str = chrono::Local::now().format("%Y-%m-%d %H:%M").to_string();
+                    let _ = db_clone.update_playtime(&gid, elapsed, &end_str);
+                    let _ = app_handle_clone.emit(
+                        "game-stopped",
+                        serde_json::json!({
+                            "id": gid,
+                            "elapsed_seconds": elapsed,
+                            "last_played": end_str
+                        }),
+                    );
+                });
+
+                return Ok(now_str);
+            } else {
+                return Err("Missing Epic App Name".to_string());
             }
         }
 

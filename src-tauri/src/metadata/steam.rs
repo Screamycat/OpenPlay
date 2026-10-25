@@ -1,4 +1,4 @@
-use crate::models::{Game, GameTrailer};
+use crate::models::{Achievement, Game, GameTrailer};
 use serde_json::Value;
 
 pub struct SteamMetadataFetcher;
@@ -165,6 +165,54 @@ impl SteamMetadataFetcher {
             None
         };
 
+        // 11. Artwork (Vertical library poster with fallback to header_image/capsule, and high-res background_raw)
+        let header_image = data
+            .get("header_image")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        let capsule_image = data
+            .get("capsule_image")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        let background_raw = data
+            .get("background_raw")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        let background = data
+            .get("background")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        let library_600 = format!(
+            "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/{}/library_600x900_2x.jpg",
+            appid
+        );
+        let library_hero = format!(
+            "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/{}/library_hero.jpg",
+            appid
+        );
+
+        // Fast probe vertical poster with 1.5s timeout
+        let cover_image = if client
+            .head(&library_600)
+            .timeout(std::time::Duration::from_millis(1500))
+            .send()
+            .await
+            .map(|r| r.status().is_success())
+            .unwrap_or(false)
+        {
+            Some(library_600)
+        } else {
+            header_image.or(capsule_image)
+        };
+
+        let background_image = background_raw
+            .or(background)
+            .or_else(|| Some(library_hero));
+
         Ok(PartialSteamMetadata {
             description,
             developer,
@@ -178,6 +226,8 @@ impl SteamMetadataFetcher {
             screenshots,
             trailers,
             age_rating,
+            cover_image,
+            background_image,
         })
     }
 
@@ -258,6 +308,74 @@ impl SteamMetadataFetcher {
         }
 
         Ok(items)
+    }
+
+    /// Searches Steam store by game title and returns the best matching appid if found
+    pub async fn search_appid_by_title(title: &str) -> Option<String> {
+        let trimmed = title.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+
+        // If the query is already a numeric AppID (e.g. "629820")
+        if trimmed.chars().all(|c| c.is_ascii_digit()) {
+            return Some(trimmed.to_string());
+        }
+
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(6))
+            .build()
+            .ok()?;
+
+        // Clean title of trademark / copyright / curly quotes
+        let cleaned = trimmed
+            .replace('®', "")
+            .replace('™', "")
+            .replace('©', "")
+            .replace('\u{2019}', "'")
+            .replace('\u{2018}', "'")
+            .trim()
+            .to_string();
+
+        let resp = client
+            .get("https://store.steampowered.com/api/storesearch/")
+            .query(&[("term", cleaned.as_str()), ("l", "english"), ("cc", "US")])
+            .header("User-Agent", "OpenPlay/0.1.0")
+            .send()
+            .await
+            .ok()?;
+
+        let json: Value = resp.json().await.ok()?;
+        let items = json.get("items").and_then(|i| i.as_array())?;
+        if items.is_empty() {
+            return None;
+        }
+
+        let clean_search = cleaned.to_lowercase();
+
+        // 1. Exact title match (case-insensitive)
+        for it in items {
+            if let Some(name) = it.get("name").and_then(|v| v.as_str()) {
+                let clean_name = name
+                    .replace('®', "")
+                    .replace('™', "")
+                    .replace('©', "")
+                    .replace('\u{2019}', "'")
+                    .replace('\u{2018}', "'")
+                    .trim()
+                    .to_lowercase();
+                if clean_name == clean_search {
+                    if let Some(id) = it.get("id").and_then(|v| v.as_u64()) {
+                        return Some(id.to_string());
+                    }
+                }
+            }
+        }
+
+        // 2. Fallback to first item in results
+        let first = items.first()?;
+        let id = first.get("id").and_then(|v| v.as_u64())?;
+        Some(id.to_string())
     }
 
     /// Fetches trailers directly from Steam Store using an appid or by searching game title
@@ -383,7 +501,181 @@ impl SteamMetadataFetcher {
         if meta.age_rating.is_some() {
             game.age_rating = meta.age_rating;
         }
+        if meta.cover_image.is_some() && (game.cover_image.is_none() || game.cover_image.as_deref().unwrap_or("").starts_with("data:")) {
+            game.cover_image = meta.cover_image;
+        }
+        if meta.background_image.is_some() && game.background_image.is_none() {
+            game.background_image = meta.background_image;
+        }
     }
+
+    pub async fn fetch_steam_achievements(
+        game_id: &str,
+        appid: &str,
+        steamid64: Option<&str>,
+    ) -> Result<Vec<Achievement>, String> {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(12))
+            .build()
+            .map_err(|e| e.to_string())?;
+
+        // 1. Fetch Global Achievement Percentages
+        let global_url = format!(
+            "https://api.steampowered.com/ISteamUserStats/GetGlobalAchievementPercentagesForApp/v0002/?gameid={}",
+            appid
+        );
+
+        let mut rarity_map: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
+        if let Ok(resp) = client
+            .get(&global_url)
+            .header("User-Agent", "OpenPlay/0.1.0")
+            .send()
+            .await
+        {
+            if let Ok(json) = resp.json::<Value>().await {
+                if let Some(list) = json
+                    .get("achievementpercentages")
+                    .and_then(|ap| ap.get("achievements"))
+                    .and_then(|a| a.as_array())
+                {
+                    for item in list {
+                        let name_opt = item.get("name").and_then(|v| v.as_str());
+                        let pct_opt = item.get("percent").and_then(|v| {
+                            if let Some(f) = v.as_f64() {
+                                Some(f)
+                            } else if let Some(s) = v.as_str() {
+                                s.parse::<f64>().ok()
+                            } else {
+                                None
+                            }
+                        });
+
+                        if let (Some(name), Some(pct)) = (name_opt, pct_opt) {
+                            let rounded = (pct * 10.0).round() / 10.0;
+                            rarity_map.insert(name.to_lowercase(), rounded);
+                            rarity_map.insert(name.to_string(), rounded);
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Fetch Personal Achievement XML
+        let xml_url = if let Some(sid) = steamid64 {
+            format!("https://steamcommunity.com/profiles/{}/stats/{}/?xml=1", sid, appid)
+        } else {
+            format!("https://steamcommunity.com/stats/{}/achievements/?xml=1", appid)
+        };
+
+        let xml_text = client
+            .get(&xml_url)
+            .header("User-Agent", "OpenPlay/0.1.0")
+            .send()
+            .await
+            .map_err(|e| format!("Failed to fetch achievements XML: {}", e))?
+            .text()
+            .await
+            .map_err(|e| format!("Failed to read achievements XML body: {}", e))?;
+
+        // 3. Parse <achievement ...>...</achievement> blocks
+        let ach_re = regex::Regex::new(r#"(?s)<achievement(?:\s+(?P<attrs>[^>]*))?>(?P<content>.*?)</achievement>"#)
+            .map_err(|e| e.to_string())?;
+
+        let mut achievements: Vec<Achievement> = Vec::new();
+
+        for cap in ach_re.captures_iter(&xml_text) {
+            let attrs = cap.name("attrs").map(|m| m.as_str()).unwrap_or("");
+            let content = cap.name("content").map(|m| m.as_str()).unwrap_or("");
+
+            let apiname = extract_tag_value(content, "apiname")
+                .or_else(|| extract_tag_value(content, "name"))
+                .unwrap_or_default();
+            if apiname.is_empty() {
+                continue;
+            }
+
+            let display_name = extract_tag_value(content, "name").unwrap_or_else(|| apiname.clone());
+            let description = extract_tag_value(content, "description");
+            // In Steam Community XML:
+            // <iconClosed> contains the EARNED / UNLOCKED full-color artwork!
+            // <iconOpen> contains the UNEARNED / LOCKED grayscale artwork!
+            let icon_unlocked = extract_tag_value(content, "iconClosed").unwrap_or_default();
+            let icon_locked = extract_tag_value(content, "iconOpen");
+
+            let is_unlocked = attrs.contains(r#"closed="1""#)
+                || attrs.contains(r#"closed='1'"#)
+                || attrs.contains("closed=1");
+
+            let unlock_time = if is_unlocked {
+                if let Some(ts_str) = extract_tag_value(content, "unlockTimestamp") {
+                    if let Ok(ts) = ts_str.parse::<i64>() {
+                        if ts > 0 {
+                            chrono::DateTime::from_timestamp(ts, 0)
+                                .map(|dt| dt.format("%b %d, %Y %H:%M").to_string())
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            let rarity = rarity_map
+                .get(&apiname)
+                .or_else(|| rarity_map.get(&apiname.to_lowercase()))
+                .copied()
+                .unwrap_or(0.0);
+
+            let is_secret = content.contains("<hidden>1</hidden>")
+                || description.as_ref().map(|d| d.trim().is_empty()).unwrap_or(false);
+
+            achievements.push(Achievement {
+                game_id: game_id.to_string(),
+                api_name: apiname,
+                display_name,
+                description,
+                icon_url: icon_unlocked,
+                icon_gray_url: icon_locked,
+                is_unlocked,
+                unlock_time,
+                rarity_percentage: rarity,
+                is_secret,
+            });
+        }
+
+        // Sort: Unlocked first, then by rarity ascending (rarest first), then display_name
+        achievements.sort_by(|a, b| {
+            b.is_unlocked
+                .cmp(&a.is_unlocked)
+                .then_with(|| a.rarity_percentage.partial_cmp(&b.rarity_percentage).unwrap_or(std::cmp::Ordering::Equal))
+                .then_with(|| a.display_name.cmp(&b.display_name))
+        });
+
+        Ok(achievements)
+    }
+}
+
+fn extract_tag_value(block: &str, tag: &str) -> Option<String> {
+    let open_tag = format!("<{}>", tag);
+    let close_tag = format!("</{}>", tag);
+
+    if let Some(start) = block.find(&open_tag) {
+        let after_open = &block[start + open_tag.len()..];
+        if let Some(end) = after_open.find(&close_tag) {
+            let inner = after_open[..end].trim();
+            if inner.starts_with("<![CDATA[") && inner.ends_with("]]>") && inner.len() >= 12 {
+                return Some(inner[9..inner.len() - 3].trim().to_string());
+            } else {
+                return Some(inner.to_string());
+            }
+        }
+    }
+    None
 }
 
 pub struct PartialSteamMetadata {
@@ -399,6 +691,8 @@ pub struct PartialSteamMetadata {
     pub screenshots: Vec<String>,
     pub trailers: Vec<GameTrailer>,
     pub age_rating: Option<String>,
+    pub cover_image: Option<String>,
+    pub background_image: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -410,4 +704,49 @@ pub struct SteamNewsItem {
     pub contents: String,
     pub date: i64,
     pub feedlabel: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_tag_value() {
+        let sample = r#"<name><![CDATA[First Steps]]></name><apiname>001</apiname><description><![CDATA[Complete the Prologue.]]></description>"#;
+        assert_eq!(extract_tag_value(sample, "name"), Some("First Steps".to_string()));
+        assert_eq!(extract_tag_value(sample, "apiname"), Some("001".to_string()));
+        assert_eq!(extract_tag_value(sample, "description"), Some("Complete the Prologue.".to_string()));
+    }
+
+    #[test]
+    fn test_achievement_regex_parsing() {
+        let sample_xml = r#"
+        <achievements>
+            <achievement closed="1">
+                <iconClosed><![CDATA[https://closed.jpg]]></iconClosed>
+                <iconOpen><![CDATA[https://open.jpg]]></iconOpen>
+                <name><![CDATA[First Steps]]></name>
+                <apiname><![CDATA[001]]></apiname>
+                <description><![CDATA[Complete the Prologue.]]></description>
+                <unlockTimestamp>1791127975</unlockTimestamp>
+            </achievement>
+            <achievement closed="0">
+                <iconClosed><![CDATA[https://closed2.jpg]]></iconClosed>
+                <iconOpen><![CDATA[https://open2.jpg]]></iconOpen>
+                <name><![CDATA[Master]]></name>
+                <apiname><![CDATA[002]]></apiname>
+            </achievement>
+        </achievements>
+        "#;
+
+        let ach_re = regex::Regex::new(r#"(?s)<achievement(?:\s+(?P<attrs>[^>]*))?>(?P<content>.*?)</achievement>"#).unwrap();
+        let matches: Vec<_> = ach_re.captures_iter(sample_xml).collect();
+        assert_eq!(matches.len(), 2);
+
+        let m1 = &matches[0];
+        let attrs1 = m1.name("attrs").map(|m| m.as_str()).unwrap_or("");
+        assert!(attrs1.contains(r#"closed="1""#));
+        let content1 = m1.name("content").map(|m| m.as_str()).unwrap_or("");
+        assert_eq!(extract_tag_value(content1, "name"), Some("First Steps".to_string()));
+    }
 }

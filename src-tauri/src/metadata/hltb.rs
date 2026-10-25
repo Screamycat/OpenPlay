@@ -33,7 +33,15 @@ impl HltbFetcher {
         let init_json: Value = init_resp.json().await.ok()?;
         let token = init_json.get("token")?.as_str()?.to_string();
 
-        let search_terms: Vec<&str> = game_title.split_whitespace().collect();
+        let clean_title: String = game_title
+            .chars()
+            .map(|c| match c {
+                ':' | '-' | '–' | '—' | '™' | '®' | '/' | '\\' | '_' => ' ',
+                _ => c,
+            })
+            .collect();
+
+        let search_terms: Vec<&str> = clean_title.split_whitespace().collect();
 
         let payload = serde_json::json!({
             "searchType": "games",

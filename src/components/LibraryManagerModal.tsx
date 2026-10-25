@@ -1,5 +1,6 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { LibraryIntegration } from "../types/integration";
+import { Game } from "../types/game";
 import {
   X,
   RefreshCw,
@@ -15,6 +16,7 @@ import {
   CheckCircle2,
   Trash2,
 } from "lucide-react";
+import { LocalGamesTab } from "./library/LocalGamesTab";
 
 interface ScanResult {
   count: number;
@@ -22,9 +24,22 @@ interface ScanResult {
   uninstalled: number;
 }
 
+export type CategoryTab =
+  | "steam"
+  | "epic"
+  | "gog"
+  | "retroarch"
+  | "standalone_emulators"
+  | "manual_local"
+  | "manual_shortcuts";
+
 interface LibraryManagerModalProps {
   isOpen: boolean;
   onClose: () => void;
+  initialTab?: CategoryTab;
+  onRefreshGames?: () => Promise<void>;
+  onGameAdded?: (game: Game) => void;
+  // Steam
   steamIntegration: LibraryIntegration;
   onOpenSteamLogin: () => void;
   onAuthenticateManual: (idOrVanity: string) => void;
@@ -34,20 +49,23 @@ interface LibraryManagerModalProps {
   onClearLibrary: () => Promise<void>;
   isSyncing: boolean;
   isAuthenticating: boolean;
+  // Epic
+  epicIntegration: LibraryIntegration;
+  onOpenEpicLogin: () => void;
+  onAuthenticateEpicManual: (code: string) => void;
+  onLogoutEpic: () => void;
+  onSaveEpicIntegration: (updated: LibraryIntegration) => void;
+  onSyncEpicLibrary: () => Promise<ScanResult | number | void>;
+  isSyncingEpic: boolean;
+  isAuthenticatingEpic: boolean;
 }
-
-type CategoryTab =
-  | "steam"
-  | "epic"
-  | "gog"
-  | "retroarch"
-  | "standalone_emulators"
-  | "manual_local"
-  | "manual_shortcuts";
 
 export const LibraryManagerModal: React.FC<LibraryManagerModalProps> = ({
   isOpen,
   onClose,
+  initialTab = "steam",
+  onRefreshGames,
+  onGameAdded,
   steamIntegration,
   onOpenSteamLogin,
   onAuthenticateManual,
@@ -57,14 +75,31 @@ export const LibraryManagerModal: React.FC<LibraryManagerModalProps> = ({
   onClearLibrary,
   isSyncing,
   isAuthenticating,
+  epicIntegration,
+  onOpenEpicLogin,
+  onAuthenticateEpicManual,
+  onLogoutEpic,
+  onSaveEpicIntegration,
+  onSyncEpicLibrary,
+  isSyncingEpic,
+  isAuthenticatingEpic,
 }) => {
-  const [activeTab, setActiveTab] = useState<CategoryTab>("steam");
+  const [activeTab, setActiveTab] = useState<CategoryTab>(initialTab);
   const [manualInput, setManualInput] = useState("");
   const [showManualInput, setShowManualInput] = useState(false);
+  const [epicManualInput, setEpicManualInput] = useState("");
+  const [showEpicManualInput, setShowEpicManualInput] = useState(false);
   const [syncStatusMsg, setSyncStatusMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isOpen && initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [isOpen, initialTab]);
 
   if (!isOpen) return null;
 
+  // Steam Toggles
   const handleToggleInstalled = () => {
     onSaveSteamIntegration({
       ...steamIntegration,
@@ -114,6 +149,66 @@ export const LibraryManagerModal: React.FC<LibraryManagerModalProps> = ({
     }
   };
 
+  // Epic Toggles
+  const handleToggleEpicInstalled = () => {
+    onSaveEpicIntegration({
+      ...epicIntegration,
+      import_installed: !epicIntegration.import_installed,
+    });
+  };
+
+  const handleToggleEpicUninstalled = () => {
+    onSaveEpicIntegration({
+      ...epicIntegration,
+      import_uninstalled: !epicIntegration.import_uninstalled,
+    });
+  };
+
+  const handleToggleEpicPlaytime = () => {
+    onSaveEpicIntegration({
+      ...epicIntegration,
+      sync_playtime: !epicIntegration.sync_playtime,
+    });
+  };
+
+  const handleEpicManualSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    let raw = epicManualInput.trim();
+    if (raw) {
+      if (raw.startsWith("{")) {
+        try {
+          const json = JSON.parse(raw);
+          raw = json.authorizationCode || json.exchangeCode || json.sid || raw;
+        } catch {}
+      } else if (raw.includes("code=")) {
+        const match = raw.match(/code=([^&]+)/);
+        if (match) raw = match[1];
+      }
+      onAuthenticateEpicManual(raw.trim());
+      setEpicManualInput("");
+      setShowEpicManualInput(false);
+    }
+  };
+
+  const handleSyncEpicClick = async () => {
+    setSyncStatusMsg(null);
+    try {
+      const res = await onSyncEpicLibrary();
+      if (res && typeof res === "object" && "installed" in res) {
+        setSyncStatusMsg(
+          `Epic Sync Complete! Found ${res.installed} installed and ${res.uninstalled} uninstalled games (${res.count} total).`
+        );
+      } else if (typeof res === "number") {
+        setSyncStatusMsg(`Epic Sync Complete! ${res} games imported into library.`);
+      } else {
+        setSyncStatusMsg("Epic Sync Complete! Library refreshed.");
+      }
+      setTimeout(() => setSyncStatusMsg(null), 6000);
+    } catch (err) {
+      setSyncStatusMsg(`Epic sync error: ${err}`);
+    }
+  };
+
   const handleClearClick = async () => {
     if (confirm("Are you sure you want to clear all imported games from OpenPlay? You can re-sync anytime.")) {
       await onClearLibrary();
@@ -123,19 +218,33 @@ export const LibraryManagerModal: React.FC<LibraryManagerModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-[#10131c] border border-[#23293d] rounded-2xl w-full max-w-4xl h-[620px] shadow-2xl overflow-hidden flex flex-col">
-        {/* Modal Header */}
-        <div className="h-14 px-6 border-b border-[#20263a] flex items-center justify-between bg-[#0e1017]">
-          <div className="flex items-center space-x-2.5">
-            <Layers className="w-5 h-5 text-cyan-400" />
-            <h2 className="text-base font-bold text-slate-100 tracking-wide">
-              Library Manager
-            </h2>
+    <div
+      onClick={onClose}
+      className="fixed inset-0 z-50 bg-black/45 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-4xl bg-[#0f111a] border border-[#23293e] rounded-2xl shadow-2xl overflow-hidden flex flex-col h-[640px]"
+      >
+        {/* Header Bar */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-[#1e2333] bg-[#121520]">
+          <div className="flex items-center space-x-3">
+            <div className="p-2 bg-cyan-950/50 border border-cyan-500/30 rounded-xl text-cyan-400">
+              <Layers className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-white tracking-wide">
+                Library Integrations & Managers
+              </h2>
+              <p className="text-xs text-slate-400">
+                Configure game platforms, emulation cores, and local disk scanners
+              </p>
+            </div>
           </div>
+
           <button
             onClick={onClose}
-            className="p-1 rounded-md text-slate-400 hover:text-slate-200 hover:bg-[#1a1f2e] transition-colors"
+            className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
@@ -145,26 +254,26 @@ export const LibraryManagerModal: React.FC<LibraryManagerModalProps> = ({
         <div className="flex-1 flex overflow-hidden">
           {/* Left Categorized Navigation (Manual, Emulation, Providers) */}
           <div className="w-64 border-r border-[#1e2333] bg-[#0c0e15] overflow-y-auto p-3 space-y-4 select-none">
-            {/* 1. MANUAL */}
+            {/* 1. MANUAL & IMPORT */}
             <div>
               <div className="px-2 py-1 text-[10px] uppercase font-bold text-slate-500 tracking-wider">
-                Manual
+                Manual & Import
               </div>
               <div className="space-y-0.5 mt-1">
                 <button
                   onClick={() => setActiveTab("manual_local")}
                   className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-all ${
                     activeTab === "manual_local"
-                      ? "bg-[#1f2538] text-cyan-300 font-semibold"
-                      : "text-slate-400 hover:text-slate-200 hover:bg-[#141824]"
+                      ? "bg-cyan-950/60 text-cyan-300 border border-cyan-500/40 font-semibold"
+                      : "text-slate-300 hover:text-white hover:bg-[#141824]"
                   }`}
                 >
                   <span className="flex items-center space-x-2">
-                    <FolderOpen className="w-3.5 h-3.5" />
-                    <span>Local Folders</span>
+                    <FolderOpen className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>Local Files & Folders</span>
                   </span>
-                  <span className="text-[9px] px-1.5 py-0.2 rounded bg-slate-800 text-slate-500">
-                    Soon
+                  <span className="text-[9px] px-1.5 py-0.2 rounded bg-cyan-500/10 text-cyan-400 font-medium">
+                    Active
                   </span>
                 </button>
 
@@ -239,7 +348,7 @@ export const LibraryManagerModal: React.FC<LibraryManagerModalProps> = ({
                 Providers
               </div>
               <div className="space-y-0.5 mt-1">
-                {/* Steam (Active!) */}
+                {/* Steam (Active) */}
                 <button
                   onClick={() => setActiveTab("steam")}
                   className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-all ${
@@ -263,19 +372,28 @@ export const LibraryManagerModal: React.FC<LibraryManagerModalProps> = ({
                   )}
                 </button>
 
-                {/* Epic Games */}
+                {/* Epic Games (Active) */}
                 <button
                   onClick={() => setActiveTab("epic")}
                   className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-all ${
                     activeTab === "epic"
-                      ? "bg-[#1f2538] text-cyan-300 font-semibold"
-                      : "text-slate-400 hover:text-slate-200 hover:bg-[#141824]"
+                      ? "bg-purple-950/60 text-purple-300 border border-purple-500/40 font-semibold"
+                      : "text-slate-300 hover:text-white hover:bg-[#141824]"
                   }`}
                 >
-                  <span>Epic Games</span>
-                  <span className="text-[9px] px-1.5 py-0.2 rounded bg-slate-800 text-slate-500">
-                    Soon
+                  <span className="flex items-center space-x-2">
+                    <span className="w-2 h-2 rounded-full bg-purple-400" />
+                    <span>Epic Games</span>
                   </span>
+                  {epicIntegration.is_authenticated ? (
+                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-400 font-bold">
+                      Connected
+                    </span>
+                  ) : (
+                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-purple-500/10 text-purple-400 font-medium">
+                      Active
+                    </span>
+                  )}
                 </button>
 
                 {/* GOG */}
@@ -294,49 +412,49 @@ export const LibraryManagerModal: React.FC<LibraryManagerModalProps> = ({
                 </button>
               </div>
             </div>
+
+            {/* Quick Action: Clear Library */}
+            <div className="pt-4">
+              <button
+                onClick={handleClearClick}
+                className="w-full flex items-center justify-center space-x-1.5 px-3 py-2 bg-rose-950/20 hover:bg-rose-950/40 text-rose-400/80 hover:text-rose-300 border border-rose-900/30 rounded-lg text-xs transition-all cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Clear All Games</span>
+              </button>
+            </div>
           </div>
 
-          {/* Right Main Content Pane */}
-          <div className="flex-1 overflow-y-auto p-6 bg-[#0f111a]">
-            {activeTab === "steam" ? (
-              <div className="max-w-2xl space-y-5 text-xs text-slate-200">
-                {/* Steam Integration Header */}
-                <div className="flex items-center justify-between border-b border-[#202538] pb-3">
-                  <div>
-                    <h3 className="text-base font-extrabold text-white flex items-center space-x-2">
-                      <span>Steam Integration</span>
-                    </h3>
-                    <p className="text-slate-400 text-xs mt-0.5">
-                      Sync installed games, full owned library catalog, and playtime directly from Steam.
-                    </p>
-                  </div>
+          {/* Right Pane: Dynamic based on Active Tab */}
+          <div className="flex-1 p-6 overflow-y-auto bg-[#0f111a]">
+            {/* Status Feedback Toast / Banner */}
+            {syncStatusMsg && (
+              <div className="mb-4 p-3 bg-cyan-950/60 border border-cyan-500/40 rounded-xl text-cyan-300 text-xs flex items-center space-x-2 animate-in fade-in duration-200">
+                <CheckCircle2 className="w-4 h-4 text-cyan-400 shrink-0" />
+                <span>{syncStatusMsg}</span>
+              </div>
+            )}
 
-                  <button
-                    onClick={handleClearClick}
-                    title="Wipe currently imported games to start completely fresh"
-                    className="flex items-center space-x-1.5 px-3 py-1.5 text-[11px] text-rose-400 hover:text-rose-300 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 rounded-lg transition-all"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    <span>Clear Library</span>
-                  </button>
+            {activeTab === "steam" ? (
+              /* STEAM INTEGRATION VIEW */
+              <div className="space-y-6">
+                <div>
+                  <h3 className="text-lg font-bold text-white flex items-center space-x-2">
+                    <span>Steam Integration</span>
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Connect your Steam account or import games directly from local drives.
+                  </p>
                 </div>
 
-                {/* Status Alert Banner */}
-                {syncStatusMsg && (
-                  <div className="p-3 bg-emerald-500/15 border border-emerald-500/30 rounded-xl text-emerald-300 text-xs flex items-center space-x-2 animate-in fade-in duration-200">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                    <span>{syncStatusMsg}</span>
-                  </div>
-                )}
-
-                {/* 1. Account / Authentication Status Card */}
+                {/* 1. Account Authentication Card */}
                 <div className="bg-[#151926] border border-[#23293e] rounded-xl p-4 space-y-4">
                   <div className="text-[11px] uppercase font-bold text-slate-400 tracking-wider">
                     Steam Account
                   </div>
 
                   {steamIntegration.is_authenticated ? (
-                    <div className="flex items-center justify-between bg-[#1a1f30] p-3 rounded-lg border border-[#293148]">
+                    <div className="flex items-center justify-between bg-[#111420] border border-[#1e2333] p-3 rounded-lg">
                       <div className="flex items-center space-x-3">
                         {steamIntegration.avatar_url ? (
                           <img
@@ -510,6 +628,204 @@ export const LibraryManagerModal: React.FC<LibraryManagerModalProps> = ({
                   </button>
                 </div>
               </div>
+            ) : activeTab === "epic" ? (
+              /* EPIC GAMES INTEGRATION VIEW */
+              <div className="space-y-6">
+                <div>
+                  <h3 className="text-lg font-bold text-white flex items-center space-x-2">
+                    <span className="p-1 px-2 rounded bg-purple-900/40 text-purple-300 text-xs font-mono font-bold border border-purple-500/30">
+                      EPIC
+                    </span>
+                    <span>Epic Games Store</span>
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Connect your Epic Games account to import your cloud library and locally installed titles.
+                  </p>
+                </div>
+
+                {/* 1. Account Authentication Card */}
+                <div className="bg-[#151926] border border-[#23293e] rounded-xl p-4 space-y-4">
+                  <div className="text-[11px] uppercase font-bold text-slate-400 tracking-wider">
+                    Epic Games Account
+                  </div>
+
+                  {epicIntegration.is_authenticated ? (
+                    <div className="flex items-center justify-between bg-[#111420] border border-[#1e2333] p-3 rounded-lg">
+                      <div className="flex items-center space-x-3">
+                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-600 to-indigo-700 flex items-center justify-center font-bold text-white shadow-md border border-purple-400/40">
+                          {epicIntegration.username?.[0]?.toUpperCase() || "E"}
+                        </div>
+                        <div>
+                          <div className="font-bold text-white text-sm flex items-center space-x-2">
+                            <span>{epicIntegration.username || "Epic User"}</span>
+                            <span className="text-[9px] px-1.5 py-0.2 bg-emerald-500/20 text-emerald-400 rounded-full font-semibold border border-emerald-500/30">
+                              Connected
+                            </span>
+                          </div>
+                          <div className="text-[10px] text-slate-400 font-mono mt-0.5">
+                            Account ID: {epicIntegration.account_id}
+                          </div>
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={onLogoutEpic}
+                        className="flex items-center space-x-1.5 px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-lg transition-all font-medium cursor-pointer"
+                      >
+                        <LogOut className="w-3.5 h-3.5" />
+                        <span>Disconnect</span>
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <div className="p-3 bg-[#121520] rounded-lg border border-[#1e2333] text-slate-400 leading-relaxed text-xs">
+                        Sign in to connect your Epic Games account. OpenPlay uses an authentic embedded login window to securely identify your profile, enabling automatic importing of your claimed, purchased, and installed games with official artwork and metadata.
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-3">
+                        <button
+                          onClick={onOpenEpicLogin}
+                          disabled={isAuthenticatingEpic}
+                          className="flex items-center space-x-2 px-5 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold rounded-xl shadow-lg transition-all active:scale-[0.98] cursor-pointer"
+                        >
+                          <LogIn className="w-4 h-4" />
+                          <span>{isAuthenticatingEpic ? "Opening Login..." : "Connect Epic Games"}</span>
+                        </button>
+
+                        <button
+                          onClick={() => setShowEpicManualInput(!showEpicManualInput)}
+                          className="text-xs text-slate-400 hover:text-slate-200 underline cursor-pointer"
+                        >
+                          {showEpicManualInput ? "Hide manual entry" : "Enter authorization code manually"}
+                        </button>
+                      </div>
+
+                      {showEpicManualInput && (
+                        <form
+                          onSubmit={handleEpicManualSubmit}
+                          className="pt-2 flex items-center space-x-2"
+                        >
+                          <input
+                            type="text"
+                            value={epicManualInput}
+                            onChange={(e) => setEpicManualInput(e.target.value)}
+                            placeholder="Paste 32-character authorization code here"
+                            className="flex-1 px-3 py-2 bg-[#10131d] border border-[#262c42] rounded-lg text-xs text-white focus:outline-none focus:border-purple-400 font-mono"
+                          />
+                          <button
+                            type="submit"
+                            className="px-4 py-2 bg-purple-600 text-white font-bold rounded-lg text-xs hover:bg-purple-500 transition-all cursor-pointer"
+                          >
+                            Authenticate
+                          </button>
+                        </form>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* 2. Library Import Settings */}
+                <div className="bg-[#151926] border border-[#23293e] rounded-xl p-4 space-y-3">
+                  <div className="text-[11px] uppercase font-bold text-slate-400 tracking-wider">
+                    Import Options
+                  </div>
+
+                  <div className="space-y-2.5">
+                    {/* Import Installed */}
+                    <label className="flex items-center justify-between p-2.5 rounded-lg bg-[#111420] border border-[#1d2232] cursor-pointer hover:bg-[#151928] transition-colors">
+                      <div className="flex items-center space-x-3">
+                        <HardDrive className="w-4 h-4 text-purple-400" />
+                        <div>
+                          <div className="font-semibold text-slate-200">
+                            Import locally installed games
+                          </div>
+                          <div className="text-[10px] text-slate-400">
+                            Reads local installation manifests (%ProgramData%\Epic) to locate launch executables and disk sizes.
+                          </div>
+                        </div>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={epicIntegration.import_installed}
+                        onChange={handleToggleEpicInstalled}
+                        className="w-4 h-4 rounded bg-[#1e2335] border-[#2c344d] text-purple-500 focus:ring-0 cursor-pointer accent-purple-400"
+                      />
+                    </label>
+
+                    {/* Import Uninstalled */}
+                    <label className="flex items-center justify-between p-2.5 rounded-lg bg-[#111420] border border-[#1d2232] cursor-pointer hover:bg-[#151928] transition-colors">
+                      <div className="flex items-center space-x-3">
+                        <Cloud className="w-4 h-4 text-amber-400" />
+                        <div>
+                          <div className="font-semibold text-slate-200">
+                            Import uninstalled / cloud-owned catalog
+                          </div>
+                          <div className="text-[10px] text-slate-400">
+                            Queries your connected Epic account for claimed, gifted, and purchased games in your library.
+                          </div>
+                        </div>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={epicIntegration.import_uninstalled}
+                        onChange={handleToggleEpicUninstalled}
+                        className="w-4 h-4 rounded bg-[#1e2335] border-[#2c344d] text-purple-500 focus:ring-0 cursor-pointer accent-purple-400"
+                      />
+                    </label>
+
+                    {/* Sync Playtime */}
+                    <label className="flex items-center justify-between p-2.5 rounded-lg bg-[#111420] border border-[#1d2232] cursor-pointer hover:bg-[#151928] transition-colors">
+                      <div className="flex items-center space-x-3">
+                        <Clock className="w-4 h-4 text-emerald-400" />
+                        <div>
+                          <div className="font-semibold text-slate-200">
+                            Sync recorded playtime
+                          </div>
+                          <div className="text-[10px] text-slate-400">
+                            Pulls official playtime statistics from Epic's live cloud library service.
+                          </div>
+                        </div>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={epicIntegration.sync_playtime}
+                        onChange={handleToggleEpicPlaytime}
+                        className="w-4 h-4 rounded bg-[#1e2335] border-[#2c344d] text-purple-500 focus:ring-0 cursor-pointer accent-purple-400"
+                      />
+                    </label>
+                  </div>
+                </div>
+
+                {/* 3. Sync Action Row */}
+                <div className="pt-2 flex items-center justify-between">
+                  <div className="text-[11px] text-slate-400">
+                    {epicIntegration.last_sync ? (
+                      <span>Last Synced: <strong className="text-slate-200">{epicIntegration.last_sync}</strong></span>
+                    ) : (
+                      <span>Ready to sync</span>
+                    )}
+                  </div>
+
+                  <button
+                    onClick={handleSyncEpicClick}
+                    disabled={isSyncingEpic}
+                    className="flex items-center space-x-2 px-6 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold rounded-xl transition-all shadow-md active:scale-[0.98] disabled:opacity-50 cursor-pointer"
+                  >
+                    <RefreshCw className={`w-4 h-4 ${isSyncingEpic ? "animate-spin" : ""}`} />
+                    <span>{isSyncingEpic ? "Scanning Epic Library..." : "Sync Epic Games"}</span>
+                  </button>
+                </div>
+              </div>
+            ) : activeTab === "manual_local" ? (
+              <LocalGamesTab
+                onGameAdded={(game) => {
+                  onGameAdded?.(game);
+                  onRefreshGames?.();
+                }}
+                onBatchAdded={() => {
+                  onRefreshGames?.();
+                }}
+              />
             ) : (
               /* Coming Soon Placeholder for other categories */
               <div className="h-full flex flex-col items-center justify-center text-center p-8 space-y-3">

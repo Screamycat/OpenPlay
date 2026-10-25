@@ -5,11 +5,12 @@ import {
   Play,
   Download,
   Square,
-  Sparkles,
   Film,
   Star,
   Settings,
   HardDrive,
+  RefreshCw,
+  Trash2,
 } from "lucide-react";
 
 export interface GameContextMenuProps {
@@ -21,12 +22,15 @@ export interface GameContextMenuProps {
   onStop?: (game: Game) => void;
   isRunning?: boolean;
   isLaunching?: boolean;
-  onOpenSteamGridDB: (game: Game) => void;
+  onOpenSteamGridDB?: (game: Game) => void;
   onOpenTrailers: (game: Game) => void;
   onToggleFavorite: (id: string) => void;
-  onFetchMetadata: (id: string) => void;
+  onFetchMetadata?: (id: string) => void;
   isFetchingMeta?: boolean;
+  onRefreshGame?: (id: string) => void;
+  isRefreshing?: boolean;
   onOpenEdit: (game: Game) => void;
+  onRemoveGame?: (game: Game) => void;
 }
 
 export const GameContextMenu: React.FC<GameContextMenuProps> = ({
@@ -38,18 +42,18 @@ export const GameContextMenu: React.FC<GameContextMenuProps> = ({
   onStop,
   isRunning = false,
   isLaunching = false,
-  onOpenSteamGridDB,
   onOpenTrailers,
   onToggleFavorite,
-  onFetchMetadata,
-  isFetchingMeta = false,
+  onRefreshGame,
+  isRefreshing = false,
   onOpenEdit,
+  onRemoveGame,
 }) => {
   const menuRef = useRef<HTMLDivElement>(null);
 
   // Keep menu within screen boundaries
   const menuWidth = 230;
-  const menuHeight = 310;
+  const menuHeight = 350;
   const clampedX = Math.max(8, Math.min(x, window.innerWidth - menuWidth - 8));
   const clampedY = Math.max(8, Math.min(y, window.innerHeight - menuHeight - 8));
 
@@ -141,18 +145,6 @@ export const GameContextMenu: React.FC<GameContextMenuProps> = ({
 
       <div className="my-1 border-t border-white/10" />
 
-      {/* Change Artwork (SteamGridDB) */}
-      <button
-        onClick={() => {
-          onClose();
-          onOpenSteamGridDB(game);
-        }}
-        className="w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl text-left text-slate-200 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
-      >
-        <Sparkles className="w-4 h-4 text-white shrink-0" />
-        <span>Change Artwork (SteamGridDB)</span>
-      </button>
-
       {/* Manage Trailers */}
       <button
         onClick={() => {
@@ -181,22 +173,25 @@ export const GameContextMenu: React.FC<GameContextMenuProps> = ({
         <span>{game.is_favorite ? "Remove from Favorites" : "Add to Favorites"}</span>
       </button>
 
-      {/* Refresh Metadata & HLTB */}
-      <button
-        onClick={() => {
-          onClose();
-          onFetchMetadata(game.id);
-        }}
-        disabled={isFetchingMeta}
-        className="w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl text-left text-slate-200 hover:text-white hover:bg-white/10 transition-colors cursor-pointer disabled:opacity-50"
-      >
-        <Sparkles
-          className={`w-4 h-4 text-emerald-400 shrink-0 ${
-            isFetchingMeta ? "animate-spin" : ""
-          }`}
-        />
-        <span>Refresh Store & HLTB</span>
-      </button>
+      {/* Refresh Live Data (HLTB, Achievements, Store Playtime & Stats) */}
+      {onRefreshGame && (
+        <button
+          onClick={() => {
+            onClose();
+            onRefreshGame(game.id);
+          }}
+          disabled={isRefreshing}
+          title="Refresh HLTB, achievements, playtime, and live store stats"
+          className="w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl text-left text-slate-200 hover:text-white hover:bg-white/10 transition-colors cursor-pointer disabled:opacity-50"
+        >
+          <RefreshCw
+            className={`w-4 h-4 text-emerald-400 shrink-0 ${
+              isRefreshing ? "animate-spin" : ""
+            }`}
+          />
+          <span>{isRefreshing ? "Refreshing..." : "Refresh"}</span>
+        </button>
+      )}
 
       <div className="my-1 border-t border-white/10" />
 
@@ -225,6 +220,28 @@ export const GameContextMenu: React.FC<GameContextMenuProps> = ({
           <span>Open Game Folder</span>
         </button>
       )}
+
+      {/* Remove Local Game */}
+      {(!["steam", "epic", "gog", "battle.net", "ea app", "ubisoft connect", "xbox"].includes(
+        game.source.toLowerCase()
+      ) ||
+        game.source.toLowerCase() === "local" ||
+        game.source.toLowerCase() === "manual") &&
+        onRemoveGame && (
+          <>
+            <div className="my-1 border-t border-white/10" />
+            <button
+              onClick={() => {
+                onClose();
+                onRemoveGame(game);
+              }}
+              className="w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl text-left text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors cursor-pointer"
+            >
+              <Trash2 className="w-4 h-4 text-red-400 shrink-0" />
+              <span>Remove Game</span>
+            </button>
+          </>
+        )}
     </div>
   );
 };

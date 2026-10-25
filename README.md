@@ -86,12 +86,15 @@ No hunting through forums for third-party scripts. OpenPlay ships with essential
 |:---|:---:|:---:|
 | **Native Linux & SteamOS Support** | ✅ **Native** | ❌ Windows Only |
 | **Animated & Moving Covers** (WebM, MP4, APNG, GIF) | ✅ **Built-in** | ⚠️ Complex Workarounds |
+| **Steam & Epic Games Account Integration** | ✅ **Built-in** | 🔌 Requires Plugin |
+| **Achievement Hub & In-Game Trophies** | ✅ **Built-in** | 🔌 Requires Plugin |
 | **SteamGridDB Artwork Integration** | ✅ **Built-in** | 🔌 Requires Plugin |
 | **HowLongToBeat Completion Metrics** | ✅ **Built-in** | 🔌 Requires Plugin |
 | **Live Steam Player Counts & News Hub** | ✅ **Built-in** | 🔌 Requires Plugin |
 | **On-Demand Video Trailers** | ✅ **Built-in** | 🔌 Requires Plugin |
 | **True Window Lifetime Tracking** (Auto Revert to Play) | ✅ **Built-in** | ⚠️ Inconsistent Exit Detection |
-| **Playnite Backup Importer** *(Upcoming)* | ✅ **Native Migration** | ❌ N/A |
+| **Playnite Backup (.zip) Importer & Media Extractor** | ✅ **Built-in** | ❌ N/A |
+| **Local Game Executable & Directory Scanner** | ✅ **Built-in** | ⚠️ Basic Manual Shortcuts |
 
 ---
 
@@ -125,7 +128,7 @@ graph TD
     TAURI[Tauri v2 IPC Bridge]
     CORE[Backend: Rust Core Engine]
     DB[(SQLite: Local Storage)]
-    EXT[External APIs: SteamGridDB / HLTB / Steam Store API]
+    EXT[External APIs: Steam / Epic / IGDB / SteamGridDB / HLTB]
     PROC[OS Process Lifecycle Monitor]
 
     UI <-->|JSON IPC| TAURI
@@ -187,6 +190,8 @@ Check out our full live tracking document in [ROADMAP.md](./ROADMAP.md) for curr
 - [x] High-precision Windows game exit & process lifecycle detection
 - [x] Glassmorphic right-click context menu at click coordinates
 - [x] 7-tabbed properties dialog with native folder & executable selectors
+- [x] Categorized settings system with SQLite persistent app state & session restore
+- [x] 3-Tier Achievements Engine: Dedicated Achievement Hub, Steam details tab, and quick showcase widget
 - [ ] **Playnite Backup Importer**
 - [ ] **Native Linux packaging (.deb, .AppImage, Flatpak)**
 - [ ] **Fullscreen / Couch Controller Mode**

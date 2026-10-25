@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { WindowControls } from "./WindowControls";
 import { FilterPopover, FilterItem } from "./FilterPopover";
+import { SortDropdown } from "./SortDropdown";
 import {
   Gamepad2,
   Search,
@@ -10,14 +11,20 @@ import {
   List,
   Settings,
   X,
-  ArrowUpDown,
   ChevronDown,
+  Trophy,
 } from "lucide-react";
 
 export type ViewMode = "split" | "grid" | "list";
 export type SortOption = "title" | "playtime" | "last_played" | "release_date" | "rating";
 export type SortDirection = "asc" | "desc";
 export type StatusFilter = "all" | "installed" | "uninstalled";
+export type GroupByOption =
+  | "none"
+  | "source"
+  | "status"
+  | "first_letter"
+  | "completion_status";
 
 interface TopNavProps {
   onToggleDrawer: () => void;
@@ -47,7 +54,12 @@ interface TopNavProps {
   onSortByChange: (s: SortOption) => void;
   sortDirection: SortDirection;
   onToggleSortDirection: () => void;
+  groupBy: GroupByOption;
+  onGroupByChange: (g: GroupByOption) => void;
   onOpenSettings: () => void;
+  onOpenAchievementHub?: () => void;
+  hunterLevel?: number;
+  hunterScore?: number;
   totalCount: number;
   installedCount: number;
   uninstalledCount: number;
@@ -79,25 +91,17 @@ export const TopNav: React.FC<TopNavProps> = ({
   onSortByChange,
   sortDirection,
   onToggleSortDirection,
+  groupBy,
+  onGroupByChange,
   onOpenSettings,
+  onOpenAchievementHub,
+  hunterLevel,
+  hunterScore,
   totalCount,
   installedCount,
   uninstalledCount,
 }) => {
   const [isFilterPopoverOpen, setIsFilterPopoverOpen] = useState(false);
-  const handleStartDrag = async (e: React.MouseEvent) => {
-    // Only primary left-click
-    if (e.button === 0) {
-      if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
-        try {
-          await getCurrentWindow().startDragging();
-        } catch (err) {
-          console.warn("Window drag error:", err);
-        }
-      }
-    }
-  };
-
   const handleHeaderDoubleClick = async (e: React.MouseEvent) => {
     if (e.button === 0) {
       if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
@@ -111,7 +115,6 @@ export const TopNav: React.FC<TopNavProps> = ({
   return (
     <header
       data-tauri-drag-region
-      onMouseDown={handleStartDrag}
       onDoubleClick={handleHeaderDoubleClick}
       className="h-14 bg-black/25 backdrop-blur-xl border-b border-white/10 px-4 flex items-center justify-between select-none z-30 gap-3 shadow-lg"
     >
@@ -128,9 +131,6 @@ export const TopNav: React.FC<TopNavProps> = ({
           <Gamepad2 className="w-4 h-4 text-slate-300 group-hover:scale-105 transition-transform" />
           <span className="font-bold text-xs tracking-wider uppercase text-white hidden sm:inline">
             OpenPlay
-          </span>
-          <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-white/10 text-slate-300 font-mono">
-            {totalCount}
           </span>
         </button>
 
@@ -152,7 +152,7 @@ export const TopNav: React.FC<TopNavProps> = ({
               onClick={() => onStatusFilterChange("installed")}
               className={`px-2.5 py-1 rounded-md transition-all font-medium text-xs cursor-pointer ${
                 statusFilter === "installed"
-                  ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shadow-sm font-bold"
+                  ? "bg-white/15 text-white shadow-sm font-bold"
                   : "text-slate-400 hover:text-slate-200"
               }`}
             >
@@ -170,12 +170,16 @@ export const TopNav: React.FC<TopNavProps> = ({
               Uninstalled <span className="opacity-70 text-[10px]">({uninstalledCount})</span>
             </button>
 
-            {/* Down Arrow: Advanced Filter Dropdown Access */}
+            {/* Down Arrow: Advanced Filter Dropdown Access with subtle active indicator */}
             <button
               onClick={() => setIsFilterPopoverOpen((prev) => !prev)}
-              title="Advanced Filters (Favorites, Tags, Developers, Libraries)"
-              className={`px-2 py-1 rounded-md transition-all flex items-center space-x-1 cursor-pointer ${
-                activeFilterCount > 0 || isFilterPopoverOpen
+              title={
+                activeFilterCount > 0
+                  ? `${activeFilterCount} active filter(s)`
+                  : "Advanced Filters (Favorites, Tags, Developers, Libraries)"
+              }
+              className={`relative px-2 py-1.5 rounded-md transition-all flex items-center justify-center cursor-pointer ${
+                isFilterPopoverOpen
                   ? "bg-white/20 text-white shadow-sm font-bold border border-white/25"
                   : "text-slate-400 hover:text-slate-200 hover:bg-white/5"
               }`}
@@ -185,10 +189,12 @@ export const TopNav: React.FC<TopNavProps> = ({
                   isFilterPopoverOpen ? "rotate-180 text-white" : ""
                 }`}
               />
+              {/* Small white circle in the down arrow's top right corner indicating active filters */}
               {activeFilterCount > 0 && (
-                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-cyan-500/30 text-cyan-200 font-mono font-bold leading-tight">
-                  {activeFilterCount}
-                </span>
+                <span
+                  className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-white shadow-[0_0_5px_rgba(255,255,255,0.9)] ring-1 ring-black/80"
+                  title={`${activeFilterCount} filter(s) active`}
+                />
               )}
             </button>
           </div>
@@ -214,28 +220,18 @@ export const TopNav: React.FC<TopNavProps> = ({
           />
         </div>
 
-        {/* 2. Sort Select */}
-        <div className="flex items-center space-x-1 bg-black/40 px-2 py-1 rounded-lg border border-white/10 text-xs text-slate-300">
-          <span className="text-[10px] text-slate-500 uppercase font-bold">Sort:</span>
-          <select
-            value={sortBy}
-            onChange={(e) => onSortByChange(e.target.value as SortOption)}
-            className="bg-transparent text-slate-200 text-xs focus:outline-none cursor-pointer"
-          >
-            <option value="playtime" className="bg-[#12141f]">Playtime</option>
-            <option value="title" className="bg-[#12141f]">Title</option>
-            <option value="last_played" className="bg-[#12141f]">Last Played</option>
-            <option value="release_date" className="bg-[#12141f]">Release Date</option>
-            <option value="rating" className="bg-[#12141f]">Rating</option>
-          </select>
-          <button
-            onClick={onToggleSortDirection}
-            title={sortDirection === "asc" ? "Sort Ascending" : "Sort Descending"}
-            className="p-1 hover:text-white transition-colors cursor-pointer"
-          >
-            <ArrowUpDown className="w-3.5 h-3.5" />
-          </button>
-        </div>
+        {/* 2. Sort & Group Dropdown */}
+        <SortDropdown
+          sortBy={sortBy}
+          onSortByChange={onSortByChange}
+          sortDirection={sortDirection}
+          onToggleSortDirection={onToggleSortDirection}
+          onSetSortDirection={(dir) => {
+            if (dir !== sortDirection) onToggleSortDirection();
+          }}
+          groupBy={groupBy}
+          onGroupByChange={onGroupByChange}
+        />
 
         {/* 3. Search Input Box */}
         <div className="relative">
@@ -261,8 +257,6 @@ export const TopNav: React.FC<TopNavProps> = ({
       {/* Draggable Center Window Area */}
       <div
         data-tauri-drag-region
-        onMouseDown={handleStartDrag}
-        onDoubleClick={handleHeaderDoubleClick}
         className="flex-1 h-full min-w-8 cursor-default"
       />
 
@@ -271,6 +265,21 @@ export const TopNav: React.FC<TopNavProps> = ({
         className="flex items-center space-x-2 shrink-0"
         onMouseDown={(e) => e.stopPropagation()}
       >
+        {/* Achievement Hunter Button */}
+        {onOpenAchievementHub && (
+          <button
+            onClick={onOpenAchievementHub}
+            title="Open Achievement Hub"
+            className="flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg bg-amber-400/10 hover:bg-amber-400/20 text-amber-300 border border-amber-400/30 transition-all cursor-pointer text-xs font-bold shadow-xs group"
+          >
+            <Trophy className="w-3.5 h-3.5 text-amber-400 group-hover:scale-110 transition-transform" />
+            <span>Lv {hunterLevel || 1}</span>
+            <span className="text-[10px] text-amber-200/70 font-mono font-normal">
+              • {hunterScore ? hunterScore.toLocaleString() : 0} pts
+            </span>
+          </button>
+        )}
+
         {/* View Mode Switcher */}
         <div className="flex items-center bg-black/40 rounded-lg p-0.5 border border-white/10">
           <button

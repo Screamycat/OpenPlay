@@ -8,4 +8,6 @@ export interface LibraryIntegration {
   import_uninstalled: boolean;
   sync_playtime: boolean;
   last_sync?: string;
+  access_token?: string;
+  refresh_token?: string;
 }
