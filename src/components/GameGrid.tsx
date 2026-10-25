@@ -104,7 +104,7 @@ export const GameGrid: React.FC<GameGridProps> = ({
           }
         }}
         style={{ minHeight: `${cardWidth * 1.5}px` }}
-        className={`group relative rounded-lg overflow-hidden cursor-pointer transition-all duration-200 aspect-[2/3] bg-black/30 backdrop-blur-xs border-0 ${
+        className={`group relative rounded-lg overflow-hidden cursor-pointer transition-all duration-200 aspect-[2/3] bg-black/30 border-0 ${
           isLaunching
             ? "ring-2 ring-white shadow-[0_0_25px_rgba(255,255,255,0.7)] z-20 scale-[0.98]"
             : isRunning
@@ -113,9 +113,7 @@ export const GameGrid: React.FC<GameGridProps> = ({
             ? "ring-2 ring-white shadow-2xl shadow-black/90 z-10"
             : "hover:ring-1 hover:ring-white/40 hover:shadow-2xl hover:shadow-black/70"
         } ${
-          !game.is_installed
-            ? "opacity-40 filter grayscale brightness-75 hover:grayscale-0 hover:opacity-100"
-            : ""
+          !game.is_installed ? "opacity-50 hover:opacity-100" : ""
         }`}
       >
         {/* Playnite FusionX Corner-to-Corner Card Shine Overlay */}
@@ -144,7 +142,9 @@ export const GameGrid: React.FC<GameGridProps> = ({
               src={coverSrc}
               alt={game.title}
               loading="lazy"
-              className="w-full h-full object-cover"
+              className={`w-full h-full object-cover ${
+                !game.is_installed ? "grayscale brightness-75" : ""
+              }`}
               onError={(e) => {
                 (e.target as HTMLElement).style.display = "none";
               }}
@@ -167,7 +167,7 @@ export const GameGrid: React.FC<GameGridProps> = ({
 
         {/* Active Launching Indicator on Card */}
         {isLaunching && (
-          <div className="absolute inset-x-2 bottom-2.5 py-1 px-2 rounded-md bg-black/85 backdrop-blur-md border border-white/20 flex items-center justify-center space-x-1.5 shadow-xl z-30 animate-pulse">
+          <div className="absolute inset-x-2 bottom-2.5 py-1 px-2 rounded-md bg-black/95 border border-white/20 flex items-center justify-center space-x-1.5 shadow-xl z-30 animate-pulse">
             <Loader2 className="w-3 h-3 text-white animate-spin" />
             <span className="text-[10px] font-black uppercase tracking-wider text-white">
               Launching...
@@ -177,7 +177,7 @@ export const GameGrid: React.FC<GameGridProps> = ({
 
         {/* Active Running Indicator on Card */}
         {isRunning && !isLaunching && (
-          <div className="absolute inset-x-2 bottom-2.5 py-1 px-2 rounded-md bg-emerald-950/85 backdrop-blur-md border border-emerald-500/40 flex items-center justify-center space-x-1.5 shadow-xl z-30">
+          <div className="absolute inset-x-2 bottom-2.5 py-1 px-2 rounded-md bg-emerald-950/95 border border-emerald-500/40 flex items-center justify-center space-x-1.5 shadow-xl z-30">
             <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_8px_rgba(52,211,153,0.9)]" />
             <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-200">
               Running
@@ -189,7 +189,7 @@ export const GameGrid: React.FC<GameGridProps> = ({
         {!game.is_installed && (
           <div
             title="Not installed (Cloud Library)"
-            className="absolute top-1.5 left-1.5 bg-black/75 backdrop-blur-sm p-1 rounded-full text-zinc-400 shadow-md z-10 border border-white/10"
+            className="absolute top-1.5 left-1.5 bg-[#0a0c12]/90 p-1 rounded-full text-zinc-400 shadow-md z-10 border border-white/10"
           >
             <Cloud className="w-3 h-3" />
           </div>
@@ -197,7 +197,7 @@ export const GameGrid: React.FC<GameGridProps> = ({
 
         {/* Favorite Star Badge */}
         {game.is_favorite && (
-          <div className="absolute top-1.5 right-1.5 bg-black/75 backdrop-blur-sm p-1 rounded-full shadow-md text-amber-400 z-10 border border-white/10">
+          <div className="absolute top-1.5 right-1.5 bg-[#0a0c12]/90 p-1 rounded-full shadow-md text-amber-400 z-10 border border-white/10">
             <Star className="w-3 h-3 fill-amber-400" />
           </div>
         )}
@@ -206,7 +206,7 @@ export const GameGrid: React.FC<GameGridProps> = ({
   };
 
   return (
-    <div className="flex-1 overflow-y-auto p-3 scroll-smooth bg-transparent select-none space-y-4">
+    <div className="flex-1 overflow-y-auto p-3 bg-transparent select-none space-y-4">
       {groups.map((group) => (
         <div key={group.name || "all"} className="space-y-2.5">
           {/* Section Group Header (shown when grouping is active) */}
@@ -215,9 +215,9 @@ export const GameGrid: React.FC<GameGridProps> = ({
               <div
                 style={{
                   background:
-                    "linear-gradient(to right, rgba(16, 16, 20, 0.55) 0%, rgba(16, 16, 20, 0.2) 60%, transparent calc(100% - 50px))",
+                    "linear-gradient(to right, rgba(16, 16, 20, 0.95) 0%, rgba(16, 16, 20, 0.8) 60%, transparent calc(100% - 50px))",
                 }}
-                className="px-4 py-2 backdrop-blur-md flex items-center justify-between border-0 shadow-none"
+                className="px-4 py-2 flex items-center justify-between border-0 shadow-none"
               >
                 <div className="flex items-center space-x-2.5">
                   <span className="text-xs font-bold text-white uppercase tracking-wider drop-shadow-sm">

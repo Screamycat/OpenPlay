@@ -10,8 +10,8 @@ interface PosterZoomSliderProps {
 
 export const PosterZoomSlider: React.FC<PosterZoomSliderProps> = ({
   cardWidth,
-  minWidth = 100,
-  maxWidth = 260,
+  minWidth = 80,
+  maxWidth = 360,
   onChange,
 }) => {
   return (

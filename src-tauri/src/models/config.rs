@@ -27,6 +27,8 @@ pub struct AppConfig {
     pub theme: Option<String>,
     pub background_blur: Option<i32>,
     pub background_opacity: Option<f64>,
+    pub accent_color: Option<String>,
+    pub panel_tint: Option<String>,
 
     // Playback & Media
     pub trailer_autoplay: Option<bool>,
@@ -62,6 +64,8 @@ impl Default for AppConfig {
             theme: Some("dark".to_string()),
             background_blur: Some(32),
             background_opacity: Some(0.75),
+            accent_color: Some("#a855f7".to_string()),
+            panel_tint: Some("#0e0e11".to_string()),
             trailer_autoplay: Some(true),
             trailer_muted: Some(true),
             steamgriddb_api_key: None,

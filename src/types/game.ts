@@ -9,6 +9,15 @@ export interface GameTrailer {
   url: string;
 }
 
+export interface GameAction {
+  id: string;
+  name: string;
+  path: string;
+  arguments?: string;
+  working_dir?: string;
+  is_primary?: boolean;
+}
+
 export interface Game {
   id: string;
   title: string;
@@ -52,4 +61,6 @@ export interface Game {
   categories?: string[];
   region?: string;
   play_count?: number;
+  is_hidden?: boolean;
+  play_actions?: GameAction[];
 }

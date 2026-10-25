@@ -99,11 +99,35 @@ export function App() {
   const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
   const [selectedDevelopers, setSelectedDevelopers] = useState<string[]>([]);
   const [selectedSources, setSelectedSources] = useState<string[]>([]);
+  const [showHiddenGames, setShowHiddenGames] = useState(() => {
+    return localStorage.getItem("openplay_show_hidden") === "true";
+  });
+  const [showHiddenOnly, setShowHiddenOnly] = useState(false);
+
+  const handleToggleShowHidden = () => {
+    setShowHiddenGames((prev) => {
+      const next = !prev;
+      localStorage.setItem("openplay_show_hidden", String(next));
+      return next;
+    });
+  };
+
+  const handleToggleHiddenOnly = () => {
+    setShowHiddenOnly((prev) => !prev);
+  };
 
   // Application Config & Persistence
   const [appConfig, setAppConfig] = useState<AppConfig>(DEFAULT_APP_CONFIG);
   const isConfigLoadedRef = useRef(false);
   const saveConfigTimeoutRef = useRef<number | null>(null);
+
+  // Apply user-configured theme accent and panel tint to document CSS variables
+  useEffect(() => {
+    const accent = appConfig.accent_color || "#a855f7";
+    const tint = appConfig.panel_tint || "#0e0e11";
+    document.documentElement.style.setProperty("--app-accent-color", accent);
+    document.documentElement.style.setProperty("--app-panel-tint", tint);
+  }, [appConfig.accent_color, appConfig.panel_tint]);
 
   // Default cardWidth to 108 for 7 columns, persist in localStorage
   const [cardWidth, setCardWidth] = useState(() => {
@@ -697,8 +721,8 @@ export function App() {
     }
   };
 
-  // Launch Game
-  const handleLaunchGame = async (game: Game) => {
+  // Launch Game (Supports default action or custom Dual Launch actionId)
+  const handleLaunchGame = async (game: Game, actionId?: string) => {
     try {
       const now = new Date();
       const pad = (n: number) => n.toString().padStart(2, "0");
@@ -712,7 +736,10 @@ export function App() {
         prev.map((g) => (g.id === game.id ? { ...g, last_played: nowStr } : g))
       );
 
-      const res = await invoke<string>("launch_game", { gameId: game.id });
+      const res = await invoke<string>("launch_game", {
+        gameId: game.id,
+        actionId: actionId || null,
+      });
       if (res && res.includes(":")) {
         setGames((prev) =>
           prev.map((g) => (g.id === game.id ? { ...g, last_played: res } : g))
@@ -737,6 +764,19 @@ export function App() {
       setIsLaunchingId(null);
       setRunningGameIds((prev) => prev.filter((id) => id !== game.id));
       alert(`Launch error: ${err}`);
+    }
+  };
+
+  // Toggle Hide / Unhide Game
+  const handleToggleHideGame = async (game: Game) => {
+    const newHidden = !game.is_hidden;
+    try {
+      await invoke("set_game_hidden", { id: game.id, hidden: newHidden });
+      setGames((prev) =>
+        prev.map((g) => (g.id === game.id ? { ...g, is_hidden: newHidden } : g))
+      );
+    } catch (err) {
+      console.error("Failed to toggle hide game:", err);
     }
   };
 
@@ -971,6 +1011,7 @@ export function App() {
   const installedCount = useMemo(() => games.filter((g) => g.is_installed).length, [games]);
   const uninstalledCount = useMemo(() => games.filter((g) => !g.is_installed).length, [games]);
   const favoritesCount = useMemo(() => games.filter((g) => g.is_favorite).length, [games]);
+  const hiddenGamesCount = useMemo(() => games.filter((g) => g.is_hidden).length, [games]);
 
   // Aggregate available Genres / Tags with counts
   const availableGenres = useMemo(() => {
@@ -1030,6 +1071,7 @@ export function App() {
 
   const handleResetFilters = () => {
     setShowFavoritesOnly(false);
+    setShowHiddenOnly(false);
     setSelectedGenres([]);
     setSelectedDevelopers([]);
     setSelectedSources([]);
@@ -1038,15 +1080,21 @@ export function App() {
   const activeFilterCount = useMemo(() => {
     return (
       (showFavoritesOnly ? 1 : 0) +
+      (showHiddenOnly ? 1 : 0) +
       selectedGenres.length +
       selectedDevelopers.length +
       selectedSources.length
     );
-  }, [showFavoritesOnly, selectedGenres, selectedDevelopers, selectedSources]);
+  }, [showFavoritesOnly, showHiddenOnly, selectedGenres, selectedDevelopers, selectedSources]);
 
   // Filter and sort games
   const filteredGames = useMemo(() => {
     const list = games.filter((g) => {
+      if (showHiddenOnly) {
+        if (!g.is_hidden) return false;
+      } else if (!showHiddenGames && g.is_hidden) {
+        return false;
+      }
       if (statusFilter === "installed" && !g.is_installed) return false;
       if (statusFilter === "uninstalled" && g.is_installed) return false;
       if (showFavoritesOnly && !g.is_favorite) return false;
@@ -1121,6 +1169,8 @@ export function App() {
     games,
     statusFilter,
     showFavoritesOnly,
+    showHiddenGames,
+    showHiddenOnly,
     selectedGenres,
     selectedDevelopers,
     selectedSources,
@@ -1230,6 +1280,11 @@ export function App() {
           showFavoritesOnly={showFavoritesOnly}
           onToggleFavoritesOnly={() => setShowFavoritesOnly(!showFavoritesOnly)}
           favoritesCount={favoritesCount}
+          showHiddenGames={showHiddenGames}
+          onToggleShowHidden={handleToggleShowHidden}
+          showHiddenOnly={showHiddenOnly}
+          onToggleHiddenOnly={handleToggleHiddenOnly}
+          hiddenGamesCount={hiddenGamesCount}
           availableGenres={availableGenres}
           selectedGenres={selectedGenres}
           onToggleGenre={handleToggleGenre}
@@ -1327,7 +1382,7 @@ export function App() {
                 <PosterZoomSlider
                   cardWidth={cardWidth}
                   minWidth={80}
-                  maxWidth={220}
+                  maxWidth={360}
                   onChange={handleCardWidthChange}
                 />
               </div>
@@ -1386,7 +1441,7 @@ export function App() {
               <PosterZoomSlider
                 cardWidth={cardWidth}
                 minWidth={80}
-                maxWidth={220}
+                maxWidth={360}
                 onChange={handleCardWidthChange}
               />
             </div>
@@ -1562,6 +1617,7 @@ export function App() {
           isRefreshing={refreshingGameIds.includes(contextMenu.game.id)}
           onOpenEdit={(g) => setEditingGame(g)}
           onRemoveGame={handleRemoveGame}
+          onToggleHide={handleToggleHideGame}
         />
       )}
 

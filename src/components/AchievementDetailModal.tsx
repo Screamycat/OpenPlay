@@ -87,7 +87,7 @@ export const AchievementDetailModal: React.FC<AchievementDetailModalProps> = ({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-md bg-[#0c0d14]/95 border border-white/10 rounded-2xl shadow-2xl overflow-hidden flex flex-col relative animate-in zoom-in-95 duration-150 backdrop-blur-2xl"
+        className="w-full max-w-md theme-panel-surface border border-white/10 rounded-2xl shadow-2xl overflow-hidden flex flex-col relative animate-in zoom-in-95 duration-150 backdrop-blur-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header Bar */}

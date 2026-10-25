@@ -18,7 +18,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   autoPlay = true,
   controls = true,
   muted = true,
-  loop = false,
+  loop = true,
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
 

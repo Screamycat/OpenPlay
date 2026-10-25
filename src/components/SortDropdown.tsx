@@ -61,7 +61,7 @@ export const SortDropdown: React.FC<SortDropdownProps> = ({
 
   useEffect(() => {
     if (!isOpen) return;
-    const handleClickOutside = (e: MouseEvent) => {
+    const handleClickOutside = (e: MouseEvent | PointerEvent) => {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
         setIsOpen(false);
       }
@@ -70,10 +70,11 @@ export const SortDropdown: React.FC<SortDropdownProps> = ({
       if (e.key === "Escape") setIsOpen(false);
     };
 
-    document.addEventListener("mousedown", handleClickOutside);
+    // Use capture phase so stopPropagation inside other headers or wrappers does not prevent closing
+    document.addEventListener("pointerdown", handleClickOutside, true);
     document.addEventListener("keydown", handleKeyDown);
     return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("pointerdown", handleClickOutside, true);
       document.removeEventListener("keydown", handleKeyDown);
     };
   }, [isOpen]);
@@ -111,7 +112,7 @@ export const SortDropdown: React.FC<SortDropdownProps> = ({
 
       {/* Floating Glassmorphic Popover Menu */}
       {isOpen && (
-        <div className="absolute left-0 top-full mt-2 w-64 bg-[#0e0e11]/95 backdrop-blur-2xl border border-white/10 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.85)] p-2.5 z-50 text-xs text-zinc-200 animate-in fade-in slide-in-from-top-2 duration-150 select-none space-y-3">
+        <div className="absolute left-0 top-full mt-2 w-64 theme-panel-surface backdrop-blur-2xl border border-white/10 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.85)] p-2.5 z-50 text-xs text-zinc-200 animate-in fade-in slide-in-from-top-2 duration-150 select-none space-y-3">
           {/* Section 1: Sort Criteria */}
           <div>
             <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-zinc-500">

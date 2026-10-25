@@ -131,7 +131,7 @@ export const AddGameModal: React.FC<AddGameModalProps> = ({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="bg-[#10121a]/98 backdrop-blur-2xl border border-white/10 rounded-2xl w-full max-w-xl shadow-2xl overflow-hidden flex flex-col text-zinc-200"
+        className="theme-panel-surface backdrop-blur-2xl border border-white/10 rounded-2xl w-full max-w-xl shadow-2xl overflow-hidden flex flex-col text-zinc-200"
       >
         {/* Header */}
         <div className="px-6 py-4 border-b border-white/10 flex items-center justify-between bg-white/[0.02]">

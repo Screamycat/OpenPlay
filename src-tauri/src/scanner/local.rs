@@ -136,6 +136,8 @@ impl LocalScanner {
             categories: Vec::new(),
             region: None,
             play_count: Some(0),
+            is_hidden: false,
+            play_actions: Vec::new(),
         })
     }
 

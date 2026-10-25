@@ -392,6 +392,8 @@ impl SteamScanner {
                         categories: Vec::new(),
                         region: None,
                         play_count: Some(0),
+                        is_hidden: false,
+                        play_actions: Vec::new(),
                     };
 
                     games.push(game);
@@ -550,6 +552,8 @@ impl SteamScanner {
                         categories: Vec::new(),
                         region: None,
                         play_count: Some(0),
+                        is_hidden: false,
+                        play_actions: Vec::new(),
                     };
 
                     uninstalled.push(game);
@@ -699,6 +703,8 @@ impl SteamScanner {
                                     categories: Vec::new(),
                                     region: None,
                                     play_count: Some(0),
+                                    is_hidden: false,
+                                    play_actions: Vec::new(),
                                 };
 
                                 games.push(game);

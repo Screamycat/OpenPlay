@@ -9,6 +9,7 @@ import { TrailerModal, getYouTubeEmbedUrl } from "./TrailerModal";
 import { VideoPlayer } from "./VideoPlayer";
 import { AchievementsTab } from "./AchievementsTab";
 import { AchievementsQuickWidget } from "./AchievementsQuickWidget";
+import { NewsArticleModal, SteamNewsItem } from "./NewsArticleModal";
 import {
   Play,
   Download,
@@ -36,18 +37,9 @@ import {
   Square,
   RefreshCw,
   Trash2,
+  ChevronDown,
 } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
-
-interface SteamNewsItem {
-  gid: string;
-  title: string;
-  url: string;
-  author: string;
-  contents: string;
-  date: number;
-  feedlabel?: string;
-}
 
 const SteamIcon: React.FC<{ className?: string }> = ({ className = "w-4 h-4" }) => (
   <svg viewBox="0 0 496 512" fill="currentColor" className={className} aria-hidden="true">
@@ -55,9 +47,65 @@ const SteamIcon: React.FC<{ className?: string }> = ({ className = "w-4 h-4" }) 
   </svg>
 );
 
+const EpicIcon: React.FC<{ className?: string }> = ({ className = "w-4 h-4" }) => (
+  <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
+    <path d="M4.686 0C3.766 0 3 0.771 3 1.696v17.478c0 0.925 0.766 1.696 1.686 1.696h1.722v3.13l3.666-3.13h9.24c0.92 0 1.686-0.771 1.686-1.696V1.696C21 0.771 20.234 0 19.314 0H4.686zm3.504 5.347h7.62v2.247h-5.244v2.544h4.722v2.247h-4.722v2.793h5.364v2.247h-7.74V5.347z" />
+  </svg>
+);
+
+const GogIcon: React.FC<{ className?: string }> = ({ className = "w-4 h-4" }) => (
+  <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
+    <path d="M12 2C6.477 2 2 6.477 2 12c0 5.522 4.477 10 10 10 5.522 0 10-4.478 10-10 0-5.523-4.478-10-10-10zm0 3.2c3.755 0 6.8 3.045 6.8 6.8 0 3.755-3.045 6.8-6.8 6.8-3.755 0-6.8-3.045-6.8-6.8 0-3.755 3.045-6.8 6.8-6.8zm-1.8 3.4a3.4 3.4 0 00-3.4 3.4 3.4 3.4 0 003.4 3.4c1.878 0 3.4-1.522 3.4-3.4h-3.4v-1.6h5c.08.525.12 1.056.12 1.6 0 3.645-2.955 6.6-6.6 6.6-3.645 0-6.6-2.955-6.6-6.6 0-3.645 2.955-6.6 6.6-6.6 1.764 0 3.37.69 4.56 1.82l-1.18 1.18c-.89-.85-2.08-1.4-3.4-1.4z" />
+  </svg>
+);
+
+const BattleNetIcon: React.FC<{ className?: string }> = ({ className = "w-4 h-4" }) => (
+  <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
+    <path d="M2.58 8.16l4.67 8.09 3.05-1.76-3.14-5.44 2.87-1.66 3.14 5.44 3.05-1.76-4.67-8.09-8.97 5.18zm8.97 10.66l6.23-3.6-1.53-2.65-4.7 2.71v-3.32l4.7-2.71-1.53-2.65-6.23 3.6v8.62h3.06z" />
+  </svg>
+);
+
+const XboxIcon: React.FC<{ className?: string }> = ({ className = "w-4 h-4" }) => (
+  <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
+    <path d="M4.198 19.53a12.016 12.016 0 0 1-2.457-4.148 11.96 11.96 0 0 1-.741-4.092c0-2.316.657-4.48 1.79-6.313a11.91 11.91 0 0 1 3.527-3.69c.143-.092.235-.074.387.037 1.854 1.353 3.655 2.825 5.296 4.417.074.074.129.074.203 0 1.64-1.592 3.442-3.064 5.296-4.417.152-.11.244-.129.387-.037a11.91 11.91 0 0 1 3.527 3.69 11.96 11.96 0 0 1 1.79 6.313c0 1.41-.258 2.784-.741 4.092a12.016 12.016 0 0 1-2.457 4.148c-.13.13-.23.13-.36 0-2.094-2.122-4.46-3.921-7.07-5.324-.093-.055-.185-.055-.278 0-2.61 1.403-4.976 3.202-7.07 5.324-.13.13-.23.13-.36 0z" />
+  </svg>
+);
+
+const PlayStationIcon: React.FC<{ className?: string }> = ({ className = "w-4 h-4" }) => (
+  <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
+    <path d="M8.985 2.59c-.43.16-.86.42-1.18.77-.38.41-.53.94-.53 1.54v9.84l4.24-1.52V4.54c0-.79-.58-1.5-1.37-1.81-.36-.14-.77-.19-1.16-.14zm6.67 5.24l-3.23 1.15v2.85l3.23-1.15c.67-.24 1.15-.88 1.15-1.6 0-.82-.57-1.46-1.15-1.25zM1.77 15.69c.5.18 1.05.27 1.59.27 1.8 0 3.32-.97 3.86-2.51l.3-.85-4.83 1.73c-.56.2-.96.65-.96 1.19 0 .1.01.17.04.17zm13.79-1.41c-1.44 0-2.73.66-3.56 1.71l2.58.93c.47-.41 1.06-.64 1.7-.64.91 0 1.63.45 1.84 1.15.08.28.05.54-.08.77-.17.3-.5.48-.96.48-1.28 0-2.69-.74-3.79-1.78l-2.03.73c1.55 1.64 3.65 2.52 5.82 2.52 1.44 0 2.65-.45 3.42-1.28.69-.74.88-1.71.53-2.67-.47-1.33-2.03-2.19-3.87-2.19z" />
+  </svg>
+);
+
+function getPlatformSourceInfo(source?: string) {
+  const s = source?.toLowerCase() || "";
+  if (s === "steam") {
+    return { title: "Platform: Steam", label: "STEAM", icon: <SteamIcon className="w-4 h-4 mx-auto text-slate-200" /> };
+  }
+  if (s === "epic" || s.includes("epic")) {
+    return { title: "Platform: Epic Games", label: "EPIC", icon: <EpicIcon className="w-4 h-4 mx-auto text-slate-200" /> };
+  }
+  if (s === "gog") {
+    return { title: "Platform: GOG", label: "GOG", icon: <GogIcon className="w-4 h-4 mx-auto text-slate-200" /> };
+  }
+  if (s === "battle.net" || s.includes("battle")) {
+    return { title: "Platform: Battle.net", label: "BATTLE.NET", icon: <BattleNetIcon className="w-4 h-4 mx-auto text-slate-200" /> };
+  }
+  if (s.includes("xbox")) {
+    return { title: "Platform: Xbox", label: "XBOX", icon: <XboxIcon className="w-4 h-4 mx-auto text-slate-200" /> };
+  }
+  if (s.includes("playstation") || s.includes("psn")) {
+    return { title: "Platform: PlayStation", label: "PSN", icon: <PlayStationIcon className="w-4 h-4 mx-auto text-slate-200" /> };
+  }
+  if (s === "local" || s === "manual") {
+    return { title: "Platform: PC (Local)", label: "LOCAL PC", icon: <Monitor className="w-4 h-4 mx-auto text-slate-200" /> };
+  }
+  return { title: `Platform: ${source || "PC"}`, label: (source || "PLATFORMS").toUpperCase(), icon: <Monitor className="w-4 h-4 mx-auto text-slate-200" /> };
+}
+
 interface GameDetailsProps {
   game: Game;
-  onLaunch: (game: Game) => void;
+  onLaunch: (game: Game, actionId?: string) => void;
   onStop?: (game: Game) => void;
   onToggleFavorite: (id: string) => void;
   onOpenEdit: (game: Game) => void;
@@ -131,9 +179,14 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
   });
   const [isLoadingHltb, setIsLoadingHltb] = useState(false);
 
-  // Steam news state
+  // Steam news & changelog state
   const [newsItems, setNewsItems] = useState<SteamNewsItem[]>([]);
   const [isLoadingNews, setIsLoadingNews] = useState(false);
+  const [selectedArticle, setSelectedArticle] = useState<SteamNewsItem | null>(null);
+
+  // Play Actions / Dual Launch dropdown state
+  const [isPlayActionsDropdownOpen, setIsPlayActionsDropdownOpen] = useState(false);
+  const playActionsDropdownRef = useRef<HTMLDivElement>(null);
 
   // SteamGridDB Modal state
   const [isSteamGridDBOpen, setIsSteamGridDBOpen] = useState(false);
@@ -252,19 +305,19 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
         .finally(() => setIsLoadingHltb(false));
     }
 
-    // 3. Fetch News if Steam game
-    if (steamAppId) {
-      setIsLoadingNews(true);
-      invoke<SteamNewsItem[]>("get_steam_news", { appid: steamAppId })
-        .then((items) => setNewsItems(items))
-        .catch((e) => {
-          console.warn("Steam news fetch error:", e);
-          setNewsItems([]);
-        })
-        .finally(() => setIsLoadingNews(false));
-    } else {
-      setNewsItems([]);
-    }
+    // 3. Fetch News & Patch Notes (Supports Steam AppID directly + auto title resolution for non-Steam/backup games)
+    setIsLoadingNews(true);
+    invoke<SteamNewsItem[]>("get_game_news", {
+      gameId: game.id,
+      title: game.title,
+      appid: steamAppId ? String(steamAppId) : null,
+    })
+      .then((items) => setNewsItems(items))
+      .catch((e) => {
+        console.warn("Game news fetch error:", e);
+        setNewsItems([]);
+      })
+      .finally(() => setIsLoadingNews(false));
   }, [game.id, game.source_id, game.title]);
 
   // Keep HLTB widget synced when live refresh updates props on the same game
@@ -290,6 +343,24 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
       document.removeEventListener("mousedown", handleClickOutside);
     };
   }, [isActionMenuOpen]);
+
+  // Close Play Actions dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        playActionsDropdownRef.current &&
+        !playActionsDropdownRef.current.contains(e.target as Node)
+      ) {
+        setIsPlayActionsDropdownOpen(false);
+      }
+    };
+    if (isPlayActionsDropdownOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [isPlayActionsDropdownOpen]);
 
   const handleOpenLink = async (url: string) => {
     try {
@@ -563,19 +634,20 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                 )}
 
                 {/* Platform / Source Button */}
-                <div
-                  title={game.source?.toLowerCase() === "steam" ? "Platform: Steam" : "Supported Platforms"}
-                  className="w-14 h-12 bg-black/25 backdrop-blur-md border border-white/15 hover:border-white/25 rounded-xl flex flex-col items-center justify-center p-1 shadow-lg text-center transition-all"
-                >
-                  {game.source?.toLowerCase() === "steam" ? (
-                    <SteamIcon className="w-4 h-4 mx-auto text-slate-200" />
-                  ) : (
-                    <Monitor className="w-4 h-4 mx-auto text-slate-200" />
-                  )}
-                  <div className="text-[7px] font-bold text-slate-400 tracking-wider uppercase mt-1">
-                    {game.source?.toLowerCase() === "steam" ? "STEAM" : "PLATFORMS"}
-                  </div>
-                </div>
+                {(() => {
+                  const platInfo = getPlatformSourceInfo(game.source);
+                  return (
+                    <div
+                      title={platInfo.title}
+                      className="w-14 h-12 bg-black/25 backdrop-blur-md border border-white/15 hover:border-white/25 rounded-xl flex flex-col items-center justify-center p-1 shadow-lg text-center transition-all"
+                    >
+                      {platInfo.icon}
+                      <div className="text-[7px] font-bold text-slate-400 tracking-wider uppercase mt-1 truncate max-w-full px-0.5">
+                        {platInfo.label}
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* Anchored Vertical Cover Poster - 200px wide, no line border */}
@@ -677,6 +749,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                         controls
                         autoPlay={trailerAutoplay}
                         muted={trailerMuted}
+                        loop
                         className="w-full h-full object-cover rounded-xl"
                       />
                     );
@@ -743,7 +816,10 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
               >
                 Overview
                 {activeTab === "overview" && (
-                  <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-white rounded-full shadow-sm" />
+                  <div
+                    className="absolute bottom-0 left-0 right-0 h-0.5 rounded-full shadow-sm"
+                    style={{ backgroundColor: "var(--app-accent-color, #ffffff)" }}
+                  />
                 )}
               </button>
 
@@ -757,7 +833,10 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
               >
                 Achievements
                 {activeTab === "achievements" && (
-                  <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-white rounded-full shadow-sm" />
+                  <div
+                    className="absolute bottom-0 left-0 right-0 h-0.5 rounded-full shadow-sm"
+                    style={{ backgroundColor: "var(--app-accent-color, #ffffff)" }}
+                  />
                 )}
               </button>
 
@@ -776,7 +855,10 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                   </span>
                 )}
                 {activeTab === "news" && (
-                  <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-white rounded-full shadow-sm" />
+                  <div
+                    className="absolute bottom-0 left-0 right-0 h-0.5 rounded-full shadow-sm"
+                    style={{ backgroundColor: "var(--app-accent-color, #ffffff)" }}
+                  />
                 )}
               </button>
             </div>
@@ -798,18 +880,18 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                 <AchievementsTab game={game} />
               )}
 
-              {/* Tab 3: News & Changelogs */}
+              {/* Tab 3: News & Activity Feed (Terraria Style) */}
               {activeTab === "news" && (
-                <div className="space-y-4">
+                <div className="space-y-5">
                   {isLoadingNews ? (
-                    <div className="flex items-center justify-center py-12 space-x-2 text-slate-400 text-xs">
-                      <Loader2 className="w-4 h-4 animate-spin text-white" />
-                      <span>Loading latest news and changelogs...</span>
+                    <div className="flex flex-col items-center justify-center py-16 space-y-3 text-zinc-400 text-xs">
+                      <Loader2 className="w-6 h-6 animate-spin text-purple-400" />
+                      <span>Fetching latest news and patch notes...</span>
                     </div>
                   ) : newsItems.length === 0 ? (
                     <div className="p-8 bg-black/30 backdrop-blur-md border border-white/10 rounded-2xl text-center space-y-2">
-                      <Newspaper className="w-8 h-8 text-slate-600 mx-auto" />
-                      <p className="text-xs text-slate-400">
+                      <Newspaper className="w-8 h-8 text-zinc-600 mx-auto" />
+                      <p className="text-xs text-zinc-400">
                         No news articles or changelogs found for this game.
                       </p>
                       {steamAppId && (
@@ -817,7 +899,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                           onClick={() =>
                             handleOpenLink(`https://store.steampowered.com/news/app/${steamAppId}`)
                           }
-                          className="text-xs text-slate-300 hover:text-white underline inline-flex items-center space-x-1 cursor-pointer"
+                          className="text-xs text-zinc-300 hover:text-white underline inline-flex items-center space-x-1 cursor-pointer"
                         >
                           <span>Open Steam News Hub</span>
                           <ExternalLink className="w-3 h-3" />
@@ -825,45 +907,158 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                       )}
                     </div>
                   ) : (
-                    <div className="space-y-3">
-                      {newsItems.map((item) => (
-                        <div
-                          key={item.gid}
-                          className="p-5 bg-black/30 backdrop-blur-md border border-white/10 hover:border-white/20 rounded-2xl space-y-2.5 transition-all shadow-md group"
-                        >
-                          <div className="flex items-center justify-between text-xs">
-                            <span className="px-2 py-0.5 rounded-full bg-white/10 text-slate-200 font-bold border border-white/10 text-[10px] uppercase tracking-wider">
-                              {item.feedlabel || item.author || "Update"}
-                            </span>
-                            <span className="text-slate-400 font-mono text-[11px]">
-                              {new Date(item.date * 1000).toLocaleDateString(undefined, {
-                                year: "numeric",
-                                month: "short",
-                                day: "numeric",
-                              })}
-                            </span>
-                          </div>
-                          <h4
-                            onClick={() => handleOpenLink(item.url)}
-                            className="text-sm font-bold text-white group-hover:text-slate-200 transition-colors cursor-pointer line-clamp-2"
+                    <div className="space-y-6">
+                      {/* Top Featured Hero Card */}
+                      {(() => {
+                        const featured = newsItems[0];
+                        const bannerImg = featured.image_url || featured.banner_image;
+                        return (
+                          <div
+                            onClick={() => setSelectedArticle(featured)}
+                            className="group relative rounded-2xl overflow-hidden border border-white/10 bg-black/40 hover:border-white/25 shadow-2xl transition-all cursor-pointer backdrop-blur-md"
                           >
-                            {item.title}
+                            {bannerImg && (
+                              <div className="relative w-full aspect-[21/9] sm:aspect-[2.4/1] max-h-[280px] overflow-hidden bg-black/60">
+                                <img
+                                  src={bannerImg}
+                                  alt=""
+                                  onError={(e) => {
+                                    const el = e.currentTarget;
+                                    el.style.display = "none";
+                                    const parent = el.parentElement;
+                                    if (parent) parent.style.display = "none";
+                                  }}
+                                  className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                                />
+                                <div className="absolute inset-0 bg-gradient-to-t from-[#0e0e11] via-black/40 to-transparent" />
+                              </div>
+                            )}
+
+                            <div className="p-5 sm:p-6 space-y-3">
+                              <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                                <div className="flex items-center space-x-2">
+                                  <span
+                                    className="px-2.5 py-0.5 rounded-full font-extrabold text-[10px] tracking-wider uppercase border"
+                                    style={{
+                                      backgroundColor: "color-mix(in srgb, var(--app-accent-color, #a855f7) 20%, transparent)",
+                                      borderColor: "color-mix(in srgb, var(--app-accent-color, #a855f7) 35%, transparent)",
+                                      color: "var(--app-accent-color, #a855f7)",
+                                    }}
+                                  >
+                                    {featured.category || "MAJOR UPDATE"}
+                                  </span>
+                                  <span className="text-zinc-400 font-mono text-[11px]">
+                                    {new Date(featured.date * 1000).toLocaleDateString(undefined, {
+                                      year: "numeric",
+                                      month: "short",
+                                      day: "numeric",
+                                    })}
+                                  </span>
+                                </div>
+                                <span className="text-[11px] text-zinc-500">
+                                  By {featured.author}
+                                </span>
+                              </div>
+
+                              <h3 className="text-base sm:text-lg font-black text-white transition-colors line-clamp-2">
+                                {featured.title}
+                              </h3>
+
+                              <p className="text-xs text-zinc-300 leading-relaxed line-clamp-3">
+                                {formatNewsExcerpt(featured.contents)}
+                              </p>
+
+                              <div className="pt-2 flex items-center justify-between">
+                                <span
+                                  className="text-xs font-bold flex items-center space-x-1.5"
+                                  style={{ color: "var(--app-accent-color, #a855f7)" }}
+                                >
+                                  <span>Read Full Changelog</span>
+                                  <span>→</span>
+                                </span>
+                                {featured.url && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleOpenLink(featured.url);
+                                    }}
+                                    className="text-[11px] text-zinc-400 hover:text-white flex items-center space-x-1 cursor-pointer"
+                                  >
+                                    <span>Steam Hub</span>
+                                    <ExternalLink className="w-3 h-3" />
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })()}
+
+                      {/* Subsequent News & Activity Cards */}
+                      {newsItems.length > 1 && (
+                        <div className="space-y-3">
+                          <h4 className="text-xs font-bold uppercase tracking-wider text-zinc-400 pt-2 border-t border-white/10">
+                            Recent Events & Updates
                           </h4>
-                          <p className="text-xs text-slate-300 leading-relaxed line-clamp-3">
-                            {formatNewsExcerpt(item.contents)}
-                          </p>
-                          <div className="pt-1 flex items-center justify-between">
-                            <span className="text-[11px] text-slate-500">By {item.author}</span>
-                            <button
-                              onClick={() => handleOpenLink(item.url)}
-                              className="text-xs font-semibold text-slate-300 hover:text-white flex items-center space-x-1 cursor-pointer"
-                            >
-                              <span>Read Full Article</span>
-                              <ExternalLink className="w-3 h-3" />
-                            </button>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                            {newsItems.slice(1).map((item) => {
+                              const bannerImg = item.image_url || item.banner_image;
+                              return (
+                                <div
+                                  key={item.gid}
+                                  onClick={() => setSelectedArticle(item)}
+                                  className="group p-4 bg-black/35 backdrop-blur-md border border-white/10 hover:border-white/20 rounded-2xl space-y-2.5 transition-all shadow-md cursor-pointer hover:bg-black/50 flex flex-col justify-between"
+                                >
+                                  <div className="space-y-2">
+                                    {bannerImg && (
+                                      <div className="w-full aspect-[16/9] max-h-[140px] rounded-xl overflow-hidden border border-white/5 bg-black/40 mb-2">
+                                        <img
+                                          src={bannerImg}
+                                          alt=""
+                                          onError={(e) => {
+                                            const el = e.currentTarget;
+                                            el.style.display = "none";
+                                            const parent = el.parentElement;
+                                            if (parent) parent.style.display = "none";
+                                          }}
+                                          className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                                        />
+                                      </div>
+                                    )}
+                                    <div className="flex items-center justify-between text-xs">
+                                      <span className="px-2 py-0.5 rounded-full bg-white/10 text-zinc-300 font-bold text-[10px] uppercase tracking-wider">
+                                        {item.category || item.feedlabel || "Update"}
+                                      </span>
+                                      <span className="text-zinc-500 font-mono text-[11px]">
+                                        {new Date(item.date * 1000).toLocaleDateString(undefined, {
+                                          month: "short",
+                                          day: "numeric",
+                                          year: "numeric",
+                                        })}
+                                      </span>
+                                    </div>
+                                    <h5 className="text-xs font-bold text-white group-hover:text-purple-200 transition-colors line-clamp-2">
+                                      {item.title}
+                                    </h5>
+                                    <p className="text-[11px] text-zinc-400 leading-relaxed line-clamp-2">
+                                      {formatNewsExcerpt(item.contents)}
+                                    </p>
+                                  </div>
+                                  <div className="pt-2 flex items-center justify-between border-t border-white/5 text-[11px]">
+                                    <span
+                                      className="font-medium hover:underline"
+                                      style={{ color: "var(--app-accent-color, #a855f7)" }}
+                                    >
+                                      View Article
+                                    </span>
+                                    <span className="text-zinc-500">By {item.author}</span>
+                                  </div>
+                                </div>
+                              );
+                            })}
                           </div>
                         </div>
-                      ))}
+                      )}
                     </div>
                   )}
                 </div>
@@ -1002,26 +1197,6 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                   </button>
                 </div>
 
-                {/* Library */}
-                <div className="flex items-center justify-between gap-2 min-w-0">
-                  <span className="text-slate-400 flex items-center space-x-1.5 shrink-0">
-                    <HardDrive className="w-3 h-3 text-slate-400" />
-                    <span>Library</span>
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => onToggleSource?.(game.source)}
-                    title={`Filter by ${game.source}`}
-                    className={`px-2 py-0.5 rounded border text-[11px] font-semibold text-right transition-all cursor-pointer ${
-                      selectedSources?.includes(game.source)
-                        ? "bg-white text-zinc-950 font-bold border-white"
-                        : "bg-white/5 border-white/10 text-slate-200 hover:bg-white/15 hover:text-white"
-                    }`}
-                  >
-                    {game.source}
-                  </button>
-                </div>
-
                 {/* Genres & Tags */}
                 {game.genres && game.genres.length > 0 && (
                   <div className="pt-2 border-t border-white/10 space-y-1.5">
@@ -1075,15 +1250,37 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                 </div>
 
                 {/* Installation Folder */}
-                {game.install_directory && (
+                {(game.install_directory || game.executable_path) && (
                   <div className="pt-2 border-t border-white/10 space-y-1">
                     <div className="text-slate-400 text-[10px] flex items-center space-x-1">
                       <HardDrive className="w-3 h-3 text-slate-400" />
                       <span>Installation Folder</span>
                     </div>
-                    <div className="text-[10px] text-slate-400 font-mono truncate" title={game.install_directory}>
-                      {game.install_directory}
-                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const target =
+                          game.install_directory ||
+                          (game.executable_path
+                            ? game.executable_path.substring(
+                                0,
+                                Math.max(
+                                  game.executable_path.lastIndexOf("\\"),
+                                  game.executable_path.lastIndexOf("/")
+                                )
+                              )
+                            : "");
+                        if (target) {
+                          invoke("open_in_explorer", { path: target }).catch((err) =>
+                            console.warn("Failed to open explorer:", err)
+                          );
+                        }
+                      }}
+                      title={`Click to open in Explorer: ${game.install_directory || game.executable_path}`}
+                      className="text-[10px] text-slate-400 hover:text-white font-mono truncate text-left w-full transition-colors cursor-pointer block"
+                    >
+                      {game.install_directory || game.executable_path}
+                    </button>
                   </div>
                 )}
               </div>
@@ -1182,7 +1379,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
 
             {/* Context Dropdown Popover */}
             {isActionMenuOpen && (
-              <div className="absolute bottom-full right-0 mb-3 w-56 bg-[#131625]/95 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl p-1.5 z-50 text-xs space-y-0.5 animate-in fade-in slide-in-from-bottom-2 duration-150">
+              <div className="absolute bottom-full right-0 mb-3 w-56 theme-panel-surface backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl p-1.5 z-50 text-xs space-y-0.5 animate-in fade-in slide-in-from-bottom-2 duration-150">
                 <button
                   onClick={() => {
                     setIsTrailerModalOpen(true);
@@ -1288,7 +1485,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
             <Settings className="w-4.5 h-4.5" />
           </button>
 
-          {/* 4. Big Play / Launching / Running Button: ~200px width x 48px height */}
+          {/* 4. Big Play / Dual Launch Split 80/20 Button */}
           {isRunning ? (
             <button
               onClick={() => setIsExitModalOpen(true)}
@@ -1299,7 +1496,118 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
               <span className="group-hover/run:hidden">Running</span>
               <span className="hidden group-hover/run:inline">Exit Game</span>
             </button>
+          ) : !game.is_installed ? (
+            <button
+              onClick={() => onLaunch(game)}
+              disabled={isLaunching}
+              className="w-[200px] h-12 rounded-full flex items-center justify-center space-x-2.5 text-sm font-black tracking-wider uppercase transition-all shadow-xl cursor-pointer bg-white text-slate-950 play-btn-glow"
+            >
+              <Download className="w-4.5 h-4.5" />
+              <span>Install</span>
+            </button>
+          ) : game.play_actions && game.play_actions.length > 0 ? (
+            /* 80/20 Split Play Button for Games with Multiple Play Actions */
+            <div className="relative" ref={playActionsDropdownRef}>
+              <div className="w-[220px] h-12 rounded-full flex overflow-hidden shadow-xl play-btn-glow bg-white text-slate-950 font-black">
+                {/* 80% Play Primary Action */}
+                <button
+                  onClick={() => {
+                    const primary = game.play_actions?.find((a) => a.is_primary);
+                    onLaunch(game, primary?.id);
+                  }}
+                  disabled={isLaunching}
+                  className="flex-1 h-full flex items-center justify-center space-x-2 px-3 text-sm tracking-wider uppercase transition-colors hover:bg-zinc-200 cursor-pointer disabled:opacity-50"
+                >
+                  {isLaunching ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin text-slate-950" />
+                      <span>LAUNCHING...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Play className="w-4.5 h-4.5 fill-slate-950 text-slate-950" />
+                      <span>Play</span>
+                    </>
+                  )}
+                </button>
+
+                {/* 1px Vertical Divider */}
+                <div className="w-px h-6 bg-slate-950/20 self-center" />
+
+                {/* 20% Action Dropdown Toggle */}
+                <button
+                  onClick={() => setIsPlayActionsDropdownOpen(!isPlayActionsDropdownOpen)}
+                  title="Choose launch configuration"
+                  className="w-11 h-full flex items-center justify-center hover:bg-zinc-200 transition-colors cursor-pointer"
+                >
+                  <ChevronDown
+                    className={`w-4 h-4 text-slate-950 transition-transform ${
+                      isPlayActionsDropdownOpen ? "rotate-180" : ""
+                    }`}
+                  />
+                </button>
+              </div>
+
+              {/* Play Actions Dropdown Menu */}
+              {isPlayActionsDropdownOpen && (
+                <div className="absolute bottom-full right-0 mb-3 w-64 theme-panel-surface backdrop-blur-2xl border border-white/10 rounded-2xl shadow-2xl p-2 z-50 text-xs space-y-1 animate-in fade-in slide-in-from-bottom-2 duration-150">
+                  <div className="px-2.5 py-1 text-[10px] uppercase font-bold tracking-wider text-zinc-500">
+                    Launch Configurations
+                  </div>
+
+                  {/* Standard Launch Option */}
+                  <button
+                    onClick={() => {
+                      setIsPlayActionsDropdownOpen(false);
+                      onLaunch(game);
+                    }}
+                    className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-left text-zinc-200 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+                  >
+                    <div className="flex items-center space-x-2 truncate pr-2">
+                      <Play className="w-3.5 h-3.5 text-emerald-400 shrink-0 fill-emerald-400" />
+                      <span className="truncate font-semibold">Standard Launch</span>
+                    </div>
+                  </button>
+
+                  {/* Configured Actions */}
+                  {game.play_actions.map((act) => (
+                    <button
+                      key={act.id}
+                      onClick={() => {
+                        setIsPlayActionsDropdownOpen(false);
+                        onLaunch(game, act.id);
+                      }}
+                      className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-left text-zinc-200 hover:text-white hover:bg-white/10 transition-colors cursor-pointer group"
+                    >
+                      <div className="flex items-center space-x-2 truncate pr-2">
+                        <Play className="w-3.5 h-3.5 text-purple-400 shrink-0 group-hover:fill-purple-400" />
+                        <span className="truncate font-semibold">{act.name}</span>
+                      </div>
+                      {act.is_primary && (
+                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 font-mono shrink-0">
+                          Primary
+                        </span>
+                      )}
+                    </button>
+                  ))}
+
+                  <div className="my-1 border-t border-white/10" />
+
+                  <button
+                    onClick={() => {
+                      setIsPlayActionsDropdownOpen(false);
+                      onOpenEdit(game);
+                    }}
+                    className="w-full flex items-center space-x-2 px-3 py-1.5 rounded-xl text-left text-zinc-400 hover:text-white hover:bg-white/[0.06] transition-colors cursor-pointer text-[11px]"
+                  >
+                    <Settings className="w-3.5 h-3.5 text-zinc-400" />
+                    <span>Manage Actions...</span>
+                  </button>
+                </div>
+              )}
+            </div>
           ) : (
+            /* Single Large Play Button when no custom play_actions are configured */
             <button
               onClick={() => onLaunch(game)}
               disabled={isLaunching}
@@ -1312,17 +1620,12 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
               {isLaunching ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin text-slate-950" />
-                  <span>{game.is_installed ? "LAUNCHING..." : "INSTALLING..."}</span>
-                </>
-              ) : game.is_installed ? (
-                <>
-                  <Play className="w-4.5 h-4.5 fill-slate-950 text-slate-950" />
-                  <span>Play</span>
+                  <span>LAUNCHING...</span>
                 </>
               ) : (
                 <>
-                  <Download className="w-4.5 h-4.5" />
-                  <span>Install</span>
+                  <Play className="w-4.5 h-4.5 fill-slate-950 text-slate-950" />
+                  <span>Play</span>
                 </>
               )}
             </button>
@@ -1338,7 +1641,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-sm bg-[#0e101a] border border-white/15 rounded-2xl p-5 shadow-2xl space-y-4 text-center select-none"
+            className="w-full max-w-sm theme-panel-surface border border-white/15 rounded-2xl p-5 shadow-2xl space-y-4 text-center select-none"
           >
             <div className="w-12 h-12 rounded-full bg-rose-500/15 border border-rose-500/30 text-rose-400 flex items-center justify-center mx-auto shadow-md">
               <Square className="w-5 h-5 fill-rose-400" />
@@ -1389,6 +1692,15 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
           onClose={() => setIsTrailerModalOpen(false)}
           game={game}
           onSaveTrailers={handleSaveTrailers}
+        />
+      )}
+
+      {/* Steam News Article & Patch Notes Reader Modal */}
+      {selectedArticle && (
+        <NewsArticleModal
+          article={selectedArticle}
+          gameTitle={game.title}
+          onClose={() => setSelectedArticle(null)}
         />
       )}
     </div>

@@ -3,7 +3,6 @@ import {
   X,
   Library,
   Settings,
-  Gamepad2,
   RefreshCw,
   Sparkles,
   ChevronRight,
@@ -77,14 +76,18 @@ export const LeftDrawer: React.FC<LeftDrawerProps> = ({
 
       {/* Sliding Drawer Container: Smoked Neutral Dark Glass */}
       <aside
-        className={`fixed top-0 left-0 bottom-0 w-64 bg-[#0e0e11]/85 backdrop-blur-2xl border-r border-white/10 z-50 flex flex-col shadow-[0_20px_60px_rgba(0,0,0,0.85)] transition-transform duration-250 ease-out select-none ${
+        className={`fixed top-0 left-0 bottom-0 w-64 theme-panel-surface backdrop-blur-2xl border-r border-white/10 z-50 flex flex-col shadow-[0_20px_60px_rgba(0,0,0,0.85)] transition-transform duration-250 ease-out select-none ${
           isOpen ? "translate-x-0" : "-translate-x-full"
         }`}
       >
         {/* Header */}
         <div className="h-14 px-4 border-b border-white/10 flex items-center justify-between bg-white/[0.03] backdrop-blur-sm shrink-0">
           <div className="flex items-center space-x-2.5">
-            <Gamepad2 className="w-5 h-5 text-zinc-400" />
+            <img
+              src="/OpenPlayIcon.svg"
+              alt="OpenPlay"
+              className="w-5 h-5 invert filter drop-shadow-[0_0_8px_rgba(168,85,247,0.4)]"
+            />
             <span className="font-extrabold text-sm text-white tracking-wide">
               OpenPlay
             </span>
@@ -155,7 +158,7 @@ export const LeftDrawer: React.FC<LeftDrawerProps> = ({
 
             {/* Submenu Flyout (Neutral Smoked Dark Glass) */}
             {isFlyoutVisible && (
-              <div className="absolute left-full top-0 ml-2 w-72 bg-[#0e0e11]/95 backdrop-blur-2xl border border-white/10 rounded-2xl shadow-[0_16px_48px_rgba(0,0,0,0.8)] p-2.5 z-50 flex flex-col space-y-1 text-zinc-200 animate-in fade-in slide-in-from-left-2 duration-150">
+              <div className="absolute left-full top-0 ml-2 w-72 theme-panel-surface backdrop-blur-2xl border border-white/10 rounded-2xl shadow-[0_16px_48px_rgba(0,0,0,0.8)] p-2.5 z-50 flex flex-col space-y-1 text-zinc-200 animate-in fade-in slide-in-from-left-2 duration-150">
                 <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-zinc-500 flex items-center justify-between">
                   <span>Refresh Options</span>
                   {(isScanning || isSyncingMetadata || isFullRefreshing) && (

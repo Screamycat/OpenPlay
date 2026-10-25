@@ -1,19 +1,30 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct GameLink {
     pub title: String,
     pub url: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct GameTrailer {
     pub name: String,
     pub thumbnail: String,
     pub url: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct GameAction {
+    pub id: String,
+    pub name: String,
+    pub path: String,
+    pub arguments: Option<String>,
+    pub working_dir: Option<String>,
+    #[serde(default)]
+    pub is_primary: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Game {
     pub id: String,
     pub title: String,
@@ -61,4 +72,8 @@ pub struct Game {
     pub region: Option<String>,
     #[serde(default)]
     pub play_count: Option<u32>,
+    #[serde(default)]
+    pub is_hidden: bool,
+    #[serde(default)]
+    pub play_actions: Vec<GameAction>,
 }

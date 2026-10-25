@@ -582,7 +582,7 @@ export const AchievementHunterHub: React.FC<AchievementHunterHubProps> = ({
           onClick={() => setInspectGame(null)}
         >
           <div
-            className="bg-[#0e101a]/95 border border-white/10 rounded-2xl w-full max-w-4xl max-h-[85vh] flex flex-col shadow-2xl overflow-hidden backdrop-blur-2xl"
+            className="theme-panel-surface border border-white/10 rounded-2xl w-full max-w-4xl max-h-[85vh] flex flex-col shadow-2xl overflow-hidden backdrop-blur-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="px-6 py-4 border-b border-white/10 flex items-center justify-between">

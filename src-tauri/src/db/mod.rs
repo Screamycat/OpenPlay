@@ -90,6 +90,8 @@ impl Database {
         let _ = conn.execute("ALTER TABLE games ADD COLUMN categories TEXT", []);
         let _ = conn.execute("ALTER TABLE games ADD COLUMN region TEXT", []);
         let _ = conn.execute("ALTER TABLE games ADD COLUMN play_count INTEGER", []);
+        let _ = conn.execute("ALTER TABLE games ADD COLUMN is_hidden INTEGER NOT NULL DEFAULT 0", []);
+        let _ = conn.execute("ALTER TABLE games ADD COLUMN play_actions TEXT", []);
 
         // Normalize date_added formats to clean YYYY-MM-DD and strip broken replacement chars in titles
         let _ = conn.execute("UPDATE games SET date_added = SUBSTR(date_added, 1, 10) WHERE date_added LIKE '%T%'", []);
@@ -158,7 +160,7 @@ impl Database {
                 platforms, community_score, user_rating, playtime_seconds, last_played,
                 date_added, completion_status, description, notes, links, screenshots, size_on_disk,
                 trailers, age_rating, critic_score, series, hltb_main, hltb_extra, hltb_completionist,
-                tags, categories, region, play_count
+                tags, categories, region, play_count, is_hidden, play_actions
             FROM games ORDER BY title ASC")
             .map_err(|e| e.to_string())?;
 
@@ -172,6 +174,7 @@ impl Database {
                 let trailers_json: String = row.get(31).unwrap_or_else(|_| "[]".to_string());
                 let tags_json: String = row.get(38).unwrap_or_else(|_| "[]".to_string());
                 let categories_json: String = row.get(39).unwrap_or_else(|_| "[]".to_string());
+                let play_actions_json: String = row.get(43).unwrap_or_else(|_| "[]".to_string());
 
                 let genres: Vec<String> = serde_json::from_str(&genres_json).unwrap_or_default();
                 let features: Vec<String> = serde_json::from_str(&features_json).unwrap_or_default();
@@ -181,9 +184,11 @@ impl Database {
                 let trailers: Vec<GameTrailer> = serde_json::from_str(&trailers_json).unwrap_or_default();
                 let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
                 let categories: Vec<String> = serde_json::from_str(&categories_json).unwrap_or_default();
+                let play_actions: Vec<crate::models::GameAction> = serde_json::from_str(&play_actions_json).unwrap_or_default();
 
                 let is_installed_int: i32 = row.get(8)?;
                 let is_favorite_int: i32 = row.get(9)?;
+                let is_hidden_int: i32 = row.get(42).unwrap_or(0);
 
                 Ok(Game {
                     id: row.get(0)?,
@@ -228,6 +233,8 @@ impl Database {
                     categories,
                     region: row.get(40)?,
                     play_count: row.get(41)?,
+                    is_hidden: is_hidden_int != 0,
+                    play_actions,
                 })
             })
             .map_err(|e| e.to_string())?;
@@ -251,6 +258,7 @@ impl Database {
         let trailers_json = serde_json::to_string(&game.trailers).unwrap_or_else(|_| "[]".to_string());
         let tags_json = serde_json::to_string(&game.tags).unwrap_or_else(|_| "[]".to_string());
         let categories_json = serde_json::to_string(&game.categories).unwrap_or_else(|_| "[]".to_string());
+        let play_actions_json = serde_json::to_string(&game.play_actions).unwrap_or_else(|_| "[]".to_string());
 
         conn.execute(
             "INSERT INTO games (
@@ -260,11 +268,11 @@ impl Database {
                 platforms, community_score, user_rating, playtime_seconds, last_played,
                 date_added, completion_status, description, notes, links, screenshots, size_on_disk,
                 trailers, age_rating, critic_score, series, hltb_main, hltb_extra, hltb_completionist,
-                tags, categories, region, play_count
+                tags, categories, region, play_count, is_hidden, play_actions
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
                 ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31,
-                ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41, ?42
+                ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44
             ) ON CONFLICT(id) DO UPDATE SET
                 title = excluded.title,
                 sorting_title = COALESCE(excluded.sorting_title, games.sorting_title),
@@ -318,7 +326,9 @@ impl Database {
                 tags = CASE WHEN excluded.tags != '[]' THEN excluded.tags ELSE games.tags END,
                 categories = CASE WHEN excluded.categories != '[]' THEN excluded.categories ELSE games.categories END,
                 region = COALESCE(excluded.region, games.region),
-                play_count = COALESCE(excluded.play_count, games.play_count)",
+                play_count = COALESCE(excluded.play_count, games.play_count),
+                is_hidden = COALESCE(excluded.is_hidden, games.is_hidden),
+                play_actions = CASE WHEN excluded.play_actions != '[]' THEN excluded.play_actions ELSE games.play_actions END",
             params![
                 game.id,
                 game.title,
@@ -362,6 +372,8 @@ impl Database {
                 categories_json,
                 game.region,
                 game.play_count,
+                if game.is_hidden { 1 } else { 0 },
+                play_actions_json,
             ],
         ).map_err(|e| e.to_string())?;
 
@@ -378,6 +390,7 @@ impl Database {
         let trailers_json = serde_json::to_string(&game.trailers).unwrap_or_else(|_| "[]".to_string());
         let tags_json = serde_json::to_string(&game.tags).unwrap_or_else(|_| "[]".to_string());
         let categories_json = serde_json::to_string(&game.categories).unwrap_or_else(|_| "[]".to_string());
+        let play_actions_json = serde_json::to_string(&game.play_actions).unwrap_or_else(|_| "[]".to_string());
 
         let rows_affected = conn.execute(
             "UPDATE games SET
@@ -421,8 +434,10 @@ impl Database {
                 tags = ?38,
                 categories = ?39,
                 region = ?40,
-                play_count = ?41
-            WHERE id = ?42",
+                play_count = ?41,
+                is_hidden = ?42,
+                play_actions = ?43
+            WHERE id = ?44",
             params![
                 game.title,
                 game.sorting_title,
@@ -465,6 +480,8 @@ impl Database {
                 categories_json,
                 game.region,
                 game.play_count,
+                if game.is_hidden { 1 } else { 0 },
+                play_actions_json,
                 game.id,
             ],
         ).map_err(|e| e.to_string())?;

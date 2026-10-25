@@ -17,7 +17,7 @@
 
 <br />
 
-## 🌟 The Vision: What Playnite Isn't
+## 🌟 The Vision: What Others Aren't
 
 For years, PC gamers who wanted to unify their fragmented game libraries turned to **Playnite**. We honor Playnite for pioneering open-source library management on PC. 
 
@@ -85,16 +85,17 @@ No hunting through forums for third-party scripts. OpenPlay ships with essential
 | Feature | OpenPlay (Native) | Traditional Launchers |
 |:---|:---:|:---:|
 | **Native Linux & SteamOS Support** | ✅ **Native** | ❌ Windows Only |
-| **Animated & Moving Covers** (WebM, MP4, APNG, GIF) | ✅ **Built-in** | ⚠️ Complex Workarounds |
+| **Animated & Moving Covers** (WebM, MP4, APNG, GIF) | ✅ **Built-in** | ⚠️Rarely supported |
 | **Steam & Epic Games Account Integration** | ✅ **Built-in** | 🔌 Requires Plugin |
 | **Achievement Hub & In-Game Trophies** | ✅ **Built-in** | 🔌 Requires Plugin |
 | **SteamGridDB Artwork Integration** | ✅ **Built-in** | 🔌 Requires Plugin |
 | **HowLongToBeat Completion Metrics** | ✅ **Built-in** | 🔌 Requires Plugin |
-| **Live Steam Player Counts & News Hub** | ✅ **Built-in** | 🔌 Requires Plugin |
-| **On-Demand Video Trailers** | ✅ **Built-in** | 🔌 Requires Plugin |
-| **True Window Lifetime Tracking** (Auto Revert to Play) | ✅ **Built-in** | ⚠️ Inconsistent Exit Detection |
+| **Live Steam Player Counts** | ✅ **Built-in** | 🔌 Requires Plugin |
+| **In-App Patch Notes & News Reader** | ✅ **Built-in** | 🔌 Requires Plugin |
+| **Dual Launch & Modded Play Actions** | ✅ **Built-in** | ⚠️ Basic Shortcuts |
+| **Game Trailers or videos** | ✅ **Built-in** | 🔌 Requires Plugin |
+| **True Window Lifetime Tracking**| ✅ **Built-in** | ⚠️ Inconsistent Exit Detection |
 | **Playnite Backup (.zip) Importer & Media Extractor** | ✅ **Built-in** | ❌ N/A |
-| **Local Game Executable & Directory Scanner** | ✅ **Built-in** | ⚠️ Basic Manual Shortcuts |
 
 ---
 
@@ -113,11 +114,12 @@ OpenPlay is built on top of **Tauri v2** and **Rust**, eschewing heavy Electron 
 
 Switching library managers shouldn't mean losing years of playtime stats, custom tags, and curated artwork. 
 
-We are actively developing a **1-click Playnite Backup Importer**:
+We have developed a **1-click Playnite Backup Importer**:
 1. Export or point to your existing Playnite database directory.
 2. OpenPlay parses your categories, completion states, playtime records, and artwork links.
 3. Your entire library is instantly ready on Windows or native Linux with zero setup friction.
 
+> More to migration come?
 ---
 
 ## 🏗️ Architecture & Tech Stack
@@ -179,23 +181,6 @@ Ensure you have the following installed on your machine:
    ```bash
    npm run tauri build
    ```
-
----
-
-## 🗺️ Roadmap & Community Backlog
-
-Check out our full live tracking document in [ROADMAP.md](./ROADMAP.md) for current sprint items, feature backlogs, and bug reports.
-
-- [x] Steam library scanning with artwork cache preservation
-- [x] High-precision Windows game exit & process lifecycle detection
-- [x] Glassmorphic right-click context menu at click coordinates
-- [x] 7-tabbed properties dialog with native folder & executable selectors
-- [x] Categorized settings system with SQLite persistent app state & session restore
-- [x] 3-Tier Achievements Engine: Dedicated Achievement Hub, Steam details tab, and quick showcase widget
-- [ ] **Playnite Backup Importer**
-- [ ] **Native Linux packaging (.deb, .AppImage, Flatpak)**
-- [ ] **Fullscreen / Couch Controller Mode**
-- [ ] **Community Theme & Extension Plugin Engine**
 
 ---
 

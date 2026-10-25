@@ -320,6 +320,8 @@ impl EpicScanner {
                                     categories: Vec::new(),
                                     region: None,
                                     play_count: Some(0),
+                                    is_hidden: false,
+                                    play_actions: Vec::new(),
                                 };
 
                                 seen_ids.insert(game.id.clone());
@@ -450,6 +452,8 @@ impl EpicScanner {
                                         categories: Vec::new(),
                                         region: None,
                                         play_count: Some(0),
+                                        is_hidden: false,
+                                        play_actions: Vec::new(),
                                     };
 
                                     seen_ids.insert(game_id);

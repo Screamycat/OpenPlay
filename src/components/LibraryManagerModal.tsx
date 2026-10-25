@@ -224,7 +224,7 @@ export const LibraryManagerModal: React.FC<LibraryManagerModalProps> = ({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-4xl bg-[#0f111a] border border-[#23293e] rounded-2xl shadow-2xl overflow-hidden flex flex-col h-[640px]"
+        className="w-full max-w-4xl theme-panel-surface border border-white/10 rounded-2xl shadow-2xl overflow-hidden flex flex-col h-[640px]"
       >
         {/* Header Bar */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-[#1e2333] bg-[#121520]">
@@ -253,7 +253,7 @@ export const LibraryManagerModal: React.FC<LibraryManagerModalProps> = ({
         {/* Modal Body: Left Categorized Sidebar + Right Content Pane */}
         <div className="flex-1 flex overflow-hidden">
           {/* Left Categorized Navigation (Manual, Emulation, Providers) */}
-          <div className="w-64 border-r border-[#1e2333] bg-[#0c0e15] overflow-y-auto p-3 space-y-4 select-none">
+          <div className="w-64 border-r border-white/10 bg-black/20 overflow-y-auto p-3 space-y-4 select-none">
             {/* 1. MANUAL & IMPORT */}
             <div>
               <div className="px-2 py-1 text-[10px] uppercase font-bold text-slate-500 tracking-wider">
@@ -426,7 +426,7 @@ export const LibraryManagerModal: React.FC<LibraryManagerModalProps> = ({
           </div>
 
           {/* Right Pane: Dynamic based on Active Tab */}
-          <div className="flex-1 p-6 overflow-y-auto bg-[#0f111a]">
+          <div className="flex-1 p-6 overflow-y-auto bg-transparent">
             {/* Status Feedback Toast / Banner */}
             {syncStatusMsg && (
               <div className="mb-4 p-3 bg-cyan-950/60 border border-cyan-500/40 rounded-xl text-cyan-300 text-xs flex items-center space-x-2 animate-in fade-in duration-200">
@@ -522,7 +522,7 @@ export const LibraryManagerModal: React.FC<LibraryManagerModalProps> = ({
                             value={manualInput}
                             onChange={(e) => setManualInput(e.target.value)}
                             placeholder="e.g. 76561198333189713 or custom_url"
-                            className="flex-1 px-3 py-2 bg-[#10131d] border border-[#262c42] rounded-lg text-xs text-white focus:outline-none focus:border-cyan-400 font-mono"
+                            className="flex-1 px-3 py-2 bg-black/40 border border-white/10 rounded-lg text-xs text-white focus:outline-none focus:border-cyan-400 font-mono"
                           />
                           <button
                             type="submit"
@@ -710,7 +710,7 @@ export const LibraryManagerModal: React.FC<LibraryManagerModalProps> = ({
                             value={epicManualInput}
                             onChange={(e) => setEpicManualInput(e.target.value)}
                             placeholder="Paste 32-character authorization code here"
-                            className="flex-1 px-3 py-2 bg-[#10131d] border border-[#262c42] rounded-lg text-xs text-white focus:outline-none focus:border-purple-400 font-mono"
+                            className="flex-1 px-3 py-2 bg-black/40 border border-white/10 rounded-lg text-xs text-white focus:outline-none focus:border-purple-400 font-mono"
                           />
                           <button
                             type="submit"

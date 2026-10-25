@@ -6,10 +6,33 @@
     --bg-secondary: rgba(18, 20, 28, 0.75);
     --bg-card: rgba(22, 25, 36, 0.65);
     --bg-hover: rgba(255, 255, 255, 0.08);
-    --accent: #ffffff;
+    --accent: #a855f7;
+    --app-accent-color: #a855f7;
+    --app-panel-tint: #0e0e11;
     --border-color: rgba(255, 255, 255, 0.08);
     --text-primary: #f8fafc;
     --text-muted: #94a3b8;
+  }
+
+  /* Dynamic Theme Classes driven by user config */
+  .theme-panel-surface {
+    background-color: color-mix(in srgb, var(--app-panel-tint, #0e0e11) 92%, transparent) !important;
+  }
+
+  .theme-panel-solid {
+    background-color: var(--app-panel-tint, #0e0e11) !important;
+  }
+
+  .theme-accent-bg {
+    background-color: var(--app-accent-color, #a855f7) !important;
+  }
+
+  .theme-accent-text {
+    color: var(--app-accent-color, #a855f7) !important;
+  }
+
+  .theme-accent-border {
+    border-color: var(--app-accent-color, #a855f7) !important;
   }
 
   body {
@@ -23,7 +46,16 @@
   }
 }
 
-/* Custom Scrollbars */
+/* Custom Auto-Hiding Scrollbars: Invisible when idle, subtly visible on hover */
+html, body, div, main, aside, section {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+div:hover, main:hover, aside:hover, section:hover {
+  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+}
+
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -34,12 +66,20 @@
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
-  border-radius: 4px;
+  background: transparent;
+  border-radius: 9999px;
+  transition: background-color 0.25s ease;
+}
+
+div:hover::-webkit-scrollbar-thumb,
+main:hover::-webkit-scrollbar-thumb,
+aside:hover::-webkit-scrollbar-thumb,
+section:hover::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.16);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.35) !important;
 }
 
 /* Playnite FusionX Glassmorphism */

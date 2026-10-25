@@ -12,10 +12,33 @@ import {
   EyeOff,
   Terminal,
   Archive,
+  RefreshCw,
+  Download,
+  CheckCircle2,
+  AlertCircle,
 } from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { AppConfig, DEFAULT_APP_CONFIG } from "../types/config";
 import { PlayniteBackupTab } from "./library/PlayniteBackupTab";
+
+interface ReleaseAssetInfo {
+  name: string;
+  download_url: string;
+  size: number;
+}
+
+interface UpdateCheckResult {
+  current_version: string;
+  latest_version: string;
+  is_update_available: boolean;
+  release_name?: string | null;
+  release_notes?: string | null;
+  published_at?: string | null;
+  html_url?: string | null;
+  download_url?: string | null;
+  assets?: ReleaseAssetInfo[];
+}
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -52,6 +75,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [showRaKey, setShowRaKey] = useState(false);
   const [showIgdbSecret, setShowIgdbSecret] = useState(false);
   const [isSavedNotice, setIsSavedNotice] = useState(false);
+  const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(null);
+  const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
+  const [updateError, setUpdateError] = useState<string | null>(null);
+
+  const handleCheckForUpdates = async () => {
+    setIsCheckingUpdate(true);
+    setUpdateError(null);
+    try {
+      const res = await invoke<UpdateCheckResult>("check_for_app_updates");
+      setUpdateResult(res);
+    } catch (err: any) {
+      setUpdateError(String(err));
+    } finally {
+      setIsCheckingUpdate(false);
+    }
+  };
 
   useEffect(() => {
     setFormConfig({ ...DEFAULT_APP_CONFIG, ...initialConfig });
@@ -83,7 +122,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="bg-[#0e0e11]/80 backdrop-blur-2xl border border-white/10 rounded-2xl w-full max-w-4xl h-[620px] max-h-[90vh] shadow-[0_20px_60px_rgba(0,0,0,0.85)] flex flex-col overflow-hidden text-zinc-200"
+        className="theme-panel-surface backdrop-blur-2xl border border-white/10 rounded-2xl w-full max-w-4xl h-[620px] max-h-[90vh] shadow-[0_20px_60px_rgba(0,0,0,0.85)] flex flex-col overflow-hidden text-zinc-200"
       >
         {/* Header */}
         <div className="h-14 px-5 border-b border-white/10 flex items-center justify-between bg-white/[0.02] shrink-0">
@@ -279,6 +318,126 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       onChange={(e) => updateField("background_opacity", Number(e.target.value))}
                       className="w-full h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer accent-white"
                     />
+                  </div>
+
+                  <div className="border-t border-white/5" />
+
+                  {/* Theme Accent Color */}
+                  <div className="space-y-2">
+                    <div className="flex justify-between items-center">
+                      <div>
+                        <label className="font-semibold text-zinc-200 block">Theme Accent Color</label>
+                        <span className="text-[11px] text-zinc-400">
+                          Highlights, focus rings, badges, and primary interactive accents
+                        </span>
+                      </div>
+                      <span className="font-mono text-zinc-300 text-xs px-2 py-0.5 rounded bg-white/5 border border-white/10">
+                        {formConfig.accent_color || "#a855f7"}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 flex-wrap pt-1">
+                      {[
+                        { name: "Purple", hex: "#a855f7" },
+                        { name: "Cyan", hex: "#06b6d4" },
+                        { name: "Blue", hex: "#3b82f6" },
+                        { name: "Emerald", hex: "#10b981" },
+                        { name: "Amber", hex: "#f59e0b" },
+                        { name: "Rose", hex: "#f43f5e" },
+                        { name: "White", hex: "#ffffff" },
+                      ].map((preset) => {
+                        const isSelected =
+                          (formConfig.accent_color || "#a855f7").toLowerCase() ===
+                          preset.hex.toLowerCase();
+                        return (
+                          <button
+                            key={preset.hex}
+                            type="button"
+                            onClick={() => updateField("accent_color", preset.hex)}
+                            title={preset.name}
+                            className={`w-7 h-7 rounded-full transition-all cursor-pointer flex items-center justify-center border ${
+                              isSelected
+                                ? "ring-2 ring-white ring-offset-2 ring-offset-black scale-110 border-white"
+                                : "border-white/20 hover:scale-105"
+                            }`}
+                            style={{ backgroundColor: preset.hex }}
+                          >
+                            {isSelected && (
+                              <Check
+                                className={`w-3.5 h-3.5 ${
+                                  preset.hex === "#ffffff" ? "text-black" : "text-white"
+                                }`}
+                              />
+                            )}
+                          </button>
+                        );
+                      })}
+                      {/* Custom color picker */}
+                      <label className="relative w-7 h-7 rounded-full border border-white/20 hover:border-white/40 cursor-pointer overflow-hidden flex items-center justify-center bg-white/5 transition-all">
+                        <input
+                          type="color"
+                          value={formConfig.accent_color || "#a855f7"}
+                          onChange={(e) => updateField("accent_color", e.target.value)}
+                          className="opacity-0 absolute inset-0 w-full h-full cursor-pointer"
+                        />
+                        <Palette className="w-3.5 h-3.5 text-zinc-400" />
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="border-t border-white/5" />
+
+                  {/* Panel Background Tint */}
+                  <div className="space-y-2">
+                    <div className="flex justify-between items-center">
+                      <div>
+                        <label className="font-semibold text-zinc-200 block">Panel Tint & Windows Background</label>
+                        <span className="text-[11px] text-zinc-400">
+                          Base background shade applied to dialogs, menus, and side panes
+                        </span>
+                      </div>
+                      <span className="font-mono text-zinc-300 text-xs px-2 py-0.5 rounded bg-white/5 border border-white/10">
+                        {formConfig.panel_tint || "#0e0e11"}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 flex-wrap pt-1">
+                      {[
+                        { name: "Greyish Black", hex: "#0e0e11" },
+                        { name: "Onyx", hex: "#070709" },
+                        { name: "Midnight Navy", hex: "#0a0d17" },
+                        { name: "Charcoal", hex: "#14151b" },
+                        { name: "Slate", hex: "#0f172a" },
+                      ].map((preset) => {
+                        const isSelected =
+                          (formConfig.panel_tint || "#0e0e11").toLowerCase() ===
+                          preset.hex.toLowerCase();
+                        return (
+                          <button
+                            key={preset.hex}
+                            type="button"
+                            onClick={() => updateField("panel_tint", preset.hex)}
+                            title={preset.name}
+                            className={`w-7 h-7 rounded-full transition-all cursor-pointer flex items-center justify-center border ${
+                              isSelected
+                                ? "ring-2 ring-white ring-offset-2 ring-offset-black scale-110 border-white"
+                                : "border-white/20 hover:scale-105"
+                            }`}
+                            style={{ backgroundColor: preset.hex }}
+                          >
+                            {isSelected && <Check className="w-3.5 h-3.5 text-white" />}
+                          </button>
+                        );
+                      })}
+                      {/* Custom tint picker */}
+                      <label className="relative w-7 h-7 rounded-full border border-white/20 hover:border-white/40 cursor-pointer overflow-hidden flex items-center justify-center bg-white/5 transition-all">
+                        <input
+                          type="color"
+                          value={formConfig.panel_tint || "#0e0e11"}
+                          onChange={(e) => updateField("panel_tint", e.target.value)}
+                          className="opacity-0 absolute inset-0 w-full h-full cursor-pointer"
+                        />
+                        <Palette className="w-3.5 h-3.5 text-zinc-400" />
+                      </label>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -560,23 +719,202 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   </p>
                 </div>
 
+                {/* App Info Card */}
                 <div className="bg-white/[0.02] border border-white/5 rounded-xl p-4 space-y-4">
-                  <div className="flex items-center space-x-3">
-                    <div className="w-10 h-10 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center">
-                      <Sliders className="w-5 h-5 text-white" />
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-3">
+                      <div className="w-11 h-11 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center p-2">
+                        <img
+                          src="/OpenPlayIcon.svg"
+                          alt="OpenPlay"
+                          className="w-full h-full invert filter drop-shadow-[0_0_8px_rgba(168,85,247,0.4)]"
+                        />
+                      </div>
+                      <div>
+                        <div className="font-extrabold text-sm text-white flex items-center space-x-2">
+                          <span>OpenPlay</span>
+                          <span
+                            className="text-[10px] px-2 py-0.5 rounded-full font-mono font-bold text-white border"
+                            style={{
+                              backgroundColor: "color-mix(in srgb, var(--app-accent-color, #a855f7) 25%, transparent)",
+                              borderColor: "color-mix(in srgb, var(--app-accent-color, #a855f7) 50%, transparent)",
+                            }}
+                          >
+                            v0.1.0
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-zinc-400">
+                          Cross-platform game library & launcher
+                        </div>
+                      </div>
                     </div>
+
+                    <button
+                      type="button"
+                      onClick={() => openUrl("https://github.com/Screamycat/OpenPlay")}
+                      className="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-semibold text-zinc-300 hover:text-white flex items-center space-x-1.5 transition-colors cursor-pointer"
+                    >
+                      <span>GitHub</span>
+                      <ExternalLink className="w-3.5 h-3.5 text-zinc-400" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Software Updates Section */}
+                <div className="bg-white/[0.02] border border-white/5 rounded-xl p-4 space-y-4">
+                  <div className="flex items-center justify-between">
                     <div>
-                      <div className="font-extrabold text-sm text-white">OpenPlay</div>
-                      <div className="text-[11px] text-zinc-400">Version 0.1.0 (Early Access)</div>
+                      <h4 className="text-xs font-bold text-white">Software Updates</h4>
+                      <p className="text-[11px] text-zinc-400">
+                        Check for new releases, bug fixes, and feature improvements
+                      </p>
                     </div>
+
+                    <button
+                      type="button"
+                      onClick={handleCheckForUpdates}
+                      disabled={isCheckingUpdate}
+                      className="px-3 py-1.5 rounded-xl text-xs font-bold text-white flex items-center space-x-2 transition-all cursor-pointer shadow-sm active:scale-95 disabled:opacity-50"
+                      style={{
+                        backgroundColor: "var(--app-accent-color, #a855f7)",
+                      }}
+                    >
+                      <RefreshCw
+                        className={`w-3.5 h-3.5 ${isCheckingUpdate ? "animate-spin" : ""}`}
+                      />
+                      <span>{isCheckingUpdate ? "Checking..." : "Check for Updates"}</span>
+                    </button>
                   </div>
 
-                  <div className="border-t border-white/5 pt-3 space-y-2 text-[11px] text-zinc-400">
-                    <div className="flex items-start space-x-2">
-                      <Terminal className="w-4 h-4 text-zinc-400 shrink-0 mt-0.5" />
-                      <div>
-                        <strong className="text-zinc-200">Offline-First Architecture:</strong> Built on Tauri v2 + Rust with local SQLite storage. All metadata, artwork links, and game configurations remain exclusively on your device.
+                  {/* Update Status Feedback */}
+                  {updateError && (
+                    <div className="p-3 rounded-xl bg-rose-950/30 border border-rose-500/30 text-rose-300 text-xs flex items-center space-x-2 animate-in fade-in duration-150">
+                      <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                      <span>{updateError}</span>
+                    </div>
+                  )}
+
+                  {updateResult && !updateResult.is_update_available && (
+                    <div className="p-3.5 rounded-xl bg-emerald-950/30 border border-emerald-500/30 text-emerald-200 text-xs flex items-center justify-between animate-in fade-in duration-150">
+                      <div className="flex items-center space-x-2.5">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                        <div>
+                          <div className="font-bold">OpenPlay is up to date</div>
+                          <div className="text-[11px] text-emerald-300/80">
+                            Version {updateResult.current_version} is the latest available release.
+                          </div>
+                        </div>
                       </div>
+                    </div>
+                  )}
+
+                  {updateResult && updateResult.is_update_available && (
+                    <div className="space-y-3.5 animate-in fade-in zoom-in-95 duration-150">
+                      <div
+                        className="p-4 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-lg"
+                        style={{
+                          backgroundColor:
+                            "color-mix(in srgb, var(--app-accent-color, #a855f7) 18%, transparent)",
+                          borderColor:
+                            "color-mix(in srgb, var(--app-accent-color, #a855f7) 45%, transparent)",
+                        }}
+                      >
+                        <div className="space-y-1">
+                          <div className="flex items-center space-x-2">
+                            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                            <h5 className="font-extrabold text-sm text-white">
+                              {updateResult.release_name || `Update Available: v${updateResult.latest_version}`}
+                            </h5>
+                          </div>
+                          <p className="text-xs text-zinc-300">
+                            A new version is ready to install (current: v{updateResult.current_version} → latest: v{updateResult.latest_version}).
+                          </p>
+                        </div>
+
+                        <div className="flex items-center space-x-2 shrink-0">
+                          {updateResult.download_url && (
+                            <button
+                              type="button"
+                              onClick={() => openUrl(updateResult.download_url!)}
+                              className="px-3.5 py-1.5 rounded-xl bg-white text-black font-extrabold text-xs flex items-center space-x-1.5 hover:bg-zinc-200 transition-all cursor-pointer shadow-md"
+                            >
+                              <Download className="w-3.5 h-3.5 stroke-[2.5]" />
+                              <span>Update to v{updateResult.latest_version}</span>
+                            </button>
+                          )}
+                          {updateResult.html_url && (
+                            <button
+                              type="button"
+                              onClick={() => openUrl(updateResult.html_url!)}
+                              className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white font-semibold text-xs flex items-center space-x-1 transition-colors cursor-pointer border border-white/15"
+                            >
+                              <span>View Release</span>
+                              <ExternalLink className="w-3 h-3 text-zinc-400" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Changelog Underneath */}
+                      {updateResult.release_notes && (
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between px-1">
+                            <span className="text-xs font-bold text-zinc-300 uppercase tracking-wider">
+                              Changelog
+                            </span>
+                            {updateResult.published_at && (
+                              <span className="text-[10px] text-zinc-500 font-mono">
+                                Released on {new Date(updateResult.published_at).toLocaleDateString()}
+                              </span>
+                            )}
+                          </div>
+                          <div className="bg-black/40 border border-white/10 rounded-xl p-3.5 max-h-60 overflow-y-auto space-y-1 font-sans">
+                            {updateResult.release_notes.split("\n").map((line, idx) => {
+                              const trimmed = line.trim();
+                              if (trimmed.startsWith("### ")) {
+                                return (
+                                  <h4 key={idx} className="text-xs font-bold text-white mt-2.5 mb-1">
+                                    {trimmed.replace(/^###\s+/, "")}
+                                  </h4>
+                                );
+                              }
+                              if (trimmed.startsWith("## ")) {
+                                return (
+                                  <h3 key={idx} className="text-xs font-extrabold text-white mt-3 mb-1 border-b border-white/10 pb-0.5">
+                                    {trimmed.replace(/^##\s+/, "")}
+                                  </h3>
+                                );
+                              }
+                              if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
+                                return (
+                                  <div key={idx} className="flex items-start space-x-2 text-[11px] text-zinc-300 ml-1 py-0.5">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-white/40 mt-1 shrink-0" />
+                                    <span>{trimmed.replace(/^[-*]\s+/, "")}</span>
+                                  </div>
+                                );
+                              }
+                              if (!trimmed) {
+                                return <div key={idx} className="h-1" />;
+                              }
+                              return (
+                                <p key={idx} className="text-[11px] text-zinc-300 leading-relaxed">
+                                  {line}
+                                </p>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Offline-First Architecture Card */}
+                <div className="bg-white/[0.02] border border-white/5 rounded-xl p-4 space-y-3 text-[11px] text-zinc-400">
+                  <div className="flex items-start space-x-2.5">
+                    <Terminal className="w-4 h-4 text-zinc-400 shrink-0 mt-0.5" />
+                    <div>
+                      <strong className="text-zinc-200">Offline-First Architecture:</strong> Built on Tauri v2 + Rust with local SQLite storage. All metadata, artwork links, and game configurations remain exclusively on your device.
                     </div>
                   </div>
                 </div>

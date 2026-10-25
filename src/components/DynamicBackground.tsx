@@ -67,7 +67,10 @@ export const DynamicBackground: React.FC<DynamicBackgroundProps> = ({
   }, [targetSrc]); // Only depends on targetSrc!
 
   return (
-    <div className="absolute inset-0 pointer-events-none overflow-hidden z-0 bg-[#07080c]">
+    <div
+      className="absolute inset-0 pointer-events-none overflow-hidden z-0 bg-[#07080c]"
+      style={{ transform: "translateZ(0)" }}
+    >
       {/* 1. Underlying Secondary (Previous Game Background) - Fades out during crossfade */}
       {prevSrc && (
         <div
@@ -127,7 +130,7 @@ export const DynamicBackground: React.FC<DynamicBackgroundProps> = ({
       )}
 
       {/* Vignette Overlay for Contrast & Readability (Softened to avoid heavy black tint) */}
-      <div className="absolute inset-0 z-20 bg-black/35 backdrop-brightness-95" />
+      <div className="absolute inset-0 z-20 bg-black/40" />
     </div>
   );
 };

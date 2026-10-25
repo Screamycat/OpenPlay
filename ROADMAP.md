@@ -6,7 +6,7 @@ Welcome to the central tracking document for **OpenPlay**. Use this document to 
 
 ## ⚡ Quick Inbox (Jot & Dump)
 > *For raw thoughts, ideas, or things noticed while working, before organizing them below.*
-- [ ] 
+- [ ] A lot of games dont come with scores, this should be looked into if ther eeven is a fix.
 
 ---
 
@@ -20,7 +20,7 @@ Welcome to the central tracking document for **OpenPlay**. Use this document to 
 - [x] **SFW SteamGridDB**: A NSFW toggle when selecting artwork to show or hide NSFW content.
 - [ ] **Playnite backup**: Make it possible to import data from a playnite backup file.
 - [x] **Full refresh**: Have a way to fetch minimal data for all games, like description, time played, last played and much more.
-- [ ] **Dual launch**: Make it possible to choose on play what exe to launhc. (for mod managers or something other) Much Like playnite actions.
+- [ ] **Dual launch (Not tested)**: Make it possible to choose on play what exe to launhc. (for mod managers or something other) Much Like playnite actions.
 - [ ] **Emulation backup support**: Roms imported from playnite backup appears as local games, once emulators is implemented, roms should be supported through backups as well.
 - [ ] **Reocurring backups**: Settings, configs data, metadat and so on shuld be backed up from time to time.
 - [ ] **Online saving**: Store all data online. So it's accessible from all devices.
@@ -29,11 +29,11 @@ Welcome to the central tracking document for **OpenPlay**. Use this document to 
 - [ ] **Custom Game Integrations (Epic Games / GOG / Xbox)**: Connect accounts or import local installed libraries automatically.
 - [ ] **Extention / Theme support**: Open up the application for custom plugins (extention) and themes.
 - [ ] **Emulation Scanner & Launch Profiles**: Auto-detect emulator installations (RetroArch, RPCS3, Dolphin, PCSX2, Ryujinx) and ROM paths.
-- [ ] **Custom Theme Tinting**: Option in Settings to choose primary accent color
+- [x] **Custom Theme Tinting**: Option in Settings to choose primary accent color
 - [x] **Trailer Autoplay Controls in Settings**: Option to toggle video trailer autoplay on/off or mute by default.
 - [ ] **Controller**: Full gamepad navigation support in desktop mode.
 - [ ] **Duplicate merger**: owning the same game on different platforms should not create two slots. Rather, they should conbine and it should be notable by the user that they own it on those platforms. (like duplicate hider in playnite)
-- [ ] **Hide**: Be able to hide and unhide a game.
+- [x] **Hide**: Be able to hide and unhide a game.
 - [ ] **Achievement system**: Optional native OpenPlay extention that makes it possible to track achivements for local games?
 
 ### 🟢 Backlog & Wishlist
@@ -47,19 +47,20 @@ Welcome to the central tracking document for **OpenPlay**. Use this document to 
 - [x] **Tag & Category Filters in Grid**: Expand the quick filter bar to dynamically filter games by clicked genre or category tags.
 - [x] **Smooth Transition Animations**: Add smooth animations when switching between games. So it's not just a hard cut but a nice fade or so.
 - [x] **Sort-Dropdown**: Have the sort-dropdown menu match the defualt theme, maybe support grouping?
-- [ ] **OpenPlay Icon**: A proper icon, blue and pruple and represent open game library. (Icon has been made "/public/OpenPlayIcon.svg")
+- [x] **OpenPlay Icon**: A proper icon, blue and pruple and represent open game library. (Icon has been made "/public/OpenPlayIcon.svg")
 - [x] **Sidebar menu**: The sidebar menu does not currently fit the overall theme with the rest of the application.
 - [x] **(Game count)**: Remove the game count next to OpenPlay in the normal window as well as in the sidebar menu.
 - [x] **Game settings themeing**: The edit game page does not fit the overall theme. No color icons. Artwork is not showin correctly, they show up asthe defualt iamge icon. Size on disk should not eb a changeable number.
-- [ ] **Scrollbars**: Hide the scrollbars when not actively scrolling.
-- [ ] **Installation folder**: Make the installation fodler directory in the details panel cliclable and have it open into file explorer.
-- [ ] **News**: Work on the News tab, it feels unfinished.
-- [ ] **Platform icon**: Epic games library games dont have a epic games icon. Rather it has a desktop icon with the text Platform, in the details window. The same goes for upcomming integrations.
-- [ ] **Description borders**: When companies have rich image in ther description it comes with a border in the OpenPlay details window. This should be removed as it destroys the imersion and intent of the developer. 
-- [ ] **Right CLick-menu**: Right click-menu does not fit the overall theme. it still on the old bluish tint theme.
-- [ ] **Scan Games folder old**: Scan games folder uses the super old way of scanning folders, it should be updated to the new explorer window (Windows).
-- [ ] **Covers sizing**: The covers size slider needs to be able to go larger.
-- [ ] **Trailer looping**: The trailer needs to loop once fnished.
+- [x] **Scrollbars**: Hide the scrollbars when not actively scrolling.
+- [x] **Installation folder**: Make the installation fodler directory in the details panel cliclable and have it open into file explorer.
+- [x] **News**: Work on the News tab, it feels unfinished.
+- [x] **Platform icon**: Epic games library games dont have a epic games icon. Rather it has a desktop icon with the text Platform, in the details window. The same goes for upcomming integrations.
+- [x] **Description borders**: When companies have rich image in ther description it comes with a border in the OpenPlay details window. This should be removed as it destroys the imersion and intent of the developer. 
+- [x] **Right CLick-menu**: Right click-menu does not fit the overall theme. it still on the old bluish tint theme.
+- [x] **Scan Games folder old**: Scan games folder uses the super old way of scanning folders, it should be updated to the new explorer window (Windows).
+- [x] **Covers sizing**: The covers size slider needs to be able to go larger.
+- [x] **Trailer looping**: The trailer needs to loop once fnished.
+- [ ] **Accent not dominant**: THere are still places in the ui where the accent color is not the dominant color. There should be no "magic" colors.
 
 ### ⚙️ Performance & Architecture
 - [ ] **Image Cache Optimization**: Cache downloaded SteamGridDB posters and logos locally in the application data folder for offline access.

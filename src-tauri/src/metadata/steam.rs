@@ -262,32 +262,47 @@ impl SteamMetadataFetcher {
 
     /// Fetches latest news items and changelogs from Steam News API
     pub async fn fetch_game_news(appid: &str) -> Result<Vec<SteamNewsItem>, String> {
-        let url = format!(
-            "https://api.steampowered.com/ISteamNews/GetNewsForApp/v2/?appid={}&count=6&maxlength=600",
-            appid
-        );
-
         let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(6))
+            .timeout(std::time::Duration::from_secs(8))
             .build()
             .map_err(|e| e.to_string())?;
 
-        let resp = client
-            .get(&url)
-            .header("User-Agent", "OpenPlay/0.1.0")
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+        // 1. First priority: fetch official developer announcements & patch notes
+        let official_url = format!(
+            "https://api.steampowered.com/ISteamNews/GetNewsForApp/v2/?appid={}&count=15&maxlength=4000&feeds=steam_community_announcements",
+            appid
+        );
 
-        let json: Value = resp.json().await.map_err(|e| e.to_string())?;
-        let items_arr = json
-            .get("appnews")
-            .and_then(|a| a.get("newsitems"))
-            .and_then(|v| v.as_array())
-            .ok_or_else(|| "No news items in response".to_string())?;
+        let mut raw_items = Vec::new();
+        if let Ok(resp) = client.get(&official_url).header("User-Agent", "OpenPlay/0.1.0").send().await {
+            if let Ok(json) = resp.json::<Value>().await {
+                if let Some(arr) = json.get("appnews").and_then(|a| a.get("newsitems")).and_then(|v| v.as_array()) {
+                    raw_items = arr.clone();
+                }
+            }
+        }
+
+        // 2. Fallback if no official community announcements exist: fetch general feed
+        if raw_items.is_empty() {
+            let general_url = format!(
+                "https://api.steampowered.com/ISteamNews/GetNewsForApp/v2/?appid={}&count=15&maxlength=4000",
+                appid
+            );
+            if let Ok(resp) = client.get(&general_url).header("User-Agent", "OpenPlay/0.1.0").send().await {
+                if let Ok(json) = resp.json::<Value>().await {
+                    if let Some(arr) = json.get("appnews").and_then(|a| a.get("newsitems")).and_then(|v| v.as_array()) {
+                        raw_items = arr.clone();
+                    }
+                }
+            }
+        }
+
+        if raw_items.is_empty() {
+            return Ok(Vec::new());
+        }
 
         let mut items = Vec::new();
-        for item in items_arr {
+        for item in raw_items {
             let gid = item.get("gid").and_then(|v| v.as_str()).unwrap_or("").to_string();
             let title = item.get("title").and_then(|v| v.as_str()).unwrap_or("News Update").to_string();
             let url = item.get("url").and_then(|v| v.as_str()).unwrap_or("").to_string();
@@ -295,6 +310,78 @@ impl SteamMetadataFetcher {
             let contents = item.get("contents").and_then(|v| v.as_str()).unwrap_or("").to_string();
             let date = item.get("date").and_then(|v| v.as_i64()).unwrap_or(0);
             let feedlabel = item.get("feedlabel").and_then(|v| v.as_str()).map(|s| s.to_string());
+            let feedname = item.get("feedname").and_then(|v| v.as_str()).unwrap_or("");
+
+            // Filter out foreign Russian / Cyrillic news and syndicates (e.g. PlayGround.ru, StopGame)
+            let is_cyrillic = title.chars().any(|c| ('\u{0400}'..='\u{04FF}').contains(&c));
+            if feedname.to_lowercase().contains(".ru")
+                || feedlabel.as_deref().unwrap_or("").to_lowercase().contains(".ru")
+                || is_cyrillic
+            {
+                continue;
+            }
+
+            // Extract featured announcement banner image from clan image markup or direct URLs
+            let mut image_url = None;
+
+            // 1. Check for {STEAM_CLAN_IMAGE}/<path>
+            const CLAN_PREFIX: &str = "{STEAM_CLAN_IMAGE}/";
+            if let Some(pos) = contents.find(CLAN_PREFIX) {
+                let rest = &contents[pos + CLAN_PREFIX.len()..];
+                let end = rest
+                    .find(|c: char| c.is_whitespace() || c == ']' || c == '"' || c == '\'' || c == '}')
+                    .unwrap_or(rest.len());
+                let img_path = rest[..end].trim();
+                if !img_path.is_empty() {
+                    image_url = Some(format!("https://clan.akamai.steamstatic.com/images/{}", img_path));
+                }
+            }
+
+            // 2. Check for [img]...[/img] BBCode
+            if image_url.is_none() {
+                if let Some(start_tag) = contents.find("[img]") {
+                    let rest = &contents[start_tag + 5..];
+                    if let Some(end_tag) = rest.find("[/img]") {
+                        let candidate = rest[..end_tag].trim();
+                        if candidate.starts_with(CLAN_PREFIX) {
+                            let img_path = candidate[CLAN_PREFIX.len()..].trim();
+                            image_url = Some(format!("https://clan.akamai.steamstatic.com/images/{}", img_path));
+                        } else if candidate.starts_with("http://") || candidate.starts_with("https://") {
+                            image_url = Some(candidate.to_string());
+                        }
+                    }
+                }
+            }
+
+            // 3. Check for direct image URLs ending in an image extension
+            if image_url.is_none() {
+                let lower = contents.to_lowercase();
+                for ext in &[".png", ".jpg", ".jpeg", ".webp"] {
+                    if let Some(ext_pos) = lower.find(ext) {
+                        let before = &contents[..ext_pos + ext.len()];
+                        if let Some(http_pos) = before.rfind("https://").or_else(|| before.rfind("http://")) {
+                            let candidate = &contents[http_pos..ext_pos + ext.len()];
+                            if !candidate.contains(' ') && !candidate.contains('\n') && !candidate.contains('"') && !candidate.contains('\'') {
+                                image_url = Some(candidate.to_string());
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Categorize post
+            let title_lower = title.to_lowercase();
+            let feed_lower = feedlabel.as_deref().unwrap_or("").to_lowercase();
+            let category = if title_lower.contains("major update") || title_lower.contains("state of the game") {
+                Some("MAJOR UPDATE".to_string())
+            } else if title_lower.contains("patch") || title_lower.contains("hotfix") || title_lower.contains("v1.") || title_lower.contains("v2.") || title_lower.contains("changelog") || title_lower.contains("notes") {
+                Some("PATCH NOTES".to_string())
+            } else if feed_lower.contains("community") {
+                Some("COMMUNITY".to_string())
+            } else {
+                Some("NEWS".to_string())
+            };
 
             items.push(SteamNewsItem {
                 gid,
@@ -304,6 +391,8 @@ impl SteamMetadataFetcher {
                 contents,
                 date,
                 feedlabel,
+                image_url,
+                category,
             });
         }
 
@@ -704,6 +793,8 @@ pub struct SteamNewsItem {
     pub contents: String,
     pub date: i64,
     pub feedlabel: Option<String>,
+    pub image_url: Option<String>,
+    pub category: Option<String>,
 }
 
 #[cfg(test)]

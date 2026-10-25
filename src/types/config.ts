@@ -24,6 +24,8 @@ export interface AppConfig {
   theme?: "dark" | "oled" | "midnight";
   background_blur?: number; // 0 to 64
   background_opacity?: number; // 0 to 1
+  accent_color?: string; // hex color e.g. #a855f7
+  panel_tint?: string; // hex color e.g. #0e0e11
 
   // Playback & Media
   trailer_autoplay?: boolean;
@@ -56,6 +58,8 @@ export const DEFAULT_APP_CONFIG: AppConfig = {
   theme: "dark",
   background_blur: 32,
   background_opacity: 0.75,
+  accent_color: "#a855f7",
+  panel_tint: "#0e0e11",
   trailer_autoplay: true,
   trailer_muted: true,
   steamgriddb_nsfw: false,

@@ -16,7 +16,7 @@ use models::{
 };
 use scanner::steam::SteamScanner;
 use scanner::epic::EpicScanner;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State, Url, WebviewUrl, WebviewWindowBuilder};
 
@@ -379,6 +379,8 @@ async fn scan_epic_library(state: State<'_, AppState>) -> Result<ScanResult, Str
                     categories: Vec::new(),
                     region: None,
                     play_count: if playtime > 0 { Some(1) } else { Some(0) },
+                    is_hidden: false,
+                    play_actions: Vec::new(),
                 };
 
                 let _ = state.db.upsert_game(&uninstalled_game);
@@ -513,6 +515,50 @@ async fn get_steam_current_players(appid: String) -> Result<u32, String> {
 #[tauri::command]
 async fn get_steam_news(appid: String) -> Result<Vec<SteamNewsItem>, String> {
     SteamMetadataFetcher::fetch_game_news(&appid).await
+}
+
+#[tauri::command]
+async fn get_game_news(
+    game_id: Option<String>,
+    title: Option<String>,
+    appid: Option<serde_json::Value>,
+) -> Result<Vec<SteamNewsItem>, String> {
+    let _ = game_id;
+    let resolved_appid = if let Some(ref val) = appid {
+        if let Some(s) = val.as_str() {
+            let trimmed = s.trim();
+            if !trimmed.is_empty() {
+                Some(trimmed.to_string())
+            } else {
+                None
+            }
+        } else if let Some(n) = val.as_u64() {
+            Some(n.to_string())
+        } else if let Some(n) = val.as_i64() {
+            Some(n.to_string())
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    let final_aid = match resolved_appid {
+        Some(aid) => Some(aid),
+        None => {
+            if let Some(ref t) = title {
+                SteamMetadataFetcher::search_appid_by_title(t).await
+            } else {
+                None
+            }
+        }
+    };
+
+    if let Some(aid) = final_aid {
+        SteamMetadataFetcher::fetch_game_news(&aid).await
+    } else {
+        Ok(Vec::new())
+    }
 }
 
 #[tauri::command]
@@ -867,12 +913,30 @@ fn toggle_favorite(game_id: String, state: State<'_, AppState>) -> Result<bool, 
 }
 
 #[tauri::command]
-fn launch_game(game_id: String, app_handle: AppHandle, state: State<'_, AppState>) -> Result<String, String> {
+fn launch_game(
+    game_id: String,
+    action_id: Option<String>,
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
     let all = state.db.get_all_games()?;
     let game = all
         .into_iter()
         .find(|g| g.id == game_id)
         .ok_or_else(|| "Game not found".to_string())?;
+
+    if let Some(ref aid) = action_id {
+        if let Some(action) = game.play_actions.iter().find(|a| &a.id == aid) {
+            return GameLauncher::launch_custom_action(
+                app_handle,
+                state.db.clone(),
+                game.id,
+                Some(action.path.clone()),
+                action.arguments.clone(),
+                action.working_dir.clone().or(game.install_directory.clone()),
+            );
+        }
+    }
 
     GameLauncher::launch_game(
         app_handle,
@@ -887,6 +951,22 @@ fn launch_game(game_id: String, app_handle: AppHandle, state: State<'_, AppState
 }
 
 #[tauri::command]
+fn set_game_hidden(
+    id: String,
+    hidden: bool,
+    state: State<'_, AppState>,
+    app_handle: AppHandle,
+) -> Result<(), String> {
+    let all = state.db.get_all_games()?;
+    if let Some(mut game) = all.into_iter().find(|g| g.id == id) {
+        game.is_hidden = hidden;
+        state.db.save_game_exact(&game)?;
+        let _ = app_handle.emit("game-updated", &game);
+    }
+    Ok(())
+}
+
+#[tauri::command]
 fn stop_game(game_id: String, app_handle: AppHandle) -> Result<(), String> {
     GameLauncher::stop_game(app_handle, &game_id)
 }
@@ -896,96 +976,166 @@ fn get_running_games(app_handle: AppHandle, state: State<'_, AppState>) -> Resul
     Ok(GameLauncher::get_running_games(Some(&app_handle), Some(&state.db)))
 }
 
-#[tauri::command]
-fn select_file(filter: Option<String>) -> Result<Option<String>, String> {
-    #[cfg(target_os = "windows")]
-    {
-        use std::process::Command;
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        let filter_str = filter.unwrap_or_else(|| "Executable (*.exe)|*.exe|All files (*.*)|*.*".to_string());
-        let ps_script = format!(
-            "Add-Type -AssemblyName System.Windows.Forms; $f = New-Object System.Windows.Forms.OpenFileDialog; $f.Filter = '{}'; $f.Title = 'Select File'; if($f.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK){{ Write-Output $f.FileName }}",
-            filter_str
-        );
-        let output = Command::new("powershell")
-            .creation_flags(CREATE_NO_WINDOW)
-            .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", &ps_script])
-            .output()
-            .map_err(|e| e.to_string())?;
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReleaseAssetInfo {
+    pub name: String,
+    pub download_url: String,
+    pub size: u64,
+}
 
-        let result = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if result.is_empty() {
-            Ok(None)
-        } else {
-            Ok(Some(result))
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateCheckResult {
+    pub current_version: String,
+    pub latest_version: String,
+    pub is_update_available: bool,
+    pub release_name: Option<String>,
+    pub release_notes: Option<String>,
+    pub published_at: Option<String>,
+    pub html_url: Option<String>,
+    pub download_url: Option<String>,
+    pub assets: Vec<ReleaseAssetInfo>,
+}
+
+fn parse_version_tuple(v: &str) -> (u64, u64, u64) {
+    let clean = v.trim().trim_start_matches(|c| c == 'v' || c == 'V');
+    let mut parts = clean.split('.');
+    let major = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+    let minor = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+    let patch = parts.next().and_then(|s| s.split(|c: char| !c.is_numeric()).next().and_then(|p| p.parse().ok())).unwrap_or(0);
+    (major, minor, patch)
+}
+
+fn is_version_newer(latest: &str, current: &str) -> bool {
+    let l = parse_version_tuple(latest);
+    let c = parse_version_tuple(current);
+    l > c
+}
+
+#[tauri::command]
+async fn check_for_app_updates() -> Result<UpdateCheckResult, String> {
+    let current_version = env!("CARGO_PKG_VERSION").to_string();
+    let url = "https://api.github.com/repos/Screamycat/OpenPlay/releases/latest";
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let resp = client
+        .get(url)
+        .header("User-Agent", format!("OpenPlay/{}", current_version))
+        .header("Accept", "application/vnd.github.v3+json")
+        .send()
+        .await;
+
+    match resp {
+        Ok(res) => {
+            if res.status() == reqwest::StatusCode::NOT_FOUND {
+                return Ok(UpdateCheckResult {
+                    current_version: current_version.clone(),
+                    latest_version: current_version,
+                    is_update_available: false,
+                    release_name: None,
+                    release_notes: Some("No releases published yet on GitHub. OpenPlay is up to date.".to_string()),
+                    published_at: None,
+                    html_url: Some("https://github.com/Screamycat/OpenPlay/releases".to_string()),
+                    download_url: None,
+                    assets: vec![],
+                });
+            }
+
+            if !res.status().is_success() {
+                return Err(format!("GitHub API responded with status {}", res.status()));
+            }
+
+            let json: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
+
+            let tag = json.get("tag_name").and_then(|v| v.as_str()).unwrap_or("0.1.0").to_string();
+            let clean_tag = tag.trim_start_matches(|c| c == 'v' || c == 'V').to_string();
+            let release_name = json.get("name").and_then(|v| v.as_str()).map(|s| s.to_string());
+            let release_notes = json.get("body").and_then(|v| v.as_str()).map(|s| s.to_string());
+            let published_at = json.get("published_at").and_then(|v| v.as_str()).map(|s| s.to_string());
+            let html_url = json.get("html_url").and_then(|v| v.as_str()).map(|s| s.to_string());
+
+            let mut assets = Vec::new();
+            let mut download_url = None;
+
+            if let Some(arr) = json.get("assets").and_then(|a| a.as_array()) {
+                for a in arr {
+                    let name = a.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    let url = a.get("browser_download_url").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    let size = a.get("size").and_then(|v| v.as_u64()).unwrap_or(0);
+                    if !name.is_empty() && !url.is_empty() {
+                        if name.ends_with(".exe") || name.ends_with(".msi") || name.ends_with(".zip") {
+                            if download_url.is_none() {
+                                download_url = Some(url.clone());
+                            }
+                        }
+                        assets.push(ReleaseAssetInfo {
+                            name,
+                            download_url: url,
+                            size,
+                        });
+                    }
+                }
+            }
+
+            if download_url.is_none() {
+                download_url = html_url.clone();
+            }
+
+            let is_newer = is_version_newer(&clean_tag, &current_version);
+
+            Ok(UpdateCheckResult {
+                current_version,
+                latest_version: clean_tag,
+                is_update_available: is_newer,
+                release_name,
+                release_notes,
+                published_at,
+                html_url,
+                download_url,
+                assets,
+            })
         }
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        let _ = filter;
-        Ok(None)
+        Err(e) => Err(format!("Failed to connect to GitHub: {}", e)),
     }
 }
 
 #[tauri::command]
-fn select_directory() -> Result<Option<String>, String> {
-    #[cfg(target_os = "windows")]
-    {
-        use std::process::Command;
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        let ps_script = "Add-Type -AssemblyName System.Windows.Forms; $f = New-Object System.Windows.Forms.FolderBrowserDialog; $f.Description = 'Select Installation Folder'; if($f.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK){ Write-Output $f.SelectedPath }";
-        let output = Command::new("powershell")
-            .creation_flags(CREATE_NO_WINDOW)
-            .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", ps_script])
-            .output()
-            .map_err(|e| e.to_string())?;
-
-        let result = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if result.is_empty() {
-            Ok(None)
-        } else {
-            Ok(Some(result))
+async fn select_file(filter: Option<String>) -> Result<Option<String>, String> {
+    let mut dialog = rfd::AsyncFileDialog::new().set_title("Select File");
+    if let Some(ref f) = filter {
+        if f.contains(".exe") {
+            dialog = dialog.add_filter("Executable (*.exe)", &["exe"]);
+        } else if f.contains(".zip") {
+            dialog = dialog.add_filter("ZIP Archive (*.zip)", &["zip"]);
         }
     }
-    #[cfg(not(target_os = "windows"))]
-    {
-        Ok(None)
-    }
+    let handle = dialog.pick_file().await;
+    Ok(handle.map(|h| h.path().to_string_lossy().to_string()))
 }
 
 #[tauri::command]
-fn select_multiple_files(filter: Option<String>) -> Result<Vec<String>, String> {
-    #[cfg(target_os = "windows")]
-    {
-        use std::process::Command;
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        let filter_str = filter.unwrap_or_else(|| "Executable (*.exe)|*.exe|All files (*.*)|*.*".to_string());
-        let ps_script = format!(
-            "Add-Type -AssemblyName System.Windows.Forms; $f = New-Object System.Windows.Forms.OpenFileDialog; $f.Multiselect = $true; $f.Filter = '{}'; $f.Title = 'Select Files'; if($f.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK){{ $f.FileNames | ForEach-Object {{ Write-Output $_ }} }}",
-            filter_str
-        );
-        let output = Command::new("powershell")
-            .creation_flags(CREATE_NO_WINDOW)
-            .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", &ps_script])
-            .output()
-            .map_err(|e| e.to_string())?;
+async fn select_directory() -> Result<Option<String>, String> {
+    let handle = rfd::AsyncFileDialog::new()
+        .set_title("Select Folder")
+        .pick_folder()
+        .await;
+    Ok(handle.map(|h| h.path().to_string_lossy().to_string()))
+}
 
-        let result = String::from_utf8_lossy(&output.stdout);
-        let files: Vec<String> = result
-            .lines()
-            .map(|l| l.trim().to_string())
-            .filter(|l| !l.is_empty())
-            .collect();
-        Ok(files)
+#[tauri::command]
+async fn select_multiple_files(filter: Option<String>) -> Result<Vec<String>, String> {
+    let mut dialog = rfd::AsyncFileDialog::new().set_title("Select Files");
+    if let Some(ref f) = filter {
+        if f.contains(".exe") {
+            dialog = dialog.add_filter("Executable (*.exe)", &["exe"]);
+        } else if f.contains(".zip") {
+            dialog = dialog.add_filter("ZIP Archive (*.zip)", &["zip"]);
+        }
     }
-    #[cfg(not(target_os = "windows"))]
-    {
-        let _ = filter;
-        Ok(Vec::new())
-    }
+    let handles = dialog.pick_files().await.unwrap_or_default();
+    Ok(handles.into_iter().map(|h| h.path().to_string_lossy().to_string()).collect())
 }
 
 #[tauri::command]
@@ -1044,6 +1194,33 @@ async fn import_playnite_backup(
         artwork_extracted: artwork_count,
         sources,
     })
+}
+
+#[tauri::command]
+fn open_in_explorer(path: String) -> Result<(), String> {
+    let p = std::path::Path::new(&path);
+    let target = if p.is_file() {
+        p.parent().unwrap_or(p)
+    } else {
+        p
+    };
+
+    if !target.exists() {
+        return Err(format!("Path does not exist: {}", target.display()));
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(target)
+            .spawn()
+            .map_err(|e| format!("Failed to open Windows Explorer: {}", e))?;
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = open::that(target);
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -1906,6 +2083,9 @@ pub fn run() {
         .manage(AppState { db: database })
         .setup(|app| {
             if let Some(window) = app.get_webview_window("main") {
+                if let Some(icon) = app.default_window_icon() {
+                    let _ = window.set_icon(icon.clone());
+                }
                 let win_clone = window.clone();
                 // Ensure the window starts inside valid screen bounds
                 if let Ok(pos) = window.outer_position() {
@@ -1977,7 +2157,11 @@ pub fn run() {
             sync_live_playtimes,
             warmup_active_achievements,
             get_game_achievement_summary,
-            get_hunter_profile
+            get_hunter_profile,
+            open_in_explorer,
+            get_game_news,
+            set_game_hidden,
+            check_for_app_updates
         ])
         .run(tauri::generate_context!())
         .expect("error while running OpenPlay application");

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
-import { Star, X, Tag, Code, Library, Check, RotateCcw, Search } from "lucide-react";
+import { Star, X, Tag, Code, Library, Check, RotateCcw, Search, Eye, EyeOff } from "lucide-react";
 
 export interface FilterItem {
   name: string;
@@ -13,6 +13,12 @@ interface FilterPopoverProps {
   showFavoritesOnly: boolean;
   onToggleFavoritesOnly: () => void;
   favoritesCount: number;
+  // Hidden games toggle
+  showHiddenGames?: boolean;
+  onToggleShowHidden?: () => void;
+  showHiddenOnly?: boolean;
+  onToggleHiddenOnly?: () => void;
+  hiddenGamesCount?: number;
   // Genres / Tags
   availableGenres: FilterItem[];
   selectedGenres: string[];
@@ -28,6 +34,7 @@ interface FilterPopoverProps {
   // Reset
   onResetFilters: () => void;
   activeFilterCount: number;
+  containerRef?: React.RefObject<HTMLDivElement | null>;
 }
 
 type FilterTab = "tags" | "developers" | "libraries";
@@ -38,6 +45,11 @@ export const FilterPopover: React.FC<FilterPopoverProps> = ({
   showFavoritesOnly,
   onToggleFavoritesOnly,
   favoritesCount,
+  showHiddenGames = false,
+  onToggleShowHidden,
+  showHiddenOnly = false,
+  onToggleHiddenOnly,
+  hiddenGamesCount = 0,
   availableGenres,
   selectedGenres,
   onToggleGenre,
@@ -49,6 +61,7 @@ export const FilterPopover: React.FC<FilterPopoverProps> = ({
   onToggleSource,
   onResetFilters,
   activeFilterCount,
+  containerRef,
 }) => {
   const [activeTab, setActiveTab] = useState<FilterTab>("tags");
   const [filterSearch, setFilterSearch] = useState("");
@@ -58,8 +71,13 @@ export const FilterPopover: React.FC<FilterPopoverProps> = ({
   useEffect(() => {
     if (!isOpen) return;
 
-    const handleClickOutside = (e: MouseEvent) => {
-      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
+    const handleClickOutside = (e: MouseEvent | PointerEvent) => {
+      const target = e.target as Node;
+      if (containerRef?.current) {
+        if (!containerRef.current.contains(target)) {
+          onClose();
+        }
+      } else if (popoverRef.current && !popoverRef.current.contains(target)) {
         onClose();
       }
     };
@@ -70,13 +88,14 @@ export const FilterPopover: React.FC<FilterPopoverProps> = ({
       }
     };
 
-    document.addEventListener("mousedown", handleClickOutside);
+    // Use capture phase so stopPropagation inside other headers or wrappers does not prevent closing
+    document.addEventListener("pointerdown", handleClickOutside, true);
     document.addEventListener("keydown", handleKeyDown);
     return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("pointerdown", handleClickOutside, true);
       document.removeEventListener("keydown", handleKeyDown);
     };
-  }, [isOpen, onClose]);
+  }, [isOpen, onClose, containerRef]);
 
   if (!isOpen) return null;
 
@@ -99,7 +118,7 @@ export const FilterPopover: React.FC<FilterPopoverProps> = ({
     <div
       ref={popoverRef}
       onMouseDown={(e) => e.stopPropagation()}
-      className="absolute top-full left-0 mt-2 w-[360px] sm:w-[420px] bg-[#0c0e18]/95 backdrop-blur-2xl border border-white/15 rounded-2xl shadow-2xl z-50 overflow-hidden flex flex-col text-slate-200 select-none animate-in fade-in zoom-in-95 duration-150"
+      className="absolute top-full left-0 mt-2 w-[360px] sm:w-[420px] theme-panel-surface backdrop-blur-2xl border border-white/15 rounded-2xl shadow-2xl z-50 overflow-hidden flex flex-col text-slate-200 select-none animate-in fade-in zoom-in-95 duration-150"
     >
       {/* Top Header */}
       <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between bg-black/30">
@@ -164,6 +183,98 @@ export const FilterPopover: React.FC<FilterPopoverProps> = ({
           </div>
           <span className="text-[11px] font-mono opacity-70">({favoritesCount})</span>
         </div>
+
+        {/* Only Show Hidden Games Section */}
+        {onToggleHiddenOnly && (
+          <div
+            onClick={onToggleHiddenOnly}
+            className={`flex items-center justify-between px-3.5 py-2.5 rounded-xl border transition-all cursor-pointer ${
+              showHiddenOnly
+                ? "border-purple-500/40 text-purple-200 shadow-md shadow-purple-950/30"
+                : "bg-white/5 hover:bg-white/10 border-white/10 text-slate-300"
+            }`}
+            style={
+              showHiddenOnly
+                ? {
+                    backgroundColor: "color-mix(in srgb, var(--app-accent-color, #a855f7) 20%, transparent)",
+                    borderColor: "color-mix(in srgb, var(--app-accent-color, #a855f7) 45%, transparent)",
+                    color: "var(--app-accent-color, #a855f7)",
+                  }
+                : undefined
+            }
+          >
+            <div className="flex items-center space-x-2.5">
+              <div
+                className={`w-4 h-4 rounded flex items-center justify-center border transition-all ${
+                  showHiddenOnly
+                    ? "text-black"
+                    : "border-slate-500 bg-black/40"
+                }`}
+                style={
+                  showHiddenOnly
+                    ? {
+                        backgroundColor: "var(--app-accent-color, #a855f7)",
+                        borderColor: "var(--app-accent-color, #a855f7)",
+                      }
+                    : undefined
+                }
+              >
+                {showHiddenOnly && <Check className="w-3 h-3 stroke-[3]" />}
+              </div>
+              <EyeOff className="w-4 h-4" />
+              <span className="text-xs font-bold tracking-wide">Only Hidden Games</span>
+            </div>
+            <span className="text-[11px] font-mono opacity-70">({hiddenGamesCount})</span>
+          </div>
+        )}
+
+        {/* Show Hidden Games Section */}
+        {onToggleShowHidden && (
+          <div
+            onClick={onToggleShowHidden}
+            className={`flex items-center justify-between px-3.5 py-2.5 rounded-xl border transition-all cursor-pointer ${
+              showHiddenGames
+                ? "border-purple-500/40 text-purple-200 shadow-md shadow-purple-950/30"
+                : "bg-white/5 hover:bg-white/10 border-white/10 text-slate-300"
+            }`}
+            style={
+              showHiddenGames
+                ? {
+                    backgroundColor: "color-mix(in srgb, var(--app-accent-color, #a855f7) 14%, transparent)",
+                    borderColor: "color-mix(in srgb, var(--app-accent-color, #a855f7) 35%, transparent)",
+                    color: "var(--app-accent-color, #a855f7)",
+                  }
+                : undefined
+            }
+          >
+            <div className="flex items-center space-x-2.5">
+              <div
+                className={`w-4 h-4 rounded flex items-center justify-center border transition-all ${
+                  showHiddenGames
+                    ? "text-black"
+                    : "border-slate-500 bg-black/40"
+                }`}
+                style={
+                  showHiddenGames
+                    ? {
+                        backgroundColor: "var(--app-accent-color, #a855f7)",
+                        borderColor: "var(--app-accent-color, #a855f7)",
+                      }
+                    : undefined
+                }
+              >
+                {showHiddenGames && <Check className="w-3 h-3 stroke-[3]" />}
+              </div>
+              {showHiddenGames ? (
+                <Eye className="w-4 h-4" />
+              ) : (
+                <EyeOff className="w-4 h-4 text-slate-400" />
+              )}
+              <span className="text-xs font-bold tracking-wide">Include Hidden Games</span>
+            </div>
+            <span className="text-[11px] font-mono opacity-70">({hiddenGamesCount})</span>
+          </div>
+        )}
 
         {/* Subtle Glass Divider */}
         <div className="h-px bg-white/10 my-1" />

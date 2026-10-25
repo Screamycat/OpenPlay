@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { Game, GameLink } from "../types/game";
+import { Game, GameLink, GameAction } from "../types/game";
 import { resolveImageSrc, formatFileSize } from "../utils/image";
 import { MetadataDiffModal, MetadataComparison } from "./MetadataDiffModal";
 import {
@@ -56,6 +56,7 @@ interface EditGameModalProps {
 type TabKey =
   | "general"
   | "installation"
+  | "actions"
   | "tags"
   | "scores"
   | "description"
@@ -209,6 +210,7 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
   const [series, setSeries] = useState(game.series || "");
   const [ageRating, setAgeRating] = useState(game.age_rating || "");
   const [region, setRegion] = useState(game.region || "");
+  const [isHidden, setIsHidden] = useState<boolean>(game.is_hidden || false);
 
   // Tab 2: Installation & Execution
   const [source, setSource] = useState(game.source || "Manual");
@@ -217,6 +219,9 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
   const [installDirectory, setInstallDirectory] = useState(game.install_directory || "");
   const [executablePath, setExecutablePath] = useState(game.executable_path || "");
   const [launchArguments, setLaunchArguments] = useState(game.launch_arguments || "");
+
+  // Tab 3: Play Actions (Dual Launch & Alternate Executables)
+  const [playActions, setPlayActions] = useState<GameAction[]>(game.play_actions || []);
 
   // Tab 3: Tags & Categorization
   const [completionStatus, setCompletionStatus] = useState(
@@ -354,6 +359,60 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
     }
   };
 
+  const handleAddPlayAction = () => {
+    const newAction: GameAction = {
+      id: crypto.randomUUID(),
+      name: "Play with Mods",
+      path: "",
+      arguments: "",
+      working_dir: "",
+      is_primary: playActions.length === 0,
+    };
+    setPlayActions([...playActions, newAction]);
+  };
+
+  const handleUpdatePlayAction = (id: string, updates: Partial<GameAction>) => {
+    setPlayActions((prev) =>
+      prev.map((act) => {
+        if (act.id === id) {
+          return { ...act, ...updates };
+        }
+        if (updates.is_primary && act.id !== id) {
+          return { ...act, is_primary: false };
+        }
+        return act;
+      })
+    );
+  };
+
+  const handleRemovePlayAction = (id: string) => {
+    setPlayActions((prev) => prev.filter((act) => act.id !== id));
+  };
+
+  const handleBrowseActionFile = async (actionId: string) => {
+    try {
+      const selected = await invoke<string | null>("select_file", {
+        filter: "Executables & Scripts (*.exe;*.bat;*.cmd)|*.exe;*.bat;*.cmd|All files (*.*)|*.*",
+      });
+      if (selected) {
+        handleUpdatePlayAction(actionId, { path: selected });
+      }
+    } catch (e) {
+      console.warn("Browse action file error:", e);
+    }
+  };
+
+  const handleBrowseActionDirectory = async (actionId: string) => {
+    try {
+      const selected = await invoke<string | null>("select_directory");
+      if (selected) {
+        handleUpdatePlayAction(actionId, { working_dir: selected });
+      }
+    } catch (e) {
+      console.warn("Browse action directory error:", e);
+    }
+  };
+
   const handleOpenFolder = async (path: string) => {
     if (!path.trim()) return;
     try {
@@ -428,6 +487,8 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
       icon_image: iconImage.trim() || undefined,
 
       links,
+      is_hidden: isHidden,
+      play_actions: playActions,
     };
 
     onSave(updated);
@@ -472,6 +533,7 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
   }> = [
     { key: "general", label: "General", icon: Info },
     { key: "installation", label: "Installation & Launch", icon: HardDrive },
+    { key: "actions", label: "Play Actions", icon: Layers },
     { key: "tags", label: "Categorization & Tags", icon: Tag },
     { key: "scores", label: "Scores & Playtime", icon: Trophy },
     { key: "description", label: "Description & Notes", icon: FileText },
@@ -486,7 +548,7 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="bg-[#0e0e11]/85 backdrop-blur-2xl border border-white/10 rounded-2xl w-full max-w-4xl h-[720px] max-h-[92vh] shadow-[0_20px_60px_rgba(0,0,0,0.85)] flex flex-col overflow-hidden text-xs text-zinc-200"
+        className="theme-panel-surface backdrop-blur-2xl border border-white/10 rounded-2xl w-full max-w-4xl h-[720px] max-h-[92vh] shadow-[0_20px_60px_rgba(0,0,0,0.85)] flex flex-col overflow-hidden text-xs text-zinc-200"
       >
         {/* Top Header */}
         <div className="px-6 py-3.5 border-b border-white/10 flex items-center justify-between bg-white/[0.03] backdrop-blur-sm shrink-0">
@@ -706,6 +768,29 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
                       <option value="Asia">Asia</option>
                     </select>
                   </div>
+
+                  {/* Hidden Game Privacy Setting */}
+                  <div className="sm:col-span-2 pt-2 border-t border-white/5">
+                    <label className="flex items-center space-x-3 cursor-pointer group p-3 bg-white/[0.02] hover:bg-white/[0.04] border border-white/5 hover:border-white/10 rounded-xl transition-colors">
+                      <input
+                        type="checkbox"
+                        checked={isHidden}
+                        onChange={(e) => setIsHidden(e.target.checked)}
+                        className="w-4 h-4 rounded bg-zinc-800 border-zinc-700 text-purple-600 focus:ring-purple-500 cursor-pointer"
+                      />
+                      <div className="space-y-0.5">
+                        <div className="text-zinc-200 font-semibold group-hover:text-white transition-colors flex items-center space-x-1.5">
+                          <span>Hide Game</span>
+                          <span className="text-[10px] px-1.5 py-0.2 rounded bg-purple-500/20 text-purple-300 font-mono">
+                            Privacy
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-zinc-400">
+                          Hides this title from the main library grid and list views unless "Show Hidden Games" is enabled.
+                        </div>
+                      </div>
+                    </label>
+                  </div>
                 </div>
               </div>
             )}
@@ -866,6 +951,187 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
                     </div>
                   </div>
                 </div>
+              </div>
+            )}
+
+            {/* TAB: PLAY ACTIONS (DUAL LAUNCH / MODDED CONFIGURATIONS) */}
+            {activeTab === "actions" && (
+              <div className="space-y-4 animate-in fade-in duration-100">
+                <div className="border-b border-white/10 pb-2 flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold text-white flex items-center space-x-2">
+                      <Layers className="w-4 h-4 text-purple-400" />
+                      <span>Play Actions & Dual Launch</span>
+                    </h3>
+                    <p className="text-[11px] text-zinc-400 mt-0.5">
+                      Configure alternate executables, mod managers (like Thunderstore / BepInEx), server instances, or custom launch arguments.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleAddPlayAction}
+                    className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-semibold flex items-center space-x-1.5 transition-colors cursor-pointer shadow-md shadow-purple-950/40"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Add Play Action</span>
+                  </button>
+                </div>
+
+                {playActions.length === 0 ? (
+                  <div className="p-8 border border-dashed border-white/10 rounded-2xl text-center space-y-3 bg-white/[0.01]">
+                    <Layers className="w-8 h-8 text-zinc-600 mx-auto" />
+                    <div className="space-y-1">
+                      <p className="text-xs font-semibold text-zinc-300">
+                        No custom play actions configured
+                      </p>
+                      <p className="text-[11px] text-zinc-500 max-w-md mx-auto">
+                        Add secondary actions to easily choose between Vanilla and Modded game launches, or launch server utilities with a single click.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleAddPlayAction}
+                      className="px-3.5 py-1.5 bg-white/10 hover:bg-white/15 text-white rounded-xl text-xs font-medium inline-flex items-center space-x-1.5 transition-colors cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Create First Action</span>
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {playActions.map((act, idx) => (
+                      <div
+                        key={act.id}
+                        className="p-4 bg-white/[0.03] border border-white/10 rounded-2xl space-y-3 relative hover:border-white/15 transition-all"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center space-x-2">
+                            <span className="w-5 h-5 rounded-full bg-purple-500/20 text-purple-300 flex items-center justify-center font-mono text-[10px] font-bold">
+                              {idx + 1}
+                            </span>
+                            <span className="font-bold text-xs text-white">
+                              {act.name || "Untitled Action"}
+                            </span>
+                            {act.is_primary && (
+                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 font-mono font-semibold">
+                                Primary Action
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="flex items-center space-x-2">
+                            <label className="flex items-center space-x-1.5 text-[11px] text-zinc-300 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={act.is_primary ?? false}
+                                onChange={(e) =>
+                                  handleUpdatePlayAction(act.id, {
+                                    is_primary: e.target.checked,
+                                  })
+                                }
+                                className="w-3.5 h-3.5 rounded bg-zinc-800 border-zinc-700 text-purple-600 cursor-pointer"
+                              />
+                              <span>Set as Primary</span>
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() => handleRemovePlayAction(act.id)}
+                              title="Delete action"
+                              className="p-1 text-zinc-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                          {/* Action Name */}
+                          <div className="sm:col-span-2">
+                            <label className="block text-zinc-400 text-[11px] mb-1">
+                              Action Name
+                            </label>
+                            <input
+                              type="text"
+                              value={act.name}
+                              onChange={(e) =>
+                                handleUpdatePlayAction(act.id, { name: e.target.value })
+                              }
+                              placeholder="e.g. Play with Thunderstore Mods, DirectX 11, Dedicated Server"
+                              className="w-full px-3 py-1.5 bg-white/[0.04] border border-white/10 rounded-xl text-white font-medium focus:outline-none focus:border-white/30"
+                            />
+                          </div>
+
+                          {/* Executable Path / URL */}
+                          <div className="sm:col-span-2">
+                            <label className="block text-zinc-400 text-[11px] mb-1">
+                              Path or Scheme URL (Executable, .bat, or steam:// / thunderstore://)
+                            </label>
+                            <div className="flex items-center space-x-2">
+                              <input
+                                type="text"
+                                value={act.path}
+                                onChange={(e) =>
+                                  handleUpdatePlayAction(act.id, { path: e.target.value })
+                                }
+                                placeholder="C:\Games\ModManager.exe or ror2mm://..."
+                                className="flex-1 px-3 py-1.5 bg-white/[0.04] border border-white/10 rounded-xl text-white font-mono text-[11px] focus:outline-none focus:border-white/30"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => handleBrowseActionFile(act.id)}
+                                className="px-3 py-1.5 bg-white/10 hover:bg-white/15 text-white rounded-xl text-xs font-semibold flex items-center space-x-1 cursor-pointer shrink-0 border border-white/10"
+                              >
+                                <FolderOpen className="w-3.5 h-3.5 text-zinc-300" />
+                                <span>Browse...</span>
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Arguments */}
+                          <div>
+                            <label className="block text-zinc-400 text-[11px] mb-1">
+                              Arguments (Optional)
+                            </label>
+                            <input
+                              type="text"
+                              value={act.arguments || ""}
+                              onChange={(e) =>
+                                handleUpdatePlayAction(act.id, { arguments: e.target.value })
+                              }
+                              placeholder="--doorstop-enable true -popupwindow"
+                              className="w-full px-3 py-1.5 bg-white/[0.04] border border-white/10 rounded-xl text-white font-mono text-[11px] focus:outline-none focus:border-white/30"
+                            />
+                          </div>
+
+                          {/* Working Directory */}
+                          <div>
+                            <label className="block text-zinc-400 text-[11px] mb-1">
+                              Working Directory (Optional)
+                            </label>
+                            <div className="flex items-center space-x-2">
+                              <input
+                                type="text"
+                                value={act.working_dir || ""}
+                                onChange={(e) =>
+                                  handleUpdatePlayAction(act.id, { working_dir: e.target.value })
+                                }
+                                placeholder="C:\Games\GameFolder"
+                                className="flex-1 px-3 py-1.5 bg-white/[0.04] border border-white/10 rounded-xl text-white font-mono text-[11px] focus:outline-none focus:border-white/30"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => handleBrowseActionDirectory(act.id)}
+                                className="px-2.5 py-1.5 bg-white/10 hover:bg-white/15 text-white rounded-xl text-xs font-medium flex items-center space-x-1 cursor-pointer shrink-0 border border-white/10"
+                              >
+                                <FolderOpen className="w-3.5 h-3.5 text-zinc-300" />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 
@@ -1547,7 +1813,7 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
             </button>
 
             {isProviderPickerOpen && (
-              <div className="absolute left-0 bottom-full mb-2 w-80 bg-[#0e1017]/98 border border-white/10 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.85)] p-3.5 z-50 space-y-3 backdrop-blur-2xl animate-in fade-in zoom-in-95 duration-150">
+              <div className="absolute left-0 bottom-full mb-2 w-80 theme-panel-surface border border-white/10 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.85)] p-3.5 z-50 space-y-3 backdrop-blur-2xl animate-in fade-in zoom-in-95 duration-150">
                 <div className="flex items-center justify-between border-b border-white/5 pb-2">
                   <span className="text-xs font-bold text-white flex items-center space-x-1.5">
                     <Sparkles className="w-3.5 h-3.5 text-purple-400" />

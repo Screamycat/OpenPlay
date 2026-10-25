@@ -79,8 +79,8 @@ export const SteamDescription: React.FC<SteamDescriptionProps> = ({ html, fallba
                    [&_hr]:border-t [&_hr]:border-white/15 [&_hr]:my-6
                    [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:space-y-1.5 [&_ul]:my-3 [&_ul]:text-slate-200/90
                    [&_li]:text-sm [&_li]:leading-relaxed
-                   [&_img]:rounded-xl [&_img]:my-4 [&_img]:max-w-full [&_img]:shadow-xl [&_img]:border [&_img]:border-white/10
-                   [&_video]:rounded-xl [&_video]:my-4 [&_video]:max-w-full [&_video]:shadow-xl [&_video]:border [&_video]:border-white/10
+                   [&_img]:my-3 [&_img]:max-w-full [&_img]:h-auto [&_img]:rounded-lg
+                   [&_video]:my-3 [&_video]:max-w-full [&_video]:h-auto [&_video]:rounded-lg
                    [&_span.bb_img_ctn]:block [&_span.bb_img_ctn]:my-3
                    [&_a]:text-cyan-400 [&_a]:underline [&_a]:underline-offset-2 hover:[&_a]:text-cyan-300
                    [&_br]:leading-relaxed"

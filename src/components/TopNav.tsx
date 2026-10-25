@@ -1,10 +1,9 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { WindowControls } from "./WindowControls";
 import { FilterPopover, FilterItem } from "./FilterPopover";
 import { SortDropdown } from "./SortDropdown";
 import {
-  Gamepad2,
   Search,
   LayoutGrid,
   Columns2,
@@ -13,6 +12,9 @@ import {
   X,
   ChevronDown,
   Trophy,
+  Eye,
+  EyeOff,
+  Star,
 } from "lucide-react";
 
 export type ViewMode = "split" | "grid" | "list";
@@ -38,6 +40,11 @@ interface TopNavProps {
   showFavoritesOnly: boolean;
   onToggleFavoritesOnly: () => void;
   favoritesCount: number;
+  showHiddenGames?: boolean;
+  onToggleShowHidden?: () => void;
+  showHiddenOnly?: boolean;
+  onToggleHiddenOnly?: () => void;
+  hiddenGamesCount?: number;
   availableGenres: FilterItem[];
   selectedGenres: string[];
   onToggleGenre: (genre: string) => void;
@@ -76,6 +83,11 @@ export const TopNav: React.FC<TopNavProps> = ({
   showFavoritesOnly,
   onToggleFavoritesOnly,
   favoritesCount,
+  showHiddenGames = false,
+  onToggleShowHidden,
+  showHiddenOnly = false,
+  onToggleHiddenOnly,
+  hiddenGamesCount = 0,
   availableGenres,
   selectedGenres,
   onToggleGenre,
@@ -102,6 +114,7 @@ export const TopNav: React.FC<TopNavProps> = ({
   uninstalledCount,
 }) => {
   const [isFilterPopoverOpen, setIsFilterPopoverOpen] = useState(false);
+  const filterContainerRef = useRef<HTMLDivElement>(null);
   const handleHeaderDoubleClick = async (e: React.MouseEvent) => {
     if (e.button === 0) {
       if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
@@ -128,14 +141,18 @@ export const TopNav: React.FC<TopNavProps> = ({
           title="Open Menu & Library Manager"
           className="flex items-center space-x-2 px-2.5 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-slate-200 hover:text-white transition-all group shadow-sm cursor-pointer"
         >
-          <Gamepad2 className="w-4 h-4 text-slate-300 group-hover:scale-105 transition-transform" />
+          <img
+            src="/OpenPlayIcon.svg"
+            alt="OpenPlay"
+            className="w-4 h-4 invert group-hover:scale-110 transition-transform filter drop-shadow-[0_0_6px_rgba(168,85,247,0.4)]"
+          />
           <span className="font-bold text-xs tracking-wider uppercase text-white hidden sm:inline">
             OpenPlay
           </span>
         </button>
 
         {/* 1. Filters (All / Installed / Uninstalled / Down Arrow dropdown) */}
-        <div className="relative">
+        <div ref={filterContainerRef} className="relative">
           <div className="flex items-center bg-black/40 rounded-lg p-0.5 border border-white/10 text-xs">
             <button
               onClick={() => onStatusFilterChange("all")}
@@ -197,15 +214,66 @@ export const TopNav: React.FC<TopNavProps> = ({
                 />
               )}
             </button>
+
+            {/* Active Favorites Indicator Pill */}
+            {showFavoritesOnly && (
+              <button
+                onClick={onToggleFavoritesOnly}
+                title="Currently showing only favorites. Click to view all games."
+                className="ml-1 px-2 py-0.5 rounded-md border font-bold text-[10px] tracking-wider uppercase flex items-center space-x-1 cursor-pointer transition-all shadow-sm bg-amber-500/20 border-amber-500/40 text-amber-300 hover:bg-amber-500/30"
+              >
+                <Star className="w-3 h-3 fill-amber-400 text-amber-400" />
+                <span>Favorites ({favoritesCount})</span>
+                <X className="w-2.5 h-2.5 ml-0.5 opacity-70 hover:opacity-100" />
+              </button>
+            )}
+
+            {/* Active Hidden Games Indicator Pill */}
+            {showHiddenOnly ? (
+              <button
+                onClick={onToggleHiddenOnly}
+                title="Currently showing only hidden games. Click to view all games."
+                className="ml-1 px-2 py-0.5 rounded-md border font-bold text-[10px] tracking-wider uppercase flex items-center space-x-1 cursor-pointer transition-all shadow-sm"
+                style={{
+                  backgroundColor: "color-mix(in srgb, var(--app-accent-color, #a855f7) 22%, transparent)",
+                  borderColor: "color-mix(in srgb, var(--app-accent-color, #a855f7) 45%, transparent)",
+                  color: "var(--app-accent-color, #a855f7)",
+                }}
+              >
+                <EyeOff className="w-3 h-3" />
+                <span>Hidden Only ({hiddenGamesCount})</span>
+                <X className="w-2.5 h-2.5 ml-0.5 opacity-70 hover:opacity-100" />
+              </button>
+            ) : showHiddenGames ? (
+              <button
+                onClick={onToggleShowHidden}
+                title="Currently viewing hidden games. Click to hide them again."
+                className="ml-1 px-2 py-0.5 rounded-md border font-bold text-[10px] tracking-wider uppercase flex items-center space-x-1 cursor-pointer transition-all"
+                style={{
+                  backgroundColor: "color-mix(in srgb, var(--app-accent-color, #a855f7) 20%, transparent)",
+                  borderColor: "color-mix(in srgb, var(--app-accent-color, #a855f7) 40%, transparent)",
+                  color: "var(--app-accent-color, #a855f7)",
+                }}
+              >
+                <Eye className="w-3 h-3" />
+                <span>Hidden ({hiddenGamesCount})</span>
+              </button>
+            ) : null}
           </div>
 
           {/* Filter Popover Panel */}
           <FilterPopover
             isOpen={isFilterPopoverOpen}
             onClose={() => setIsFilterPopoverOpen(false)}
+            containerRef={filterContainerRef}
             showFavoritesOnly={showFavoritesOnly}
             onToggleFavoritesOnly={onToggleFavoritesOnly}
             favoritesCount={favoritesCount}
+            showHiddenGames={showHiddenGames}
+            onToggleShowHidden={onToggleShowHidden}
+            showHiddenOnly={showHiddenOnly}
+            onToggleHiddenOnly={onToggleHiddenOnly}
+            hiddenGamesCount={hiddenGamesCount}
             availableGenres={availableGenres}
             selectedGenres={selectedGenres}
             onToggleGenre={onToggleGenre}

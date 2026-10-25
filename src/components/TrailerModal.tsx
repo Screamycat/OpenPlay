@@ -33,7 +33,7 @@ export function getYouTubeEmbedUrl(
   if (match && match[1]) {
     const autoPlayParam = autoPlay ? "1" : "0";
     const muteParam = muted ? "1" : "0";
-    return `https://www.youtube-nocookie.com/embed/${match[1]}?autoplay=${autoPlayParam}&mute=${muteParam}&rel=0`;
+    return `https://www.youtube-nocookie.com/embed/${match[1]}?autoplay=${autoPlayParam}&mute=${muteParam}&loop=1&playlist=${match[1]}&rel=0`;
   }
   return null;
 }
@@ -181,7 +181,7 @@ export const TrailerModal: React.FC<TrailerModalProps> = ({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="bg-[#12151e]/95 backdrop-blur-2xl border border-[#23293d] rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
+        className="theme-panel-surface backdrop-blur-2xl border border-white/10 rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
       >
         {/* Header */}
         <div className="px-6 py-4 border-b border-[#202538] flex items-center justify-between">
@@ -572,7 +572,7 @@ export const TrailerModal: React.FC<TrailerModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-3 border-t border-[#202538] flex items-center justify-between bg-[#0e1017]">
+        <div className="px-6 py-3 border-t border-white/10 flex items-center justify-between bg-white/[0.02]">
           <div className="text-[11px] text-slate-400">
             {trailers.length} trailer{trailers.length === 1 ? "" : "s"} assigned
           </div>

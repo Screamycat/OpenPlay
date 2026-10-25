@@ -205,10 +205,10 @@ export const SteamGridDBModal: React.FC<SteamGridDBModalProps> = ({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="bg-[#10131d]/95 backdrop-blur-2xl border border-[#23293e] rounded-2xl w-full max-w-5xl h-[720px] shadow-2xl flex flex-col overflow-hidden"
+        className="theme-panel-surface backdrop-blur-2xl border border-white/10 rounded-2xl w-full max-w-5xl h-[720px] shadow-2xl flex flex-col overflow-hidden"
       >
         {/* Modal Header */}
-        <div className="h-14 px-6 border-b border-[#20263a] flex items-center justify-between bg-[#0e1017] shrink-0">
+        <div className="h-14 px-6 border-b border-white/10 flex items-center justify-between bg-white/[0.02] shrink-0">
           <div className="flex items-center space-x-2.5">
             <Sparkles className="w-5 h-5 text-cyan-400" />
             <div>
@@ -275,8 +275,8 @@ export const SteamGridDBModal: React.FC<SteamGridDBModalProps> = ({
           /* Main Asset Browser */
           <div className="flex-1 flex flex-col overflow-hidden">
             {/* Asset Type Selector Bar */}
-            <div className="px-6 py-3 border-b border-[#1c2235] bg-[#0c0e15] flex items-center justify-between gap-3">
-              <div className="flex items-center space-x-2 bg-[#141825] p-1 rounded-xl border border-[#242b3e]">
+            <div className="px-6 py-3 border-b border-white/10 bg-black/20 flex items-center justify-between gap-3">
+              <div className="flex items-center space-x-2 bg-black/40 p-1 rounded-xl border border-white/10">
                 <button
                   onClick={() => setAssetType("grids")}
                   className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
