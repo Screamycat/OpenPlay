@@ -1,8 +1,8 @@
 [package]
 name = "openplay"
-version = "0.1.0"
+version = "0.1.1"
 description = "OpenPlay - Cross-Platform Game Library & Launcher"
-authors = ["OpenPlay Developers"]
+authors = ["ScreamyCat", "OpenPlay Developers"]
 edition = "2021"
 
 [lib]

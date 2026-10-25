@@ -10,6 +10,7 @@ use metadata::hltb::{HltbData, HltbFetcher};
 use metadata::steam::{SteamMetadataFetcher, SteamNewsItem};
 use metadata::steamgriddb::{SteamGridDBAsset, SteamGridDBClient};
 use metadata::epic::EpicMetadataFetcher;
+use metadata::retroachievements::RetroAchievementsClient;
 use models::{
     Achievement, AppConfig, Game, GameAchievementSummary, GameTrailer, HunterProfile,
     LibraryIntegration,
@@ -1552,6 +1553,40 @@ async fn sync_game_achievements(
                 }
             }
         }
+    } else if source_lower == "retroachievements" || source_lower.contains("retro") {
+        let (username, api_key) = {
+            let cfg = state.db.get_app_config()?;
+            let u = cfg.retroachievements_username.as_deref().unwrap_or("").trim().to_string();
+            let k = cfg.retroachievements_api_key.as_deref().unwrap_or("").trim().to_string();
+            if u.is_empty() || k.is_empty() {
+                return Err(
+                    "RetroAchievements credentials not configured. Please enter your username and Web API key in Settings -> APIs & Services."
+                        .to_string(),
+                );
+            }
+            (u, k)
+        };
+
+        if let Some(ref sid) = game.source_id {
+            if let Ok(ra_id) = sid.parse::<u64>() {
+                if let Ok(detail) = RetroAchievementsClient::fetch_game_info_and_progress(ra_id, &username, &api_key).await {
+                    let achievements = RetroAchievementsClient::extract_achievements(&game_id, &detail);
+                    if !achievements.is_empty() {
+                        state.db.save_game_achievements(&game_id, &achievements)?;
+                        if let Some(playtime) = detail.user_total_playtime {
+                            if playtime > game.playtime_seconds {
+                                game.playtime_seconds = playtime;
+                            }
+                        }
+                        if let Some(latest_date) = extract_latest_unlock_date(&achievements) {
+                            if game.last_played.is_none() || game.last_played.as_deref() < Some(latest_date.as_str()) {
+                                game.last_played = Some(latest_date);
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     let _ = state.db.upsert_game(&game);
@@ -1648,6 +1683,157 @@ async fn sync_all_achievements(
             }
         }
     }
+
+    // Also sync RetroAchievements if credentials are configured
+    let (ra_user, ra_key) = {
+        let cfg = state.db.get_app_config()?;
+        let u = cfg.retroachievements_username.as_deref().unwrap_or("").trim().to_string();
+        let k = cfg.retroachievements_api_key.as_deref().unwrap_or("").trim().to_string();
+        (u, k)
+    };
+    if !ra_user.is_empty() && !ra_key.is_empty() {
+        let _ = sync_retroachievements_core(&app_handle, &state.db, &ra_user, &ra_key).await;
+    }
+
+    let updated_all = state.db.get_all_games()?;
+    state.db.get_hunter_profile(&updated_all)
+}
+
+async fn sync_retroachievements_core(
+    app_handle: &AppHandle,
+    db: &Database,
+    username: &str,
+    api_key: &str,
+) -> Result<(), String> {
+    let progress_list = RetroAchievementsClient::fetch_user_completion_progress(username, api_key)
+        .await
+        .map_err(|e| format!("Failed to fetch RetroAchievements user progress: {}", e))?;
+
+    let all_games = db.get_all_games()?;
+    let mut game_map_by_source_id: std::collections::HashMap<String, Game> = std::collections::HashMap::new();
+    let mut game_map_by_title: std::collections::HashMap<String, Game> = std::collections::HashMap::new();
+
+    for g in all_games {
+        let src_lower = g.source.to_lowercase();
+        if src_lower.contains("retro") {
+            if let Some(ref sid) = g.source_id {
+                game_map_by_source_id.insert(sid.clone(), g.clone());
+            }
+        }
+        game_map_by_title.insert(g.title.to_lowercase().trim().to_string(), g);
+    }
+
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(4));
+    let mut join_set = tokio::task::JoinSet::new();
+
+    for prog in progress_list {
+        let sem = semaphore.clone();
+        let u = username.to_string();
+        let k = api_key.to_string();
+        let prog_clone = prog.clone();
+
+        join_set.spawn(async move {
+            let _permit = sem.acquire_owned().await.ok()?;
+            let detail = RetroAchievementsClient::fetch_game_info_and_progress(prog_clone.game_id, &u, &k)
+                .await
+                .ok()?;
+            Some((prog_clone, detail))
+        });
+    }
+
+    while let Some(res) = join_set.join_next().await {
+        if let Ok(Some((prog, detail))) = res {
+            let game_id_str = prog.game_id.to_string();
+            let title_key = detail.title.to_lowercase().trim().to_string();
+
+            let mut game = if let Some(existing) = game_map_by_source_id.get(&game_id_str) {
+                existing.clone()
+            } else if let Some(existing) = game_map_by_title.get(&title_key) {
+                existing.clone()
+            } else {
+                Game {
+                    id: format!("ra_{}", prog.game_id),
+                    title: detail.title.clone(),
+                    source: "RetroAchievements".to_string(),
+                    source_id: Some(game_id_str.clone()),
+                    platforms: detail.console_name.as_ref().map(|c| vec![c.clone()]).unwrap_or_else(|| vec!["Retro".to_string()]),
+                    is_installed: false,
+                    date_added: Some(chrono::Utc::now().to_rfc3339()),
+                    ..Default::default()
+                }
+            };
+
+            if game.cover_image.is_none() || game.cover_image.as_deref().unwrap_or("").is_empty() {
+                game.cover_image = RetroAchievementsClient::to_media_url(detail.image_box_art.as_deref());
+            }
+            if game.icon_image.is_none() || game.icon_image.as_deref().unwrap_or("").is_empty() {
+                game.icon_image = RetroAchievementsClient::to_media_url(detail.image_icon.as_deref());
+            }
+            if game.background_image.is_none() || game.background_image.as_deref().unwrap_or("").is_empty() {
+                game.background_image = RetroAchievementsClient::to_media_url(detail.image_title.as_deref());
+            }
+            if game.developer.is_none() {
+                game.developer = detail.developer.clone();
+            }
+            if game.publisher.is_none() {
+                game.publisher = detail.publisher.clone();
+            }
+            if let Some(playtime) = detail.user_total_playtime {
+                if playtime > game.playtime_seconds {
+                    game.playtime_seconds = playtime;
+                }
+            }
+            if let Some(ref recent_date) = prog.most_recent_awarded_date {
+                let date_str = if recent_date.len() >= 10 { &recent_date[..10] } else { recent_date.as_str() };
+                if game.last_played.is_none() || game.last_played.as_deref() < Some(date_str) {
+                    game.last_played = Some(date_str.to_string());
+                }
+            }
+
+            if prog.highest_award_kind.as_deref() == Some("mastered") {
+                game.completion_status = Some("Completed".to_string());
+            } else if prog.highest_award_kind.is_some() {
+                game.completion_status = Some("Completed".to_string());
+            } else if game.playtime_seconds > 0 || prog.num_awarded.unwrap_or(0) > 0 {
+                if game.completion_status.is_none() || game.completion_status.as_deref() == Some("Not Played") {
+                    game.completion_status = Some("Played".to_string());
+                }
+            }
+
+            let _ = db.upsert_game(&game);
+
+            let achs = RetroAchievementsClient::extract_achievements(&game.id, &detail);
+            if !achs.is_empty() {
+                let _ = db.save_game_achievements(&game.id, &achs);
+            }
+
+            let _ = app_handle.emit("game-updated", &game);
+            let _ = app_handle.emit("achievements-updated", &game.id);
+        }
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn sync_retroachievements(
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<HunterProfile, String> {
+    let (username, api_key) = {
+        let cfg = state.db.get_app_config()?;
+        let u = cfg.retroachievements_username.as_deref().unwrap_or("").trim().to_string();
+        let k = cfg.retroachievements_api_key.as_deref().unwrap_or("").trim().to_string();
+        if u.is_empty() || k.is_empty() {
+            return Err(
+                "RetroAchievements credentials not configured. Please enter your username and Web API key in Settings -> APIs & Services."
+                    .to_string(),
+            );
+        }
+        (u, k)
+    };
+
+    sync_retroachievements_core(&app_handle, &state.db, &username, &api_key).await?;
 
     let updated_all = state.db.get_all_games()?;
     state.db.get_hunter_profile(&updated_all)
@@ -1809,6 +1995,44 @@ async fn refresh_game_live_data(
                     let _ = state.db.save_game_achievements(&game.id, &achs);
                     if let Some(latest_date) = extract_latest_unlock_date(&achs) {
                         game.last_played = Some(latest_date);
+                    }
+                }
+            }
+        }
+    } else if source_lower == "retroachievements" || source_lower.contains("retro") {
+        let (username, api_key) = {
+            let cfg = state.db.get_app_config()?;
+            let u = cfg.retroachievements_username.as_deref().unwrap_or("").trim().to_string();
+            let k = cfg.retroachievements_api_key.as_deref().unwrap_or("").trim().to_string();
+            (u, k)
+        };
+        if !username.is_empty() && !api_key.is_empty() {
+            if let Some(ref sid) = game.source_id {
+                if let Ok(ra_id) = sid.parse::<u64>() {
+                    if let Ok(detail) = RetroAchievementsClient::fetch_game_info_and_progress(ra_id, &username, &api_key).await {
+                        if game.cover_image.is_none() || game.cover_image.as_deref().unwrap_or("").is_empty() {
+                            game.cover_image = RetroAchievementsClient::to_media_url(detail.image_box_art.as_deref());
+                        }
+                        if game.icon_image.is_none() || game.icon_image.as_deref().unwrap_or("").is_empty() {
+                            game.icon_image = RetroAchievementsClient::to_media_url(detail.image_icon.as_deref());
+                        }
+                        if game.background_image.is_none() || game.background_image.as_deref().unwrap_or("").is_empty() {
+                            game.background_image = RetroAchievementsClient::to_media_url(detail.image_title.as_deref());
+                        }
+                        if let Some(playtime) = detail.user_total_playtime {
+                            if playtime > game.playtime_seconds {
+                                game.playtime_seconds = playtime;
+                            }
+                        }
+                        let achs = RetroAchievementsClient::extract_achievements(&game.id, &detail);
+                        if !achs.is_empty() {
+                            let _ = state.db.save_game_achievements(&game.id, &achs);
+                            if let Some(latest_date) = extract_latest_unlock_date(&achs) {
+                                if game.last_played.is_none() || game.last_played.as_deref() < Some(latest_date.as_str()) {
+                                    game.last_played = Some(latest_date);
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -2074,6 +2298,139 @@ async fn warmup_active_achievements(
     Ok(indexed)
 }
 
+fn extract_sgdb_candidate_hash(url: &str) -> Option<String> {
+    let trimmed = url.trim();
+    let is_sgdb_raw = trimmed.starts_with("https://cdn2.steamgriddb.com/grid/")
+        || trimmed.starts_with("https://cdn2.steamgriddb.com/hero/")
+        || trimmed.starts_with("https://cdn2.steamgriddb.com/logo/")
+        || trimmed.starts_with("https://cdn2.steamgriddb.com/icon/");
+    if !is_sgdb_raw {
+        return None;
+    }
+
+    let file_part = trimmed.rsplit('/').next()?.split('?').next()?;
+    let (hash, ext) = file_part.rsplit_once('.')?;
+    let ext_lower = ext.to_ascii_lowercase();
+    if matches!(ext_lower.as_str(), "png" | "webp" | "gif") && !hash.is_empty() {
+        Some(hash.to_string())
+    } else {
+        None
+    }
+}
+
+/// Upgrades heavy raw SteamGridDB APNG / Animated WebP URLs (often 10–32 MB CPU-decoded)
+/// to their official hardware-accelerated VP9 `.webm` stream (`cdn2.steamgriddb.com/thumb/<hash>.webm`)
+/// while leaving static PNG/JPG covers untouched.
+#[tauri::command]
+async fn optimize_animated_artwork(
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<usize, String> {
+    let mut all = state.db.get_all_games()?;
+    if all.is_empty() {
+        return Ok(0);
+    }
+
+    let checked_raw = state
+        .db
+        .get_setting("checked_sgdb_webm_hashes_v1")?
+        .unwrap_or_else(|| "{}".to_string());
+    let mut checked_map: std::collections::HashMap<String, bool> =
+        serde_json::from_str(&checked_raw).unwrap_or_default();
+
+    let mut to_probe = std::collections::HashSet::new();
+    for g in &all {
+        for opt_url in [
+            g.cover_image.as_deref(),
+            g.background_image.as_deref(),
+            g.logo_image.as_deref(),
+            g.icon_image.as_deref(),
+        ] {
+            if let Some(h) = opt_url.and_then(extract_sgdb_candidate_hash) {
+                if !checked_map.contains_key(&h) {
+                    to_probe.insert(h);
+                }
+            }
+        }
+    }
+
+    if !to_probe.is_empty() {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(6))
+            .user_agent(format!("OpenPlay/{}", env!("CARGO_PKG_VERSION")))
+            .build()
+            .map_err(|e| e.to_string())?;
+
+        let sem = Arc::new(tokio::sync::Semaphore::new(8));
+        let mut join_set = tokio::task::JoinSet::new();
+
+        for hash in to_probe {
+            let client_clone = client.clone();
+            let sem_clone = sem.clone();
+            join_set.spawn(async move {
+                let _permit = sem_clone.acquire_owned().await.ok()?;
+                let webm_url = format!("https://cdn2.steamgriddb.com/thumb/{}.webm", hash);
+                let resp = client_clone.head(&webm_url).send().await.ok()?;
+                if resp.status().is_success() {
+                    Some((hash, true))
+                } else if resp.status() == reqwest::StatusCode::NOT_FOUND {
+                    Some((hash, false))
+                } else {
+                    None
+                }
+            });
+        }
+
+        while let Some(res) = join_set.join_next().await {
+            if let Ok(Some((hash, has_webm))) = res {
+                checked_map.insert(hash, has_webm);
+            }
+        }
+
+        if let Ok(serialized) = serde_json::to_string(&checked_map) {
+            let _ = state.db.set_setting("checked_sgdb_webm_hashes_v1", &serialized);
+        }
+    }
+
+    let mut upgraded_games = 0;
+    for game in &mut all {
+        let mut changed = false;
+
+        let try_upgrade = |field: &mut Option<String>| -> bool {
+            if let Some(ref current) = field {
+                if let Some(hash) = extract_sgdb_candidate_hash(current) {
+                    if checked_map.get(&hash).copied() == Some(true) {
+                        *field = Some(format!("https://cdn2.steamgriddb.com/thumb/{}.webm", hash));
+                        return true;
+                    }
+                }
+            }
+            false
+        };
+
+        if try_upgrade(&mut game.cover_image) {
+            changed = true;
+        }
+        if try_upgrade(&mut game.background_image) {
+            changed = true;
+        }
+        if try_upgrade(&mut game.logo_image) {
+            changed = true;
+        }
+        if try_upgrade(&mut game.icon_image) {
+            changed = true;
+        }
+
+        if changed {
+            let _ = state.db.save_game_exact(game);
+            let _ = app_handle.emit("game-updated", &game);
+            upgraded_games += 1;
+        }
+    }
+
+    Ok(upgraded_games)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let database = Arc::new(Database::new().expect("Failed to initialize OpenPlay SQLite database"));
@@ -2153,6 +2510,7 @@ pub fn run() {
             get_game_achievements,
             sync_game_achievements,
             sync_all_achievements,
+            sync_retroachievements,
             refresh_game_live_data,
             sync_live_playtimes,
             warmup_active_achievements,
@@ -2161,7 +2519,8 @@ pub fn run() {
             open_in_explorer,
             get_game_news,
             set_game_hidden,
-            check_for_app_updates
+            check_for_app_updates,
+            optimize_animated_artwork
         ])
         .run(tauri::generate_context!())
         .expect("error while running OpenPlay application");

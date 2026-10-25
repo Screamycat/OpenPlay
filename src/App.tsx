@@ -54,21 +54,20 @@ export function App() {
   });
   const selectedGameIdRef = useRef<string | null>(selectedGameId);
 
-  const handleSelectGame = (gameId: string) => {
+  const handleSelectGame = useCallback((gameId: string) => {
     setSelectedGameId(gameId);
     selectedGameIdRef.current = gameId;
     try {
       localStorage.setItem("openplay_last_selected_game_id", gameId);
     } catch {}
+  }, []);
 
-    setAppConfig((prev) => {
-      const updated: AppConfig = { ...prev, last_selected_game_id: gameId };
-      invoke("save_app_config", { config: updated }).catch((e) =>
-        console.warn("Failed to persist last_selected_game_id:", e)
-      );
-      return updated;
-    });
-  };
+  const handleSelectGameCard = useCallback(
+    (game: Game) => {
+      handleSelectGame(game.id);
+    },
+    [handleSelectGame]
+  );
 
   useEffect(() => {
     selectedGameIdRef.current = selectedGameId;
@@ -509,6 +508,10 @@ export function App() {
       }
     };
 
+    const artworkOptimizeTimer = window.setTimeout(() => {
+      invoke<number>("optimize_animated_artwork").catch(() => {});
+    }, 1000);
+
     const startupPulseTimer = window.setTimeout(() => {
       pulseLivePlaytimes();
     }, 2500);
@@ -533,6 +536,7 @@ export function App() {
     document.addEventListener("visibilitychange", handleWindowFocus);
 
     return () => {
+      clearTimeout(artworkOptimizeTimer);
       clearTimeout(startupPulseTimer);
       clearTimeout(warmupTimer);
       window.removeEventListener("focus", handleWindowFocus);
@@ -1371,7 +1375,7 @@ export function App() {
                 <GameGrid
                   games={filteredGames}
                   selectedGameId={selectedGame?.id}
-                  onSelectGame={(g) => handleSelectGame(g.id)}
+                  onSelectGame={handleSelectGameCard}
                   onLaunchGame={handleLaunchGame}
                   cardWidth={cardWidth}
                   isLaunchingId={isLaunchingId}
@@ -1430,7 +1434,7 @@ export function App() {
               <GameGrid
                 games={filteredGames}
                 selectedGameId={selectedGame?.id}
-                onSelectGame={(g) => handleSelectGame(g.id)}
+                onSelectGame={handleSelectGameCard}
                 onLaunchGame={handleLaunchGame}
                 cardWidth={cardWidth}
                 isLaunchingId={isLaunchingId}

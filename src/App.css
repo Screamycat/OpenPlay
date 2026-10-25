@@ -46,13 +46,25 @@
   }
 }
 
-/* Custom Auto-Hiding Scrollbars: Invisible when idle, subtly visible on hover */
-html, body, div, main, aside, section {
+/* Custom Auto-Hiding Scrollbars: Scoped strictly to scrollable containers to avoid universal div:hover style recalculation */
+html,
+body,
+main,
+aside,
+section,
+[class*="overflow-y-auto"],
+[class*="overflow-x-auto"],
+[class*="overflow-auto"] {
   scrollbar-width: thin;
   scrollbar-color: transparent transparent;
 }
 
-div:hover, main:hover, aside:hover, section:hover {
+main:hover,
+aside:hover,
+section:hover,
+[class*="overflow-y-auto"]:hover,
+[class*="overflow-x-auto"]:hover,
+[class*="overflow-auto"]:hover {
   scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
 }
 
@@ -68,18 +80,35 @@ div:hover, main:hover, aside:hover, section:hover {
 ::-webkit-scrollbar-thumb {
   background: transparent;
   border-radius: 9999px;
-  transition: background-color 0.25s ease;
 }
 
-div:hover::-webkit-scrollbar-thumb,
 main:hover::-webkit-scrollbar-thumb,
 aside:hover::-webkit-scrollbar-thumb,
-section:hover::-webkit-scrollbar-thumb {
+section:hover::-webkit-scrollbar-thumb,
+[class*="overflow-y-auto"]:hover::-webkit-scrollbar-thumb,
+[class*="overflow-x-auto"]:hover::-webkit-scrollbar-thumb,
+[class*="overflow-auto"]:hover::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.16);
 }
 
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.35) !important;
+}
+
+/* CSS Containment & Offscreen Rendering Optimization */
+.isolated-widget,
+.game-card-isolated {
+  contain: layout style paint;
+}
+
+.game-card-deferred {
+  content-visibility: auto;
+}
+
+@supports not (content-visibility: auto) {
+  .game-card-deferred {
+    contain: layout style paint;
+  }
 }
 
 /* Playnite FusionX Glassmorphism */
@@ -120,25 +149,35 @@ section:hover::-webkit-scrollbar-thumb {
   height: 230%;
   background: linear-gradient(
     135deg,
-    transparent 28%,
-    rgba(255, 255, 255, 0.05) 38%,
-    rgba(255, 255, 255, 0.25) 45%,
-    rgba(255, 255, 255, 0.95) 50%,
-    rgba(255, 255, 255, 0.25) 55%,
-    rgba(255, 255, 255, 0.05) 62%,
-    transparent 72%
+    transparent 24%,
+    rgba(255, 255, 255, 0.04) 34%,
+    rgba(255, 255, 255, 0.16) 42%,
+    rgba(255, 255, 255, 0.42) 46.5%,
+    rgba(255, 255, 255, 0.98) 50%,
+    rgba(255, 255, 255, 0.42) 53.5%,
+    rgba(255, 255, 255, 0.16) 58%,
+    rgba(255, 255, 255, 0.04) 66%,
+    transparent 76%
   );
-  filter: drop-shadow(0 0 14px rgba(255, 255, 255, 0.85));
-  transform: translate(-100%, -100%);
+  transform: translate3d(-100%, -100%, 0);
   opacity: 0;
   pointer-events: none;
 }
 
 .group:hover .card-shine-beam {
-  transform: translate(100%, 100%);
+  will-change: transform, opacity;
+  transform: translate3d(100%, 100%, 0);
   opacity: 1;
   /* Sword shine easing: gentle buildup at start, dynamic glide through blade, crisp glint off tip */
   transition: transform 1.55s cubic-bezier(0.35, 0, 0.15, 1), opacity 0.5s ease;
+}
+
+/* Suppress accidental hover shine cascades while actively wheel-scrolling the grid */
+.game-grid-scroll[data-scrolling="true"] .group:hover .card-shine-beam {
+  will-change: auto;
+  transform: translate3d(-100%, -100%, 0);
+  opacity: 0;
+  transition: none;
 }
 
 /* Play Button Glow Effect */

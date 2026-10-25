@@ -80,7 +80,7 @@ export const AchievementsQuickWidget: React.FC<AchievementsQuickWidgetProps> = (
 
   if (isLoading && !summary) {
     return (
-      <div className="bg-black/15 backdrop-blur-md border border-white/10 rounded-xl p-4 shadow-xl flex items-center justify-center space-x-2 py-6 text-xs text-zinc-400">
+      <div className="isolated-widget bg-black/25 border border-white/10 rounded-xl p-4 shadow-xl flex items-center justify-center space-x-2 py-6 text-xs text-zinc-400">
         <Loader2 className="w-4 h-4 animate-spin text-zinc-400" />
         <span>Loading achievements...</span>
       </div>
@@ -116,7 +116,7 @@ export const AchievementsQuickWidget: React.FC<AchievementsQuickWidgetProps> = (
   return (
     <div
       onClick={onOpenFullAchievements}
-      className="bg-black/15 backdrop-blur-md border border-white/10 hover:border-white/25 transition-all rounded-xl p-4 shadow-xl space-y-3.5 cursor-pointer group select-none text-xs"
+      className="isolated-widget bg-black/25 border border-white/10 hover:border-white/25 transition-colors rounded-xl p-4 shadow-xl space-y-3.5 cursor-pointer group select-none text-xs"
     >
       {/* Header */}
       <div className="flex items-center justify-between border-b border-white/10 pb-2.5">
@@ -145,6 +145,10 @@ export const AchievementsQuickWidget: React.FC<AchievementsQuickWidgetProps> = (
               <img
                 src={latest_unlocked.icon_url}
                 alt={latest_unlocked.display_name}
+                width={48}
+                height={48}
+                loading="lazy"
+                decoding="async"
                 className="w-full h-full object-cover"
                 onError={(e) => {
                   (e.target as HTMLElement).style.display = "none";
@@ -195,6 +199,10 @@ export const AchievementsQuickWidget: React.FC<AchievementsQuickWidgetProps> = (
                 <img
                   src={ach.icon_url}
                   alt={ach.display_name}
+                  width={36}
+                  height={36}
+                  loading="lazy"
+                  decoding="async"
                   className="w-full h-full object-cover"
                   onError={(e) => {
                     (e.target as HTMLElement).style.display = "none";
@@ -249,6 +257,10 @@ export const AchievementsQuickWidget: React.FC<AchievementsQuickWidgetProps> = (
                     <img
                       src={ach.icon_gray_url || ach.icon_url}
                       alt={ach.display_name}
+                      width={36}
+                      height={36}
+                      loading="lazy"
+                      decoding="async"
                       className={`w-full h-full object-cover grayscale opacity-40 ${
                         ach.is_secret ? "blur-xs scale-110" : ""
                       }`}

@@ -32,7 +32,7 @@ export const HowLongToBeatWidget: React.FC<HowLongToBeatWidgetProps> = ({
   const completePct = Math.max(15, 100 - mainPct - extraPct);
 
   return (
-    <div className="bg-black/12 backdrop-blur-md border border-white/10 rounded-xl p-4 shadow-xl space-y-3 select-none">
+    <div className="isolated-widget bg-black/25 border border-white/10 rounded-xl p-4 shadow-xl space-y-3 select-none">
       <div className="flex items-center justify-between">
         <h3 className="text-xs font-bold text-white uppercase tracking-wider flex items-center space-x-2">
           <span>HOW LONG TO BEAT</span>
@@ -66,21 +66,21 @@ export const HowLongToBeatWidget: React.FC<HowLongToBeatWidgetProps> = ({
 
       {/* 3 Duration Metric Cards - Translucent with subtle border */}
       <div className="grid grid-cols-3 gap-2.5 pt-0.5 text-center">
-        <div className="bg-black/20 backdrop-blur-sm border border-white/15 rounded-xl py-2.5 px-1.5 transition-all hover:border-white/25">
+        <div className="bg-black/30 border border-white/15 rounded-xl py-2.5 px-1.5 transition-colors hover:border-white/25">
           <div className="text-[10px] text-slate-400 font-medium">Main story</div>
           <div className="text-xs font-bold text-white font-mono mt-0.5">
             {formatHours(mainStoryHours)}
           </div>
         </div>
 
-        <div className="bg-black/20 backdrop-blur-sm border border-white/15 rounded-xl py-2.5 px-1.5 transition-all hover:border-white/25">
+        <div className="bg-black/30 border border-white/15 rounded-xl py-2.5 px-1.5 transition-colors hover:border-white/25">
           <div className="text-[10px] text-slate-400 font-medium">Main + extra</div>
           <div className="text-xs font-bold text-white font-mono mt-0.5">
             {formatHours(mainExtraHours)}
           </div>
         </div>
 
-        <div className="bg-black/20 backdrop-blur-sm border border-white/15 rounded-xl py-2.5 px-1.5 transition-all hover:border-white/25">
+        <div className="bg-black/30 border border-white/15 rounded-xl py-2.5 px-1.5 transition-colors hover:border-white/25">
           <div className="text-[10px] text-slate-400 font-medium">Completionist</div>
           <div className="text-xs font-bold text-white font-mono mt-0.5">
             {formatHours(completionistHours)}

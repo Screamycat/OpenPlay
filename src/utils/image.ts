@@ -19,6 +19,29 @@ export function resolveImageSrc(pathOrUrl?: string): string | undefined {
   }
 }
 
+/**
+ * Resolves cover artwork optimized for library poster grids and cards.
+ * Uses CDN server-side resizing on raw multi-megabyte storefront portrait assets
+ * (e.g., Epic Games 1200x1600+ PNGs/JPGs) so raster decoding stays instant during scroll.
+ */
+export function resolveGridCoverSrc(
+  pathOrUrl?: string,
+  targetHeight = 540
+): string | undefined {
+  const resolved = resolveImageSrc(pathOrUrl);
+  if (!resolved) return undefined;
+
+  if (
+    resolved.startsWith("https://cdn1.epicgames.com/") &&
+    !resolved.includes("resize=1")
+  ) {
+    const sep = resolved.includes("?") ? "&" : "?";
+    return `${resolved}${sep}h=${targetHeight}&resize=1`;
+  }
+
+  return resolved;
+}
+
 export function formatPlaytime(seconds: number): string {
   if (!seconds || seconds <= 0) return "Never";
   const hours = Math.floor(seconds / 3600);

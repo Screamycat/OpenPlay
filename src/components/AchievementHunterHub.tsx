@@ -58,10 +58,10 @@ export const AchievementHunterHub: React.FC<AchievementHunterHubProps> = ({
       let data = await invoke<HunterProfile>("get_hunter_profile");
       setProfile(data);
 
-      // If library has Steam or Epic games but no achievements cached yet, trigger background sync
+      // If library has Steam, Epic, or RetroAchievements games but no achievements cached yet, trigger background sync
       if (
         data.total_achievements_count === 0 &&
-        games.some((g) => ["steam", "epic"].includes(g.source.toLowerCase()))
+        games.some((g) => ["steam", "epic", "retroachievements"].includes(g.source.toLowerCase()))
       ) {
         setIsSyncingAll(true);
         const synced = await invoke<HunterProfile>("sync_all_achievements");

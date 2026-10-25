@@ -87,6 +87,8 @@ No hunting through forums for third-party scripts. OpenPlay ships with essential
 | **Native Linux & SteamOS Support** | ✅ **Native** | ❌ Windows Only |
 | **Animated & Moving Covers** (WebM, MP4, APNG, GIF) | ✅ **Built-in** | ⚠️Rarely supported |
 | **Steam & Epic Games Account Integration** | ✅ **Built-in** | 🔌 Requires Plugin |
+| **Achievement Hub & Store Trophy Scoring** |
+| **RetroAchievements Integration** (Retro Console Trophies & Rarity) | ✅ **Built-in** | 🔌 Requires Plugin |
 | **Achievement Hub & In-Game Trophies** | ✅ **Built-in** | 🔌 Requires Plugin |
 | **SteamGridDB Artwork Integration** | ✅ **Built-in** | 🔌 Requires Plugin |
 | **HowLongToBeat Completion Metrics** | ✅ **Built-in** | 🔌 Requires Plugin |
@@ -119,7 +121,7 @@ We have developed a **1-click Playnite Backup Importer**:
 2. OpenPlay parses your categories, completion states, playtime records, and artwork links.
 3. Your entire library is instantly ready on Windows or native Linux with zero setup friction.
 
-> More to migration come?
+> More migration to come?
 ---
 
 ## 🏗️ Architecture & Tech Stack
@@ -130,7 +132,7 @@ graph TD
     TAURI[Tauri v2 IPC Bridge]
     CORE[Backend: Rust Core Engine]
     DB[(SQLite: Local Storage)]
-    EXT[External APIs: Steam / Epic / IGDB / SteamGridDB / HLTB]
+    EXT[External APIs: Steam / Epic / RetroAchievements / IGDB / SteamGridDB / HLTB]
     PROC[OS Process Lifecycle Monitor]
 
     UI <-->|JSON IPC| TAURI

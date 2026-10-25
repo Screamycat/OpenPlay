@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Game } from "../types/game";
-import { resolveImageSrc, formatPlaytime, formatFileSize } from "../utils/image";
+import { resolveImageSrc, resolveGridCoverSrc, formatPlaytime, formatFileSize } from "../utils/image";
 import { SteamDescription } from "./SteamDescription";
 import { HowLongToBeatWidget } from "./HowLongToBeatWidget";
 import { SteamGridDBModal } from "./SteamGridDBModal";
@@ -96,6 +96,9 @@ function getPlatformSourceInfo(source?: string) {
   }
   if (s.includes("playstation") || s.includes("psn")) {
     return { title: "Platform: PlayStation", label: "PSN", icon: <PlayStationIcon className="w-4 h-4 mx-auto text-slate-200" /> };
+  }
+  if (s.includes("retro")) {
+    return { title: "Platform: RetroAchievements", label: "RETRO", icon: <Gamepad2 className="w-4 h-4 mx-auto text-amber-300" /> };
   }
   if (s === "local" || s === "manual") {
     return { title: "Platform: PC (Local)", label: "LOCAL PC", icon: <Monitor className="w-4 h-4 mx-auto text-slate-200" /> };
@@ -199,7 +202,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
 
   const heroSrc = resolveImageSrc(game.background_image);
   const logoSrc = resolveImageSrc(game.logo_image);
-  const coverSrc = resolveImageSrc(game.cover_image);
+  const coverSrc = resolveGridCoverSrc(game.cover_image, 720);
   const iconSrc = resolveImageSrc(game.icon_image);
 
   // Smooth Morphing Hero Crossfade
@@ -409,10 +412,9 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
 
   return (
     <div className="relative flex-1 w-full h-full bg-transparent overflow-hidden select-text font-sans">
-      {/* Scrollable details container stopping above bottom bar, matching Playnite FusionX's Margin="0,0,0,64" */}
+      {/* Static bottom-fade mask wrapper (kept off the scrolling element so GPU tiled scroll compositing stays fast) */}
       <div
-        ref={scrollContainerRef}
-        className="w-full h-[calc(100%-80px)] overflow-y-auto pb-10 scroll-smooth"
+        className="w-full h-[calc(100%-80px)] overflow-hidden"
         style={{
           WebkitMaskImage:
             "linear-gradient(to bottom, black 0px, black calc(100% - 65px), rgba(0,0,0,0.8) calc(100% - 45px), rgba(0,0,0,0.35) calc(100% - 25px), rgba(0,0,0,0.08) calc(100% - 10px), transparent 100%)",
@@ -420,6 +422,11 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
             "linear-gradient(to bottom, black 0px, black calc(100% - 65px), rgba(0,0,0,0.8) calc(100% - 45px), rgba(0,0,0,0.35) calc(100% - 25px), rgba(0,0,0,0.08) calc(100% - 10px), transparent 100%)",
         }}
       >
+        {/* Scrollable details container stopping above bottom bar, matching Playnite FusionX's Margin="0,0,0,64" */}
+        <div
+          ref={scrollContainerRef}
+          className="w-full h-full overflow-y-auto pb-10"
+        >
         {/* Top Hero Header - Strictly 96/31 Aspect Ratio & 50% Opacity Mask Fading */}
         <div className="relative w-full aspect-[96/31] select-none mb-[100px]">
           {/* Background Hero Art with Pure Alpha Mask Fading & Seamless Dual-Layer Morphing */}
@@ -462,6 +469,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                       <img
                         src={prevHero}
                         alt=""
+                        decoding="async"
                         className="w-full h-full object-cover opacity-50"
                       />
                     )}
@@ -488,6 +496,8 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                       <img
                         src={currentHero}
                         alt={game.title}
+                        fetchPriority="high"
+                        decoding="async"
                         className="w-full h-full object-cover opacity-50"
                       />
                     )}
@@ -516,6 +526,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                 <img
                   src={logoSrc}
                   alt={game.title}
+                  decoding="async"
                   className="w-[500px] max-w-full max-h-[200px] h-auto object-contain object-left drop-shadow-[0_6px_24px_rgba(0,0,0,0.95)]"
                   onError={(e) => {
                     (e.target as HTMLElement).style.display = "none";
@@ -538,6 +549,9 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                   <img
                     src={iconSrc}
                     alt=""
+                    width={16}
+                    height={16}
+                    decoding="async"
                     className="w-4 h-4 rounded object-contain shrink-0 drop-shadow"
                     onError={(e) => {
                       (e.target as HTMLElement).style.display = "none";
@@ -601,10 +615,10 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                       type="button"
                       onClick={() => onToggleGenre?.(g)}
                       title={`Filter by ${g}`}
-                      className={`px-2.5 py-0.5 rounded-md text-[10px] font-extrabold uppercase tracking-wider shadow-sm transition-all cursor-pointer ${
+                      className={`px-2.5 py-0.5 rounded-md text-[10px] font-extrabold uppercase tracking-wider shadow-sm transition-colors cursor-pointer ${
                         isSelected
                           ? "bg-white text-zinc-950 font-black ring-1 ring-white"
-                          : "bg-black/25 backdrop-blur-md border border-white/15 text-white hover:bg-white/15 hover:border-white/30"
+                          : "bg-black/35 border border-white/15 text-white hover:bg-white/15 hover:border-white/30"
                       }`}
                     >
                       {g}
@@ -622,7 +636,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                 {playerCount !== null && (
                   <div
                     title="Live current players on Steam"
-                    className="w-14 h-12 bg-black/25 backdrop-blur-md border border-white/15 hover:border-white/25 rounded-xl flex flex-col items-center justify-center p-1 shadow-lg text-center transition-all"
+                    className="w-14 h-12 bg-black/35 border border-white/15 hover:border-white/25 rounded-xl flex flex-col items-center justify-center p-1 shadow-lg text-center transition-colors"
                   >
                     <div className="text-[11px] font-bold text-white font-mono leading-none">
                       {playerCount > 9999 ? `${Math.round(playerCount / 1000)}k` : playerCount}
@@ -639,7 +653,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                   return (
                     <div
                       title={platInfo.title}
-                      className="w-14 h-12 bg-black/25 backdrop-blur-md border border-white/15 hover:border-white/25 rounded-xl flex flex-col items-center justify-center p-1 shadow-lg text-center transition-all"
+                      className="w-14 h-12 bg-black/35 border border-white/15 hover:border-white/25 rounded-xl flex flex-col items-center justify-center p-1 shadow-lg text-center transition-colors"
                     >
                       {platInfo.icon}
                       <div className="text-[7px] font-bold text-slate-400 tracking-wider uppercase mt-1 truncate max-w-full px-0.5">
@@ -669,7 +683,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                   }
                 }}
                 title="Left click to change artwork, right click for options"
-                className="group relative w-[170px] sm:w-[185px] lg:w-[200px] aspect-[2/3] rounded-xl overflow-hidden shadow-2xl transition-all cursor-pointer hover:ring-1 hover:ring-white/40 hover:shadow-black/80 bg-black/40 shrink-0 border-0"
+                className="group relative w-[170px] sm:w-[185px] lg:w-[200px] aspect-[2/3] rounded-xl overflow-hidden shadow-2xl transition-shadow cursor-pointer hover:ring-1 hover:ring-white/40 hover:shadow-black/80 bg-black/40 shrink-0 border-0 isolated-widget"
               >
                 {/* FusionX Corner-to-Corner Shine Overlay */}
                 <div className="card-shine-container">
@@ -684,12 +698,17 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                       loop
                       muted
                       playsInline
+                      width={400}
+                      height={600}
                       className="w-full h-full object-cover pointer-events-none"
                     />
                   ) : (
                     <img
                       src={coverSrc}
                       alt={game.title}
+                      width={400}
+                      height={600}
+                      decoding="async"
                       className="w-full h-full object-cover"
                     />
                   )
@@ -723,7 +742,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
             {activeTrailer && (
               <div className="space-y-2">
                 {/* Video Trailer Container */}
-                <div className="relative rounded-xl overflow-hidden border border-white/10 shadow-xl bg-black/60 backdrop-blur-sm aspect-video flex items-center justify-center group">
+                <div className="isolated-widget relative rounded-xl overflow-hidden border border-white/10 shadow-xl bg-black/65 aspect-video flex items-center justify-center group">
                   {(() => {
                     const ytEmbed = getYouTubeEmbedUrl(
                       activeTrailer.url,
@@ -757,7 +776,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
 
                   {/* Watermark Badges */}
                   {game.age_rating && (
-                    <div className="absolute bottom-3 left-3 px-2 py-0.5 rounded-md bg-black/80 backdrop-blur-sm border border-white/10 text-slate-200 font-extrabold text-[11px] shadow-md flex items-center space-x-1 pointer-events-none">
+                    <div className="absolute bottom-3 left-3 px-2 py-0.5 rounded-md bg-black/85 border border-white/10 text-slate-200 font-extrabold text-[11px] shadow-md flex items-center space-x-1 pointer-events-none">
                       <ShieldAlert className="w-3 h-3 text-slate-400" />
                       <span>{game.age_rating}</span>
                     </div>
@@ -768,7 +787,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                     <button
                       onClick={() => (onOpenTrailers ? onOpenTrailers(game) : setIsTrailerModalOpen(true))}
                       title="Manage Trailers"
-                      className="px-2.5 py-1 rounded-lg bg-black/80 hover:bg-black text-white text-[10px] font-bold border border-white/20 backdrop-blur-md shadow-md flex items-center space-x-1 cursor-pointer"
+                      className="px-2.5 py-1 rounded-lg bg-black/85 hover:bg-black text-white text-[10px] font-bold border border-white/20 shadow-md flex items-center space-x-1 cursor-pointer"
                     >
                       <Film className="w-3 h-3 text-cyan-400" />
                       <span>Manage Trailers</span>
@@ -805,7 +824,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
             )}
 
             {/* Content Tabs Navigation: Clean Playnite Style with White Underline */}
-            <div className="border-b border-white/10 flex items-center space-x-8 select-none sticky top-0 bg-transparent backdrop-blur-xs z-20 pt-2">
+            <div className="border-b border-white/10 flex items-center space-x-8 select-none pt-2">
               <button
                 onClick={() => setActiveTab("overview")}
                 className={`pb-3 text-xs font-bold uppercase tracking-wider transition-all cursor-pointer relative ${
@@ -889,7 +908,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                       <span>Fetching latest news and patch notes...</span>
                     </div>
                   ) : newsItems.length === 0 ? (
-                    <div className="p-8 bg-black/30 backdrop-blur-md border border-white/10 rounded-2xl text-center space-y-2">
+                    <div className="p-8 bg-black/35 border border-white/10 rounded-2xl text-center space-y-2">
                       <Newspaper className="w-8 h-8 text-zinc-600 mx-auto" />
                       <p className="text-xs text-zinc-400">
                         No news articles or changelogs found for this game.
@@ -915,13 +934,14 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                         return (
                           <div
                             onClick={() => setSelectedArticle(featured)}
-                            className="group relative rounded-2xl overflow-hidden border border-white/10 bg-black/40 hover:border-white/25 shadow-2xl transition-all cursor-pointer backdrop-blur-md"
+                            className="isolated-widget group relative rounded-2xl overflow-hidden border border-white/10 bg-black/45 hover:border-white/25 shadow-2xl transition-colors cursor-pointer"
                           >
                             {bannerImg && (
                               <div className="relative w-full aspect-[21/9] sm:aspect-[2.4/1] max-h-[280px] overflow-hidden bg-black/60">
                                 <img
                                   src={bannerImg}
                                   alt=""
+                                  decoding="async"
                                   onError={(e) => {
                                     const el = e.currentTarget;
                                     el.style.display = "none";
@@ -1007,7 +1027,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                                 <div
                                   key={item.gid}
                                   onClick={() => setSelectedArticle(item)}
-                                  className="group p-4 bg-black/35 backdrop-blur-md border border-white/10 hover:border-white/20 rounded-2xl space-y-2.5 transition-all shadow-md cursor-pointer hover:bg-black/50 flex flex-col justify-between"
+                                  className="isolated-widget group p-4 bg-black/40 border border-white/10 hover:border-white/20 rounded-2xl space-y-2.5 transition-colors shadow-md cursor-pointer hover:bg-black/55 flex flex-col justify-between"
                                 >
                                   <div className="space-y-2">
                                     {bannerImg && (
@@ -1015,6 +1035,8 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                                         <img
                                           src={bannerImg}
                                           alt=""
+                                          loading="lazy"
+                                          decoding="async"
                                           onError={(e) => {
                                             const el = e.currentTarget;
                                             el.style.display = "none";
@@ -1077,7 +1099,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
             />
 
             {/* 2. Details Card - Matches Playnite FusionX reference (No Text Clipping) */}
-            <div className="bg-black/12 backdrop-blur-md border border-white/10 rounded-xl p-4 shadow-xl space-y-3 select-none text-xs">
+            <div className="isolated-widget bg-black/25 border border-white/10 rounded-xl p-4 shadow-xl space-y-3 select-none text-xs">
               <h3 className="text-xs font-bold text-white border-b border-white/10 pb-2 uppercase tracking-wider">
                 Details
               </h3>
@@ -1294,6 +1316,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
           </div>
         </div>
       </div>
+      </div>
 
       {/* Floating Bottom Stats & Action Launch Bar - Exactly matching Playnite FusionX: No Black Box, No Border Line, Scaled Controls (~200x48 Play button, w-12 buttons, large stats) */}
       <div className="absolute bottom-0 inset-x-0 h-20 px-6 lg:px-8 pb-4 flex items-end justify-between select-none z-30 pointer-events-none bg-transparent">
@@ -1342,10 +1365,10 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
           <button
             onClick={() => onToggleFavorite(game.id)}
             title={game.is_favorite ? "Remove from Favorites" : "Add to Favorites"}
-            className={`w-12 h-12 rounded-full border transition-all flex items-center justify-center cursor-pointer shadow-lg backdrop-blur-sm group ${
+            className={`w-12 h-12 rounded-full border transition-colors flex items-center justify-center cursor-pointer shadow-lg group ${
               game.is_favorite
                 ? "bg-amber-400/15 text-amber-400 border-amber-400/30 hover:bg-amber-400/25 hover:border-amber-400/50"
-                : "bg-white/5 text-slate-300 border-white/10 hover:text-white hover:bg-white/15"
+                : "bg-white/[0.07] text-slate-300 border-white/10 hover:text-white hover:bg-white/15"
             }`}
           >
             <Star
@@ -1368,10 +1391,10 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                 }
               }}
               title="More Actions"
-              className={`w-12 h-12 rounded-full border transition-colors flex items-center justify-center cursor-pointer shadow-lg backdrop-blur-sm ${
+              className={`w-12 h-12 rounded-full border transition-colors flex items-center justify-center cursor-pointer shadow-lg ${
                 isActionMenuOpen
                   ? "bg-white/20 text-white border-white/40"
-                  : "bg-white/5 text-slate-300 border-white/10 hover:text-white hover:bg-white/15"
+                  : "bg-white/[0.07] text-slate-300 border-white/10 hover:text-white hover:bg-white/15"
               }`}
             >
               <MoreHorizontal className="w-4.5 h-4.5" />
@@ -1480,7 +1503,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
           <button
             onClick={() => onOpenEdit(game)}
             title="Game Properties"
-            className="w-12 h-12 rounded-full bg-white/5 hover:bg-white/15 text-slate-300 hover:text-white border border-white/10 flex items-center justify-center transition-colors cursor-pointer shadow-lg backdrop-blur-sm"
+            className="w-12 h-12 rounded-full bg-white/[0.07] hover:bg-white/15 text-slate-300 hover:text-white border border-white/10 flex items-center justify-center transition-colors cursor-pointer shadow-lg"
           >
             <Settings className="w-4.5 h-4.5" />
           </button>

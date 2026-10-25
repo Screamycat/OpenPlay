@@ -123,7 +123,13 @@ export const SteamGridDBModal: React.FC<SteamGridDBModalProps> = ({
   const handleApply = async (asset: SteamGridDBAsset) => {
     try {
       setApplyingUrl(asset.url);
-      const targetUrl = asset.url || asset.thumb;
+      // For animated assets, prefer SteamGridDB's hardware-decoded .webm stream over 10-32MB CPU-decoded APNG/WebP
+      const isAnimatedVideoThumb =
+        asset.is_animated &&
+        (asset.thumb.endsWith(".webm") || asset.thumb.endsWith(".mp4"));
+      const targetUrl = isAnimatedVideoThumb
+        ? asset.thumb
+        : asset.url || asset.thumb;
       const updates: {
         coverImage?: string;
         cover_image?: string;

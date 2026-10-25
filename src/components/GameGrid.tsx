@@ -1,6 +1,6 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { Game } from "../types/game";
-import { resolveImageSrc } from "../utils/image";
+import { resolveGridCoverSrc } from "../utils/image";
 import { Star, Gamepad2, Cloud, Loader2 } from "lucide-react";
 import { GroupByOption } from "./TopNav";
 
@@ -20,6 +20,9 @@ interface GameGroup {
   name: string;
   games: Game[];
 }
+
+// Keep first ~5 rows (7 cols x 5 rows = 35 cards) eagerly rendered above the initial fold
+const ABOVE_FOLD_CARD_COUNT = 35;
 
 function getGroupKey(game: Game, groupBy: GroupByOption): string {
   switch (groupBy) {
@@ -55,56 +58,104 @@ function buildGameGroups(games: Game[], groupBy: GroupByOption): GameGroup[] {
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
 }
 
-export const GameGrid: React.FC<GameGridProps> = ({
-  games,
-  selectedGameId,
-  onSelectGame,
-  onLaunchGame,
-  cardWidth,
-  isLaunchingId,
-  runningGameIds = [],
-  onContextMenu,
-  groupBy = "none",
-}) => {
-  const [justLaunchedId, setJustLaunchedId] = useState<string | null>(null);
+interface GameCardProps {
+  game: Game;
+  cardWidth: number;
+  isSelected: boolean;
+  isLaunching: boolean;
+  isRunning: boolean;
+  isFlashActive: boolean;
+  isBelowFold: boolean;
+  onSelect: (game: Game) => void;
+  onDoubleClick: (game: Game) => void;
+  onContextMenu: (game: Game, x: number, y: number) => void;
+  registerVideoCard?: (cardEl: HTMLDivElement, videoEl: HTMLVideoElement | null) => void;
+}
 
-  const handleCardDoubleClick = (game: Game) => {
-    if (runningGameIds.includes(game.id)) {
-      onSelectGame(game);
-      return;
-    }
-    setJustLaunchedId(game.id);
-    setTimeout(() => {
-      setJustLaunchedId((curr) => (curr === game.id ? null : curr));
-    }, 600);
-    onSelectGame(game);
-    onLaunchGame(game);
-  };
+const GameCard = React.memo<GameCardProps>(
+  ({
+    game,
+    cardWidth,
+    isSelected,
+    isLaunching,
+    isRunning,
+    isFlashActive,
+    isBelowFold,
+    onSelect,
+    onDoubleClick,
+    onContextMenu,
+    registerVideoCard,
+  }) => {
+    const cardRef = useRef<HTMLDivElement>(null);
+    const videoRef = useRef<HTMLVideoElement>(null);
+    const cardHeight = Math.round(cardWidth * 1.5);
 
-  const groups = useMemo(() => buildGameGroups(games, groupBy), [games, groupBy]);
+    const coverSrc = resolveGridCoverSrc(
+      game.cover_image,
+      cardWidth > 220 ? 720 : 540
+    );
+    const isVideoCover = Boolean(
+      coverSrc && (coverSrc.endsWith(".webm") || coverSrc.endsWith(".mp4"))
+    );
 
-  const renderGameCard = (game: Game) => {
-    const isSelected = game.id === selectedGameId;
-    const isLaunching = isLaunchingId === game.id;
-    const isRunning = runningGameIds.includes(game.id);
-    const isFlashActive = justLaunchedId === game.id;
-    const coverSrc = resolveImageSrc(game.cover_image);
+    // Pause offscreen <video> covers via contentvisibilityautostatechange (for deferred below-the-fold cards)
+    // paired with shared IntersectionObserver (for above-the-fold cards scrolled out of view & fallback)
+    useEffect(() => {
+      if (!isVideoCover) return;
+      const cardEl = cardRef.current;
+      const videoEl = videoRef.current;
+      if (!cardEl || !videoEl) return;
+
+      const handleCvStateChange = (event: Event) => {
+        const skipped = (event as Event & { skipped?: boolean }).skipped;
+        if (skipped) {
+          videoEl.pause();
+        } else {
+          videoEl.play().catch(() => {});
+        }
+      };
+
+      if (isBelowFold) {
+        cardEl.addEventListener(
+          "contentvisibilityautostatechange",
+          handleCvStateChange
+        );
+      }
+
+      registerVideoCard?.(cardEl, videoEl);
+
+      return () => {
+        if (isBelowFold) {
+          cardEl.removeEventListener(
+            "contentvisibilityautostatechange",
+            handleCvStateChange
+          );
+        }
+        registerVideoCard?.(cardEl, null);
+      };
+    }, [isVideoCover, isBelowFold, coverSrc, registerVideoCard]);
 
     return (
       <div
-        key={game.id}
-        onClick={() => onSelectGame(game)}
-        onDoubleClick={() => handleCardDoubleClick(game)}
+        ref={cardRef}
+        onClick={() => onSelect(game)}
+        onDoubleClick={() => onDoubleClick(game)}
         onContextMenu={(e) => {
           e.preventDefault();
           e.stopPropagation();
-          onSelectGame(game);
-          if (onContextMenu) {
-            onContextMenu(game, e.clientX, e.clientY);
-          }
+          onContextMenu(game, e.clientX, e.clientY);
         }}
-        style={{ minHeight: `${cardWidth * 1.5}px` }}
-        className={`group relative rounded-lg overflow-hidden cursor-pointer transition-all duration-200 aspect-[2/3] bg-black/30 border-0 ${
+        style={
+          isBelowFold
+            ? {
+                minHeight: `${cardHeight}px`,
+                containIntrinsicSize: `auto ${cardWidth}px auto ${cardHeight}px`,
+              }
+            : { minHeight: `${cardHeight}px` }
+        }
+        className={`group relative rounded-lg overflow-hidden cursor-pointer transition-[box-shadow,opacity,transform] duration-200 aspect-[2/3] bg-black/30 border-0 ${
+          isBelowFold ? "game-card-deferred" : "game-card-isolated"
+        } ${
           isLaunching
             ? "ring-2 ring-white shadow-[0_0_25px_rgba(255,255,255,0.7)] z-20 scale-[0.98]"
             : isRunning
@@ -112,9 +163,7 @@ export const GameGrid: React.FC<GameGridProps> = ({
             : isSelected
             ? "ring-2 ring-white shadow-2xl shadow-black/90 z-10"
             : "hover:ring-1 hover:ring-white/40 hover:shadow-2xl hover:shadow-black/70"
-        } ${
-          !game.is_installed ? "opacity-50 hover:opacity-100" : ""
-        }`}
+        } ${!game.is_installed ? "opacity-50 hover:opacity-100" : ""}`}
       >
         {/* Playnite FusionX Corner-to-Corner Card Shine Overlay */}
         <div className="card-shine-container">
@@ -126,22 +175,29 @@ export const GameGrid: React.FC<GameGridProps> = ({
           <div className="absolute inset-0 bg-white/50 pointer-events-none rounded-lg z-30 animate-launch-flash" />
         )}
 
-        {/* Cover Art Image */}
+        {/* Cover Art Image or Hardware-Decoded WebM/MP4 Video */}
         {coverSrc ? (
-          coverSrc.endsWith(".webm") || coverSrc.endsWith(".mp4") ? (
+          isVideoCover ? (
             <video
+              ref={videoRef}
               src={coverSrc}
-              autoPlay
+              autoPlay={!isBelowFold}
+              preload={isBelowFold ? "metadata" : "auto"}
               loop
               muted
               playsInline
+              width={600}
+              height={900}
               className="w-full h-full object-cover pointer-events-none"
             />
           ) : (
             <img
               src={coverSrc}
               alt={game.title}
-              loading="lazy"
+              width={600}
+              height={900}
+              loading={isBelowFold ? "lazy" : "eager"}
+              decoding="async"
               className={`w-full h-full object-cover ${
                 !game.is_installed ? "grayscale brightness-75" : ""
               }`}
@@ -203,10 +259,149 @@ export const GameGrid: React.FC<GameGridProps> = ({
         )}
       </div>
     );
+  }
+);
+
+export const GameGrid: React.FC<GameGridProps> = ({
+  games,
+  selectedGameId,
+  onSelectGame,
+  onLaunchGame,
+  cardWidth,
+  isLaunchingId,
+  runningGameIds = [],
+  onContextMenu,
+  groupBy = "none",
+}) => {
+  const [justLaunchedId, setJustLaunchedId] = useState<string | null>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const scrollIdleTimerRef = useRef<number | null>(null);
+
+  // Shared IntersectionObserver to pause any <video> covers (including above-the-fold ones) when scrolled out of view
+  const videoMapRef = useRef<Map<Element, HTMLVideoElement>>(new Map());
+  const observerRef = useRef<IntersectionObserver | null>(null);
+
+  useEffect(() => {
+    const rootEl = scrollContainerRef.current;
+    if (typeof IntersectionObserver === "undefined") return;
+
+    const obs = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          const video = videoMapRef.current.get(entry.target);
+          if (!video) continue;
+          if (entry.isIntersecting) {
+            video.play().catch(() => {});
+          } else {
+            video.pause();
+          }
+        }
+      },
+      {
+        root: rootEl,
+        rootMargin: "250px 0px",
+      }
+    );
+
+    observerRef.current = obs;
+    for (const el of videoMapRef.current.keys()) {
+      obs.observe(el);
+    }
+
+    return () => {
+      obs.disconnect();
+      observerRef.current = null;
+    };
+  }, []);
+
+  const registerVideoCard = useCallback(
+    (cardEl: HTMLDivElement, videoEl: HTMLVideoElement | null) => {
+      if (videoEl) {
+        videoMapRef.current.set(cardEl, videoEl);
+        observerRef.current?.observe(cardEl);
+      } else {
+        videoMapRef.current.delete(cardEl);
+        observerRef.current?.unobserve(cardEl);
+      }
+    },
+    []
+  );
+
+  // Keep latest handlers in a ref so memoized GameCard callbacks never change identity
+  const handlersRef = useRef({
+    onSelectGame,
+    onLaunchGame,
+    onContextMenu,
+    runningGameIds,
+  });
+  handlersRef.current = {
+    onSelectGame,
+    onLaunchGame,
+    onContextMenu,
+    runningGameIds,
   };
 
+  const handleSelectStable = useCallback((game: Game) => {
+    handlersRef.current.onSelectGame(game);
+  }, []);
+
+  const handleDoubleClickStable = useCallback((game: Game) => {
+    if (handlersRef.current.runningGameIds.includes(game.id)) {
+      handlersRef.current.onSelectGame(game);
+      return;
+    }
+    setJustLaunchedId(game.id);
+    window.setTimeout(() => {
+      setJustLaunchedId((curr) => (curr === game.id ? null : curr));
+    }, 600);
+    handlersRef.current.onSelectGame(game);
+    handlersRef.current.onLaunchGame(game);
+  }, []);
+
+  const handleContextMenuStable = useCallback(
+    (game: Game, x: number, y: number) => {
+      handlersRef.current.onSelectGame(game);
+      handlersRef.current.onContextMenu?.(game, x, y);
+    },
+    []
+  );
+
+  const handleScroll = useCallback(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    if (el.dataset.scrolling !== "true") {
+      el.dataset.scrolling = "true";
+    }
+    if (scrollIdleTimerRef.current !== null) {
+      window.clearTimeout(scrollIdleTimerRef.current);
+    }
+    scrollIdleTimerRef.current = window.setTimeout(() => {
+      if (scrollContainerRef.current) {
+        delete scrollContainerRef.current.dataset.scrolling;
+      }
+      scrollIdleTimerRef.current = null;
+    }, 120);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (scrollIdleTimerRef.current !== null) {
+        window.clearTimeout(scrollIdleTimerRef.current);
+      }
+    };
+  }, []);
+
+  const runningSet = useMemo(() => new Set(runningGameIds), [runningGameIds]);
+  const groups = useMemo(() => buildGameGroups(games, groupBy), [games, groupBy]);
+
+  let flatIndex = 0;
+
   return (
-    <div className="flex-1 overflow-y-auto p-3 bg-transparent select-none space-y-4">
+    <div
+      ref={scrollContainerRef}
+      onScroll={handleScroll}
+      className="game-grid-scroll flex-1 overflow-y-auto p-3 bg-transparent select-none space-y-4"
+    >
       {groups.map((group) => (
         <div key={group.name || "all"} className="space-y-2.5">
           {/* Section Group Header (shown when grouping is active) */}
@@ -237,7 +432,25 @@ export const GameGrid: React.FC<GameGridProps> = ({
               gridTemplateColumns: `repeat(auto-fill, minmax(${cardWidth}px, 1fr))`,
             }}
           >
-            {group.games.map((game) => renderGameCard(game))}
+            {group.games.map((game) => {
+              const currentIdx = flatIndex++;
+              return (
+                <GameCard
+                  key={game.id}
+                  game={game}
+                  cardWidth={cardWidth}
+                  isSelected={game.id === selectedGameId}
+                  isLaunching={isLaunchingId === game.id}
+                  isRunning={runningSet.has(game.id)}
+                  isFlashActive={justLaunchedId === game.id}
+                  isBelowFold={currentIdx >= ABOVE_FOLD_CARD_COUNT}
+                  onSelect={handleSelectStable}
+                  onDoubleClick={handleDoubleClickStable}
+                  onContextMenu={handleContextMenuStable}
+                  registerVideoCard={registerVideoCard}
+                />
+              );
+            })}
           </div>
         </div>
       ))}

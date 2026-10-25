@@ -24,6 +24,7 @@ Welcome to the central tracking document for **OpenPlay**. Use this document to 
 - [ ] **Emulation backup support**: Roms imported from playnite backup appears as local games, once emulators is implemented, roms should be supported through backups as well.
 - [ ] **Reocurring backups**: Settings, configs data, metadat and so on shuld be backed up from time to time.
 - [ ] **Online saving**: Store all data online. So it's accessible from all devices.
+- [ ] **Auto status**: In the completionist status it should feature statuses like,"Untouched", "Forgotten", "In Progress", "Hunting", "Beaten", "Mastered" and "Auto". Auto should auto assign these statuses based on time played and last played and achivements.
 
 ### 🟡 Medium Priority / Future Enhancements
 - [ ] **Custom Game Integrations (Epic Games / GOG / Xbox)**: Connect accounts or import local installed libraries automatically.
@@ -35,6 +36,8 @@ Welcome to the central tracking document for **OpenPlay**. Use this document to 
 - [ ] **Duplicate merger**: owning the same game on different platforms should not create two slots. Rather, they should conbine and it should be notable by the user that they own it on those platforms. (like duplicate hider in playnite)
 - [x] **Hide**: Be able to hide and unhide a game.
 - [ ] **Achievement system**: Optional native OpenPlay extention that makes it possible to track achivements for local games?
+- [ ] **Custom installer**: Replace the native wizard with a sleek and modern installer. A chance to prepare settings and so on.
+- [ ] **Save location**: Add support for finding out where it stores save files and config files.
 
 ### 🟢 Backlog & Wishlist
 - [ ] **Custom Soundtrack / Background Audio Player**: Play theme music when viewing game details (e.g. from Steam or custom mp3).
@@ -60,7 +63,9 @@ Welcome to the central tracking document for **OpenPlay**. Use this document to 
 - [x] **Scan Games folder old**: Scan games folder uses the super old way of scanning folders, it should be updated to the new explorer window (Windows).
 - [x] **Covers sizing**: The covers size slider needs to be able to go larger.
 - [x] **Trailer looping**: The trailer needs to loop once fnished.
-- [ ] **Accent not dominant**: THere are still places in the ui where the accent color is not the dominant color. There should be no "magic" colors.
+- [ ] **Accent not dominant**: There are still places in the ui where the accent color is not the dominant color. There should be no "magic" colors.
+- [ ] **In game counter for all**: Make in game counter not fixed for only steam games, and open to all platforms.
+- [ ] **Launch option on start up (Settings)**: An option in settings to enable start OpenPLay on device boot.
 
 ### ⚙️ Performance & Architecture
 - [ ] **Image Cache Optimization**: Cache downloaded SteamGridDB posters and logos locally in the application data folder for offline access.

@@ -46,6 +46,10 @@ export const SteamDescription: React.FC<SteamDescriptionProps> = ({ html, fallba
       }
     );
 
+    // Defer offscreen image decoding and heavy embedded store video buffering during details scroll
+    processed = processed.replace(/<img\b(?![^>]*\bloading=)/gi, '<img loading="lazy" decoding="async"');
+    processed = processed.replace(/<video\b(?![^>]*\bpreload=)/gi, '<video preload="metadata"');
+
     return processed;
   }, [html]);
 

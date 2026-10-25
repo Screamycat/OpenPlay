@@ -41,8 +41,9 @@ export const AchievementsTab: React.FC<AchievementsTabProps> = ({
   const srcLower = game.source.toLowerCase();
   const supportsAchievements =
     (srcLower === "steam" && !!game.source_id) ||
-    (srcLower === "epic" && (!!game.source_id || !!game.notes?.includes("namespace:")));
-  const storeLabel = srcLower === "epic" ? "Epic Games" : "Steam";
+    (srcLower === "epic" && (!!game.source_id || !!game.notes?.includes("namespace:"))) ||
+    srcLower.includes("retro");
+  const storeLabel = srcLower === "epic" ? "Epic Games" : srcLower.includes("retro") ? "RetroAchievements" : "Steam";
 
   // 1. Initial Load from Local SQLite Cache
   const loadCachedAchievements = async (autoSyncIfEmpty = true) => {
@@ -199,7 +200,7 @@ export const AchievementsTab: React.FC<AchievementsTabProps> = ({
   // Empty State: Unsupported Manual / Local Source without cached achievements
   if (!supportsAchievements && achievements.length === 0) {
     return (
-      <div className="p-8 bg-black/25 backdrop-blur-md border border-white/10 rounded-2xl text-center space-y-3">
+      <div className="p-8 bg-black/30 border border-white/10 rounded-2xl text-center space-y-3">
         <div className="w-12 h-12 mx-auto rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-zinc-400">
           <Trophy className="w-6 h-6" />
         </div>
@@ -227,7 +228,7 @@ export const AchievementsTab: React.FC<AchievementsTabProps> = ({
   // Empty State: Game has 0 achievements registered on its store
   if (!isLoading && achievements.length === 0) {
     return (
-      <div className="p-8 bg-black/25 backdrop-blur-md border border-white/10 rounded-2xl text-center space-y-3">
+      <div className="p-8 bg-black/30 border border-white/10 rounded-2xl text-center space-y-3">
         <div className="w-12 h-12 mx-auto rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-zinc-400">
           <Trophy className="w-6 h-6" />
         </div>
@@ -252,7 +253,7 @@ export const AchievementsTab: React.FC<AchievementsTabProps> = ({
   return (
     <div className="space-y-5 animate-view-fade">
       {/* 1. Header Progress & Perfect Game Banner */}
-      <div className="bg-black/20 backdrop-blur-md border border-white/10 rounded-2xl p-5 shadow-xl space-y-4">
+      <div className="isolated-widget bg-black/30 border border-white/10 rounded-2xl p-5 shadow-xl space-y-4">
         {/* Perfect Game Trophy Banner */}
         {isPerfectGame && (
           <div className="flex items-center justify-between p-3 rounded-xl bg-gradient-to-r from-amber-500/20 via-yellow-500/10 to-amber-500/20 border border-amber-400/40 shadow-[0_0_20px_rgba(251,191,36,0.15)]">
@@ -328,7 +329,7 @@ export const AchievementsTab: React.FC<AchievementsTabProps> = ({
       </div>
 
       {/* 2. Controls Toolbar (Status Pills, Sort, Search, Spoilers) */}
-      <div className="bg-black/15 backdrop-blur-md border border-white/10 rounded-xl p-3 flex flex-wrap items-center justify-between gap-3 text-xs">
+      <div className="isolated-widget bg-black/25 border border-white/10 rounded-xl p-3 flex flex-wrap items-center justify-between gap-3 text-xs">
         {/* Status Pills */}
         <div className="flex items-center space-x-1 bg-white/[0.03] p-1 rounded-lg border border-white/5">
           <button
@@ -419,16 +420,24 @@ export const AchievementsTab: React.FC<AchievementsTabProps> = ({
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {filteredAndSorted.map((ach) => {
+          {filteredAndSorted.map((ach, idx) => {
             const isSecretLocked =
               !ach.is_unlocked && ach.is_secret && !revealSpoilers;
             const rarity = getRarityBadge(ach.rarity_percentage);
+            const isDeferred = idx >= 16;
 
             return (
               <div
                 key={ach.api_name}
                 onClick={() => setSelectedAchievement(ach)}
-                className={`flex items-start space-x-3.5 p-3 rounded-xl border transition-all cursor-pointer group select-none ${
+                style={
+                  isDeferred
+                    ? { containIntrinsicSize: "auto 320px auto 86px" }
+                    : undefined
+                }
+                className={`flex items-start space-x-3.5 p-3 rounded-xl border transition-colors cursor-pointer group select-none ${
+                  isDeferred ? "game-card-deferred" : "isolated-widget"
+                } ${
                   ach.is_unlocked
                     ? "bg-white/[0.025] border-white/10 hover:border-white/30 hover:bg-white/[0.05]"
                     : "bg-black/20 border-white/5 opacity-75 hover:opacity-100 hover:border-white/20 hover:bg-white/[0.02]"
@@ -450,6 +459,10 @@ export const AchievementsTab: React.FC<AchievementsTabProps> = ({
                           : ach.icon_gray_url || ach.icon_url
                       }
                       alt={ach.display_name}
+                      width={56}
+                      height={56}
+                      loading={isDeferred ? "lazy" : "eager"}
+                      decoding="async"
                       className={`w-full h-full object-cover ${
                         isSecretLocked ? "blur-sm opacity-20 scale-125" : ""
                       }`}
