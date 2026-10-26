@@ -3,6 +3,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { WindowControls } from "./WindowControls";
 import { FilterPopover, FilterItem } from "./FilterPopover";
 import { SortDropdown } from "./SortDropdown";
+import { UpdateCheckResult } from "../types/update";
 import {
   Search,
   LayoutGrid,
@@ -63,7 +64,8 @@ interface TopNavProps {
   onToggleSortDirection: () => void;
   groupBy: GroupByOption;
   onGroupByChange: (g: GroupByOption) => void;
-  onOpenSettings: () => void;
+  onOpenSettings: (tab?: string) => void;
+  availableUpdate?: UpdateCheckResult | null;
   onOpenAchievementHub?: () => void;
   hunterLevel?: number;
   hunterScore?: number;
@@ -106,6 +108,7 @@ export const TopNav: React.FC<TopNavProps> = ({
   groupBy,
   onGroupByChange,
   onOpenSettings,
+  availableUpdate,
   onOpenAchievementHub,
   hunterLevel,
   hunterScore,
@@ -333,6 +336,23 @@ export const TopNav: React.FC<TopNavProps> = ({
         className="flex items-center space-x-2 shrink-0"
         onMouseDown={(e) => e.stopPropagation()}
       >
+        {/* Subtle Update Available Pill */}
+        {availableUpdate?.is_update_available && (
+          <button
+            onClick={() => onOpenSettings("about")}
+            title={`OpenPlay v${availableUpdate.latest_version} available. Click to view changelog and update.`}
+            className="flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-bold cursor-pointer transition-all shadow-xs hover:scale-102 active:scale-98 animate-in fade-in"
+            style={{
+              backgroundColor: "color-mix(in srgb, var(--app-accent-color, #a855f7) 18%, transparent)",
+              borderColor: "color-mix(in srgb, var(--app-accent-color, #a855f7) 45%, transparent)",
+              color: "white",
+            }}
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+            <span className="text-[11px] font-bold tracking-tight">Update v{availableUpdate.latest_version}</span>
+          </button>
+        )}
+
         {/* Achievement Hunter Button */}
         {onOpenAchievementHub && (
           <button
@@ -389,7 +409,7 @@ export const TopNav: React.FC<TopNavProps> = ({
 
         {/* Settings Button */}
         <button
-          onClick={onOpenSettings}
+          onClick={() => onOpenSettings()}
           title="Settings"
           className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white border border-white/10 transition-colors cursor-pointer"
         >

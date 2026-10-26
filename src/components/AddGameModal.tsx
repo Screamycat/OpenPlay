@@ -105,7 +105,7 @@ export const AddGameModal: React.FC<AddGameModalProps> = ({
       is_favorite: false,
       playtime_seconds: 0,
       platforms: ["Windows"],
-      completion_status: "Not Played",
+      completion_status: "Auto",
       links: [],
       screenshots: [],
       features: [],

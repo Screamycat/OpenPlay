@@ -18,7 +18,7 @@ import {
   RefreshCw,
   X,
 } from "lucide-react";
-import { resolveImageSrc } from "../utils/image";
+import { resolveImageSrc, isVideoSrc } from "../utils/image";
 
 interface AchievementHunterHubProps {
   onBackToLibrary: () => void;
@@ -384,11 +384,22 @@ export const AchievementHunterHub: React.FC<AchievementHunterHubProps> = ({
                     <div className="flex items-center space-x-3">
                       <div className="w-12 h-16 rounded-md bg-black/60 border border-white/10 overflow-hidden shrink-0">
                         {g.cover_image && (
-                          <img
-                            src={resolveImageSrc(g.cover_image)}
-                            alt={g.game_title}
-                            className="w-full h-full object-cover group-hover:scale-105 transition-transform"
-                          />
+                          isVideoSrc(g.cover_image) ? (
+                            <video
+                              src={resolveImageSrc(g.cover_image)}
+                              autoPlay
+                              loop
+                              muted
+                              playsInline
+                              className="w-full h-full object-cover group-hover:scale-105 transition-transform pointer-events-none"
+                            />
+                          ) : (
+                            <img
+                              src={resolveImageSrc(g.cover_image)}
+                              alt={g.game_title}
+                              className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                            />
+                          )
                         )}
                       </div>
                       <div className="min-w-0 flex-1">
@@ -523,11 +534,22 @@ export const AchievementHunterHub: React.FC<AchievementHunterHubProps> = ({
                     <div className="flex items-start space-x-3">
                       <div className="w-12 h-16 rounded-md bg-black/60 border border-white/10 overflow-hidden shrink-0">
                         {g.cover_image && (
-                          <img
-                            src={resolveImageSrc(g.cover_image)}
-                            alt={g.game_title}
-                            className="w-full h-full object-cover group-hover:scale-105 transition-transform"
-                          />
+                          isVideoSrc(g.cover_image) ? (
+                            <video
+                              src={resolveImageSrc(g.cover_image)}
+                              autoPlay
+                              loop
+                              muted
+                              playsInline
+                              className="w-full h-full object-cover group-hover:scale-105 transition-transform pointer-events-none"
+                            />
+                          ) : (
+                            <img
+                              src={resolveImageSrc(g.cover_image)}
+                              alt={g.game_title}
+                              className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                            />
+                          )
                         )}
                       </div>
                       <div className="min-w-0 flex-1 space-y-0.5">

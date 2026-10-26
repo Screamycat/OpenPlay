@@ -322,6 +322,7 @@ impl EpicScanner {
                                     play_count: Some(0),
                                     is_hidden: false,
                                     play_actions: Vec::new(),
+                                    ..Default::default()
                                 };
 
                                 seen_ids.insert(game.id.clone());
@@ -454,6 +455,7 @@ impl EpicScanner {
                                         play_count: Some(0),
                                         is_hidden: false,
                                         play_actions: Vec::new(),
+                                        ..Default::default()
                                     };
 
                                     seen_ids.insert(game_id);

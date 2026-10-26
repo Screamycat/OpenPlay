@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Game } from "../types/game";
 import { resolveImageSrc, resolveGridCoverSrc, formatPlaytime, formatFileSize } from "../utils/image";
@@ -31,15 +31,22 @@ import {
   ShieldAlert,
   Star,
   Newspaper,
-  CheckCircle2,
   Film,
   Plus,
   Square,
   RefreshCw,
   Trash2,
   ChevronDown,
+  Crown,
+  ShieldCheck,
+  Target,
+  Flame,
+  CircleDot,
 } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { getEffectiveCompletionStatus, shouldPromptBeatenModal } from "../utils/completionStatus";
+import { formatReleaseYear } from "../utils/date";
+import { StoryBeatenModal } from "./StoryBeatenModal";
 
 const SteamIcon: React.FC<{ className?: string }> = ({ className = "w-4 h-4" }) => (
   <svg viewBox="0 0 496 512" fill="currentColor" className={className} aria-hidden="true">
@@ -77,33 +84,148 @@ const PlayStationIcon: React.FC<{ className?: string }> = ({ className = "w-4 h-
   </svg>
 );
 
-function getPlatformSourceInfo(source?: string) {
-  const s = source?.toLowerCase() || "";
-  if (s === "steam") {
-    return { title: "Platform: Steam", label: "STEAM", icon: <SteamIcon className="w-4 h-4 mx-auto text-slate-200" /> };
+export interface GamePlatformBadge {
+  id: string;
+  title: string;
+  label: string;
+  icon: React.ReactNode;
+  isInstalled: boolean;
+}
+
+export function getGamePlatformBadges(
+  game: Game,
+  achSummary?: { total_achievements?: number; unlocked_achievements?: number } | null
+): GamePlatformBadge[] {
+  const badges: GamePlatformBadge[] = [];
+  const src = (game.source || "").toLowerCase().trim();
+  const platforms = (game.platforms || []).map((p) => p.toLowerCase().trim());
+
+  // 1. Primary Source
+  if (src === "steam") {
+    badges.push({
+      id: "steam",
+      title: "Steam",
+      label: "STEAM",
+      icon: <SteamIcon className="w-4 h-4 mx-auto text-slate-200" />,
+      isInstalled: !!game.is_installed,
+    });
+  } else if (src === "epic" || src.includes("epic")) {
+    badges.push({
+      id: "epic",
+      title: "Epic Games",
+      label: "EPIC",
+      icon: <EpicIcon className="w-4 h-4 mx-auto text-slate-200" />,
+      isInstalled: !!game.is_installed,
+    });
+  } else if (src === "gog") {
+    badges.push({
+      id: "gog",
+      title: "GOG Galaxy",
+      label: "GOG",
+      icon: <GogIcon className="w-4 h-4 mx-auto text-slate-200" />,
+      isInstalled: !!game.is_installed,
+    });
+  } else if (src === "battle.net" || src.includes("battle")) {
+    badges.push({
+      id: "battlenet",
+      title: "Battle.net",
+      label: "BATTLE.NET",
+      icon: <BattleNetIcon className="w-4 h-4 mx-auto text-slate-200" />,
+      isInstalled: !!game.is_installed,
+    });
+  } else if (src.includes("xbox")) {
+    badges.push({
+      id: "xbox",
+      title: "Xbox",
+      label: "XBOX",
+      icon: <XboxIcon className="w-4 h-4 mx-auto text-slate-200" />,
+      isInstalled: !!game.is_installed,
+    });
+  } else if (src.includes("playstation") || src.includes("psn")) {
+    badges.push({
+      id: "psn",
+      title: "PlayStation",
+      label: "PSN",
+      icon: <PlayStationIcon className="w-4 h-4 mx-auto text-slate-200" />,
+      isInstalled: !!game.is_installed,
+    });
+  } else if (src.includes("retro")) {
+    badges.push({
+      id: "retro",
+      title: "RetroAchievements",
+      label: "RETRO",
+      icon: <Gamepad2 className="w-4 h-4 mx-auto text-amber-300" />,
+      isInstalled: !!game.is_installed,
+    });
+  } else if (src === "local" || src === "manual" || src === "") {
+    badges.push({
+      id: "local",
+      title: "PC (Local)",
+      label: "LOCAL PC",
+      icon: <Monitor className="w-4 h-4 mx-auto text-slate-200" />,
+      isInstalled: !!game.is_installed,
+    });
+  } else {
+    badges.push({
+      id: src,
+      title: game.source,
+      label: game.source.toUpperCase(),
+      icon: <Monitor className="w-4 h-4 mx-auto text-slate-200" />,
+      isInstalled: !!game.is_installed,
+    });
   }
-  if (s === "epic" || s.includes("epic")) {
-    return { title: "Platform: Epic Games", label: "EPIC", icon: <EpicIcon className="w-4 h-4 mx-auto text-slate-200" /> };
+
+  // 2. Check for merged RetroAchievements / Retro platform
+  const hasRetroPlatform = platforms.some((p) => p === "retro" || p.includes("retro"));
+  const hasRetroConsole = platforms.some((p) =>
+    [
+      "nintendo 64",
+      "n64",
+      "nintendo ds",
+      "game boy",
+      "gba",
+      "snes",
+      "playstation 2",
+      "ps2",
+      "nes",
+      "genesis",
+      "sega",
+      "megadrive",
+    ].some((c) => p.includes(c))
+  );
+  const hasRetroAchievements =
+    achSummary &&
+    (achSummary.total_achievements ?? 0) > 0 &&
+    (src === "local" || src === "manual");
+
+  if (
+    !badges.some((b) => b.id === "retro") &&
+    (hasRetroPlatform || hasRetroConsole || hasRetroAchievements || game.id.startsWith("ra_"))
+  ) {
+    badges.push({
+      id: "retro",
+      title: "RetroAchievements",
+      label: "RETRO",
+      icon: <Gamepad2 className="w-4 h-4 mx-auto text-amber-300" />,
+      isInstalled: false, // Cloud linked platform
+    });
   }
-  if (s === "gog") {
-    return { title: "Platform: GOG", label: "GOG", icon: <GogIcon className="w-4 h-4 mx-auto text-slate-200" /> };
+
+  // 3. Check if game also has Local PC if primary is RetroAchievements and executable/install path exists
+  if (
+    !badges.some((b) => b.id === "local") &&
+    (src.includes("retro") && (game.executable_path || game.install_directory || game.is_installed))
+  ) {
+    badges.push({
+      id: "local",
+      title: "PC (Local)",
+      label: "LOCAL PC",
+      icon: <Monitor className="w-4 h-4 mx-auto text-slate-200" />,
+      isInstalled: !!game.is_installed,
+    });
   }
-  if (s === "battle.net" || s.includes("battle")) {
-    return { title: "Platform: Battle.net", label: "BATTLE.NET", icon: <BattleNetIcon className="w-4 h-4 mx-auto text-slate-200" /> };
-  }
-  if (s.includes("xbox")) {
-    return { title: "Platform: Xbox", label: "XBOX", icon: <XboxIcon className="w-4 h-4 mx-auto text-slate-200" /> };
-  }
-  if (s.includes("playstation") || s.includes("psn")) {
-    return { title: "Platform: PlayStation", label: "PSN", icon: <PlayStationIcon className="w-4 h-4 mx-auto text-slate-200" /> };
-  }
-  if (s.includes("retro")) {
-    return { title: "Platform: RetroAchievements", label: "RETRO", icon: <Gamepad2 className="w-4 h-4 mx-auto text-amber-300" /> };
-  }
-  if (s === "local" || s === "manual") {
-    return { title: "Platform: PC (Local)", label: "LOCAL PC", icon: <Monitor className="w-4 h-4 mx-auto text-slate-200" /> };
-  }
-  return { title: `Platform: ${source || "PC"}`, label: (source || "PLATFORMS").toUpperCase(), icon: <Monitor className="w-4 h-4 mx-auto text-slate-200" /> };
+
+  return badges;
 }
 
 interface GameDetailsProps {
@@ -331,6 +453,96 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
       completionist: game.hltb_completionist,
     });
   }, [game.hltb_main, game.hltb_extra, game.hltb_completionist]);
+
+  // Achievement summary for completion status evaluation
+  const [achSummary, setAchSummary] = useState<{
+    total_achievements: number;
+    unlocked_achievements: number;
+    is_perfect: boolean;
+  } | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    invoke<any>("get_game_achievement_summary", { gameId: game.id })
+      .then((res) => {
+        if (active && res) {
+          setAchSummary({
+            total_achievements: res.total_achievements,
+            unlocked_achievements: res.unlocked_achievements,
+            is_perfect: res.is_perfect,
+          });
+        }
+      })
+      .catch(() => {
+        if (active) setAchSummary(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [game.id]);
+
+  const effectiveStatus = getEffectiveCompletionStatus(game, achSummary);
+  const platformBadges = useMemo(
+    () => getGamePlatformBadges(game, achSummary),
+    [game, achSummary]
+  );
+
+  // Story Beaten Prompt Modal state
+  const [isBeatenModalOpen, setIsBeatenModalOpen] = useState(false);
+  const sessionDismissedBeatenPromptRef = useRef<Set<string>>(new Set());
+
+  // Subtle auto-trigger when selecting the game if story hours reached
+  useEffect(() => {
+    if (shouldPromptBeatenModal(game) && !sessionDismissedBeatenPromptRef.current.has(game.id)) {
+      const timer = window.setTimeout(() => {
+        setIsBeatenModalOpen(true);
+      }, 500);
+      return () => window.clearTimeout(timer);
+    }
+  }, [game.id, game.playtime_seconds, game.hltb_main, game.auto_beaten, game.beaten_prompt_playtime]);
+
+  const handleConfirmBeaten = () => {
+    const updated: Game = {
+      ...game,
+      auto_beaten: true,
+    };
+    if (onUpdateGame) onUpdateGame(updated);
+    setIsBeatenModalOpen(false);
+  };
+
+  const handleSnoozeBeaten = () => {
+    const updated: Game = {
+      ...game,
+      beaten_prompt_playtime: game.playtime_seconds || 0,
+    };
+    sessionDismissedBeatenPromptRef.current.add(game.id);
+    if (onUpdateGame) onUpdateGame(updated);
+    setIsBeatenModalOpen(false);
+  };
+
+  const handleCloseBeatenModal = () => {
+    sessionDismissedBeatenPromptRef.current.add(game.id);
+    setIsBeatenModalOpen(false);
+  };
+
+  const handleDisableBeatenPrompts = () => {
+    const updated: Game = {
+      ...game,
+      beaten_prompt_playtime: 999999999,
+    };
+    sessionDismissedBeatenPromptRef.current.add(game.id);
+    if (onUpdateGame) onUpdateGame(updated);
+    setIsBeatenModalOpen(false);
+  };
+
+  const handleUndoAutoBeaten = () => {
+    const updated: Game = {
+      ...game,
+      auto_beaten: false,
+      beaten_prompt_playtime: game.playtime_seconds || 0,
+    };
+    if (onUpdateGame) onUpdateGame(updated);
+  };
 
   // Close context menu when clicking outside
   useEffect(() => {
@@ -584,9 +796,9 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                 ) : null}
 
                 {/* Release Year */}
-                {game.release_date && (
+                {formatReleaseYear(game.release_date) && (
                   <span className="text-slate-300 font-semibold text-xs">
-                    {game.release_date.slice(0, 4)}
+                    {formatReleaseYear(game.release_date)}
                   </span>
                 )}
 
@@ -647,21 +859,31 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                   </div>
                 )}
 
-                {/* Platform / Source Button */}
-                {(() => {
-                  const platInfo = getPlatformSourceInfo(game.source);
-                  return (
+                {/* Platform / Source Badges (Supports Merged Multi-Platform games like Local PC + Retro) */}
+                {platformBadges.map((plat) => (
+                  <div
+                    key={plat.id}
+                    title={
+                      plat.isInstalled
+                        ? `${plat.title} (Installed on PC)`
+                        : `${plat.title} (Cloud / Linked)`
+                    }
+                    className={`w-14 h-12 rounded-xl flex flex-col items-center justify-center p-1 text-center transition-all cursor-default ${
+                      plat.isInstalled
+                        ? "bg-white/[0.08] border border-white/50 shadow-[0_0_10px_rgba(255,255,255,0.12)] text-white"
+                        : "bg-black/35 border border-white/10 hover:border-white/20 text-slate-400 opacity-75 hover:opacity-100 shadow-lg"
+                    }`}
+                  >
+                    {plat.icon}
                     <div
-                      title={platInfo.title}
-                      className="w-14 h-12 bg-black/35 border border-white/15 hover:border-white/25 rounded-xl flex flex-col items-center justify-center p-1 shadow-lg text-center transition-colors"
+                      className={`text-[7px] font-bold tracking-wider uppercase mt-1 truncate max-w-full px-0.5 ${
+                        plat.isInstalled ? "text-slate-100" : "text-slate-400"
+                      }`}
                     >
-                      {platInfo.icon}
-                      <div className="text-[7px] font-bold text-slate-400 tracking-wider uppercase mt-1 truncate max-w-full px-0.5">
-                        {platInfo.label}
-                      </div>
+                      {plat.label}
                     </div>
-                  );
-                })()}
+                  </div>
+                ))}
               </div>
 
               {/* Anchored Vertical Cover Poster - 200px wide, no line border */}
@@ -1327,11 +1549,23 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
         >
           {/* Completion Status */}
           <div className="flex items-center space-x-3">
-            <CheckCircle2 className="w-6 h-6 text-slate-400 shrink-0" />
+            {effectiveStatus.iconName === "Crown" && <Crown className="w-6 h-6 text-amber-400 shrink-0" />}
+            {effectiveStatus.iconName === "ShieldCheck" && <ShieldCheck className="w-6 h-6 text-emerald-400 shrink-0" />}
+            {effectiveStatus.iconName === "Target" && <Target className="w-6 h-6 text-purple-400 shrink-0" />}
+            {effectiveStatus.iconName === "Flame" && <Flame className="w-6 h-6 text-cyan-400 shrink-0" />}
+            {effectiveStatus.iconName === "Clock" && <Clock className="w-6 h-6 text-orange-400 shrink-0" />}
+            {effectiveStatus.iconName === "CircleDot" && <CircleDot className="w-6 h-6 text-slate-400 shrink-0" />}
             <div>
-              <div className="text-xs text-slate-400 uppercase font-bold tracking-wider">Completion Status</div>
+              <div className="text-xs text-slate-400 uppercase font-bold tracking-wider flex items-center space-x-1.5">
+                <span>Completion Status</span>
+                {effectiveStatus.isAuto && (
+                  <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-white/10 text-zinc-300 font-mono font-medium tracking-normal border border-white/10">
+                    Auto
+                  </span>
+                )}
+              </div>
               <div className="font-extrabold text-slate-100 text-base">
-                {game.completion_status || (game.last_played || game.playtime_seconds > 0 ? "Played" : "Not Played")}
+                {effectiveStatus.status}
               </div>
             </div>
           </div>
@@ -1448,6 +1682,23 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                   />
                   <span>{isRefreshing || isFetchingMeta ? "Refreshing..." : "Refresh"}</span>
                 </button>
+
+                {effectiveStatus.isAuto && (
+                  <button
+                    onClick={() => {
+                      if (game.auto_beaten) {
+                        handleUndoAutoBeaten();
+                      } else {
+                        setIsBeatenModalOpen(true);
+                      }
+                      setIsActionMenuOpen(false);
+                    }}
+                    className="w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl text-left text-slate-200 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+                  >
+                    <ShieldCheck className={`w-4 h-4 shrink-0 ${game.auto_beaten ? "text-zinc-400" : "text-emerald-400"}`} />
+                    <span>{game.auto_beaten ? "Undo Story Beaten" : "Claim Story Beaten (Auto)"}</span>
+                  </button>
+                )}
 
                 <div className="my-1 border-t border-white/10" />
 
@@ -1726,6 +1977,16 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
           onClose={() => setSelectedArticle(null)}
         />
       )}
+
+      {/* Story Beaten Confirmation & Snooze Modal */}
+      <StoryBeatenModal
+        game={game}
+        isOpen={isBeatenModalOpen}
+        onClose={handleCloseBeatenModal}
+        onConfirmBeaten={handleConfirmBeaten}
+        onSnooze={handleSnoozeBeaten}
+        onDisablePrompts={handleDisableBeatenPrompts}
+      />
     </div>
   );
 };

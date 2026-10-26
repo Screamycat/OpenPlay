@@ -394,6 +394,7 @@ impl SteamScanner {
                         play_count: Some(0),
                         is_hidden: false,
                         play_actions: Vec::new(),
+                        ..Default::default()
                     };
 
                     games.push(game);
@@ -554,6 +555,7 @@ impl SteamScanner {
                         play_count: Some(0),
                         is_hidden: false,
                         play_actions: Vec::new(),
+                        ..Default::default()
                     };
 
                     uninstalled.push(game);
@@ -705,6 +707,7 @@ impl SteamScanner {
                                     play_count: Some(0),
                                     is_hidden: false,
                                     play_actions: Vec::new(),
+                                    ..Default::default()
                                 };
 
                                 games.push(game);

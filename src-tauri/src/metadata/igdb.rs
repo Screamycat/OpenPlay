@@ -59,6 +59,7 @@ impl IgdbFetcher {
         client_id: &str,
         client_secret: &str,
         title: &str,
+        platform_hint: Option<&[String]>,
     ) -> Result<MetadataComparison, String> {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(12))
@@ -72,8 +73,8 @@ impl IgdbFetcher {
 
         let body = format!(
             r#"search "{}";
-fields name, summary, storyline, first_release_date, genres.name, themes.name, game_modes.name, player_perspectives.name, aggregated_rating, rating, involved_companies.company.name, involved_companies.developer, involved_companies.publisher, age_ratings.rating, age_ratings.category, collection.name, cover.image_id, artworks.image_id, screenshots.image_id, websites.url, websites.category;
-limit 1;
+fields name, summary, storyline, first_release_date, platforms.name, category, genres.name, themes.name, game_modes.name, player_perspectives.name, aggregated_rating, rating, involved_companies.company.name, involved_companies.developer, involved_companies.publisher, age_ratings.rating, age_ratings.category, collection.name, cover.image_id, artworks.image_id, screenshots.image_id, websites.url, websites.category;
+limit 10;
 "#,
             sanitized
         );
@@ -97,8 +98,70 @@ limit 1;
             .as_array()
             .ok_or_else(|| "Invalid IGDB response format".to_string())?;
 
+        if games_arr.is_empty() {
+            return Err(format!("No game found on IGDB for '{}'", title));
+        }
+
+        let clean_target: String = title
+            .chars()
+            .filter(|c| c.is_alphanumeric())
+            .collect::<String>()
+            .to_ascii_lowercase();
+
+        // Score candidates to pick the closest title and platform match
         let game_obj = games_arr
-            .first()
+            .iter()
+            .max_by_key(|cand| {
+                let cand_name = cand.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                let clean_cand: String = cand_name
+                    .chars()
+                    .filter(|c| c.is_alphanumeric())
+                    .collect::<String>()
+                    .to_ascii_lowercase();
+
+                let mut score: i32 = 0;
+
+                // 1. Title match scoring
+                if clean_cand == clean_target {
+                    score += 100;
+                } else if clean_cand.starts_with(&clean_target) {
+                    score += 40;
+                } else if clean_cand.contains(&clean_target) {
+                    score += 20;
+                }
+
+                // Subtitle/extra word penalty if not an exact match
+                if clean_cand != clean_target {
+                    let diff = (clean_cand.len() as i32 - clean_target.len() as i32).abs();
+                    score -= diff;
+                }
+
+                // 2. Platform match boost
+                if let Some(hints) = platform_hint {
+                    if let Some(cand_plats) = cand.get("platforms").and_then(|v| v.as_array()) {
+                        let cand_plat_names: Vec<String> = cand_plats
+                            .iter()
+                            .filter_map(|p| p.get("name").and_then(|v| v.as_str()).map(|s| s.to_ascii_lowercase()))
+                            .collect();
+
+                        for hint in hints {
+                            let hint_lower = hint.to_ascii_lowercase();
+                            if cand_plat_names.iter().any(|cp| cp.contains(&hint_lower) || hint_lower.contains(cp)) {
+                                score += 50;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                // 3. Category preference (Main game = 0 or null preferred over standalone expansions/mods)
+                let cat = cand.get("category").and_then(|v| v.as_i64()).unwrap_or(0);
+                if cat == 0 {
+                    score += 10;
+                }
+
+                score
+            })
             .ok_or_else(|| format!("No game found on IGDB for '{}'", title))?;
 
         let game_name = game_obj.get("name").and_then(|v| v.as_str()).map(|s| s.to_string());

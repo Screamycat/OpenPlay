@@ -2,8 +2,9 @@ import React, { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { Game, GameLink, GameAction } from "../types/game";
-import { resolveImageSrc, formatFileSize } from "../utils/image";
+import { resolveImageSrc, formatFileSize, isVideoSrc } from "../utils/image";
 import { MetadataDiffModal, MetadataComparison } from "./MetadataDiffModal";
+import { normalizeCompletionStatus } from "../utils/completionStatus";
 import {
   X,
   Save,
@@ -37,6 +38,7 @@ import {
   Layers,
   Terminal,
   CheckCircle2,
+  ShieldCheck,
   ArrowUpDown,
   PenTool,
   Upload,
@@ -89,9 +91,7 @@ const ArtworkPreviewItem: React.FC<ArtworkPreviewItemProps> = ({
     setImgError(false);
   }, [value]);
 
-  const isVideo =
-    value &&
-    (value.toLowerCase().endsWith(".mp4") || value.toLowerCase().endsWith(".webm"));
+  const isVideo = Boolean(value && (isVideoSrc(value) || isVideoSrc(resolved)));
 
   return (
     <div className="p-3.5 bg-white/[0.03] border border-white/10 rounded-2xl space-y-2.5 transition-colors hover:border-white/15">
@@ -223,10 +223,11 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
   // Tab 3: Play Actions (Dual Launch & Alternate Executables)
   const [playActions, setPlayActions] = useState<GameAction[]>(game.play_actions || []);
 
-  // Tab 3: Tags & Categorization
-  const [completionStatus, setCompletionStatus] = useState(
-    game.completion_status || "Not Played"
+  // Scores & Playtime: Completion Status & Auto Beaten
+  const [completionStatus, setCompletionStatus] = useState<string>(
+    normalizeCompletionStatus(game.completion_status)
   );
+  const [autoBeaten, setAutoBeaten] = useState(!!game.auto_beaten);
   const [genres, setGenres] = useState<string[]>(game.genres || []);
   const [categories, setCategories] = useState<string[]>(game.categories || []);
   const [features, setFeatures] = useState<string[]>(game.features || []);
@@ -489,6 +490,8 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
       links,
       is_hidden: isHidden,
       play_actions: playActions,
+      auto_beaten: autoBeaten,
+      beaten_prompt_playtime: game.beaten_prompt_playtime,
     };
 
     onSave(updated);
@@ -555,7 +558,18 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
           <div className="flex items-center space-x-3.5 min-w-0">
             <div className="w-9 h-12 rounded-lg bg-black/40 border border-white/10 overflow-hidden shrink-0 shadow-sm flex items-center justify-center">
               {coverImage && resolvedHeaderCover ? (
-                <img src={resolvedHeaderCover} alt="" className="w-full h-full object-cover" />
+                isVideoSrc(resolvedHeaderCover) ? (
+                  <video
+                    src={resolvedHeaderCover}
+                    autoPlay
+                    loop
+                    muted
+                    playsInline
+                    className="w-full h-full object-cover pointer-events-none"
+                  />
+                ) : (
+                  <img src={resolvedHeaderCover} alt="" className="w-full h-full object-cover" />
+                )
               ) : (
                 <Gamepad2 className="w-5 h-5 text-zinc-400" />
               )}
@@ -779,11 +793,8 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
                         className="w-4 h-4 rounded bg-zinc-800 border-zinc-700 text-purple-600 focus:ring-purple-500 cursor-pointer"
                       />
                       <div className="space-y-0.5">
-                        <div className="text-zinc-200 font-semibold group-hover:text-white transition-colors flex items-center space-x-1.5">
-                          <span>Hide Game</span>
-                          <span className="text-[10px] px-1.5 py-0.2 rounded bg-purple-500/20 text-purple-300 font-mono">
-                            Privacy
-                          </span>
+                        <div className="text-zinc-200 font-semibold group-hover:text-white transition-colors">
+                          Hide Game
                         </div>
                         <div className="text-[11px] text-zinc-400">
                           Hides this title from the main library grid and list views unless "Show Hidden Games" is enabled.
@@ -1146,27 +1157,6 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
                   <span className="text-[11px] text-zinc-400">Genres, features, and platform tags</span>
                 </div>
 
-                {/* Completion Status */}
-                <div>
-                  <label className="block text-zinc-300 font-medium mb-1 flex items-center space-x-1.5">
-                    <Trophy className="w-3.5 h-3.5 text-zinc-400" />
-                    <span>Completion Status</span>
-                  </label>
-                  <select
-                    value={completionStatus}
-                    onChange={(e) => setCompletionStatus(e.target.value)}
-                    className="w-full px-3 py-2 bg-[#18181b] border border-white/10 rounded-xl text-white focus:outline-none focus:border-white/30 transition-all cursor-pointer"
-                  >
-                    <option value="Not Played">Not Played</option>
-                    <option value="Playing">Playing (Active)</option>
-                    <option value="Beaten">Beaten (Main Story)</option>
-                    <option value="Completed">Completed (100%)</option>
-                    <option value="On Hold">On Hold</option>
-                    <option value="Dropped">Dropped</option>
-                    <option value="Endless">Endless / Multiplayer</option>
-                  </select>
-                </div>
-
                 {/* Genres */}
                 <div>
                   <label className="block text-zinc-300 font-medium mb-1 flex items-center space-x-1.5">
@@ -1398,9 +1388,64 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
                 <div className="border-b border-white/10 pb-2 flex items-center justify-between">
                   <h3 className="text-sm font-semibold text-white flex items-center space-x-2">
                     <Trophy className="w-4 h-4 text-zinc-400" />
-                    <span>Scores, Stats & Identifiers</span>
+                    <span>Scores, Stats & Progress</span>
                   </h3>
-                  <span className="text-[11px] text-zinc-400">Playtime history and game IDs</span>
+                  <span className="text-[11px] text-zinc-400">Completion status, playtime history and scores</span>
+                </div>
+
+                {/* Completion Status & Auto Beaten Claim */}
+                <div className="p-4 bg-white/[0.03] border border-white/10 rounded-2xl space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-zinc-200 uppercase tracking-wider flex items-center space-x-2">
+                      <Trophy className="w-4 h-4 text-amber-400" />
+                      <span>Completion Status</span>
+                    </label>
+                    <span className="text-[11px] text-zinc-400">Progression & story tracking</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <select
+                      value={completionStatus}
+                      onChange={(e) => setCompletionStatus(e.target.value)}
+                      className="w-full px-3 py-2.5 bg-[#18181b] border border-white/10 rounded-xl text-white focus:outline-none focus:border-white/30 transition-all cursor-pointer font-medium text-xs"
+                    >
+                      <option value="Auto">Auto (Smart Dynamic Status)</option>
+                      <option value="Untouched">Untouched (Never Played)</option>
+                      <option value="In Progress">In Progress (Actively Playing)</option>
+                      <option value="Beaten">Beaten (Main Story Complete)</option>
+                      <option value="Hunting">Hunting (Achievement Hunting)</option>
+                      <option value="Mastered">Mastered (100% / Perfect)</option>
+                      <option value="Forgotten">Forgotten (Unplayed for 6+ months)</option>
+                    </select>
+
+                    {normalizeCompletionStatus(completionStatus) === "Auto" ? (
+                      <button
+                        type="button"
+                        onClick={() => setAutoBeaten(!autoBeaten)}
+                        className={`w-full px-4 py-2.5 rounded-xl font-bold text-xs transition-all flex items-center justify-center space-x-2 cursor-pointer border shadow-sm ${
+                          autoBeaten
+                            ? "bg-emerald-500/25 hover:bg-emerald-500/35 text-emerald-300 border-emerald-500/40"
+                            : "bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border-emerald-500/25 hover:border-emerald-500/45"
+                        }`}
+                      >
+                        {autoBeaten ? (
+                          <>
+                            <Check className="w-4 h-4 text-emerald-400 stroke-[2.5]" />
+                            <span>Beaten (Claimed)</span>
+                          </>
+                        ) : (
+                          <>
+                            <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                            <span>Claim Beaten</span>
+                          </>
+                        )}
+                      </button>
+                    ) : (
+                      <div className="w-full px-4 py-2.5 rounded-xl text-zinc-500 text-xs font-medium border border-white/5 bg-white/[0.02] flex items-center justify-center">
+                        <span>Manual Override Active</span>
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 {/* Score Cards (User, Critic, Community) */}

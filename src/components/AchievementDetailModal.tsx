@@ -9,7 +9,7 @@ import {
   EyeOff,
   Gamepad2,
 } from "lucide-react";
-import { resolveImageSrc } from "../utils/image";
+import { resolveImageSrc, isVideoSrc } from "../utils/image";
 
 interface AchievementDetailModalProps {
   achievement: Achievement | null;
@@ -94,11 +94,22 @@ export const AchievementDetailModal: React.FC<AchievementDetailModalProps> = ({
         <div className="px-5 py-3.5 border-b border-white/10 flex items-center justify-between bg-white/[0.02]">
           <div className="flex items-center space-x-2 min-w-0">
             {gameCover ? (
-              <img
-                src={resolveImageSrc(gameCover)}
-                alt=""
-                className="w-5 h-6 rounded object-cover shrink-0 border border-white/10"
-              />
+              isVideoSrc(gameCover) ? (
+                <video
+                  src={resolveImageSrc(gameCover)}
+                  autoPlay
+                  loop
+                  muted
+                  playsInline
+                  className="w-5 h-6 rounded object-cover shrink-0 border border-white/10 pointer-events-none"
+                />
+              ) : (
+                <img
+                  src={resolveImageSrc(gameCover)}
+                  alt=""
+                  className="w-5 h-6 rounded object-cover shrink-0 border border-white/10"
+                />
+              )
             ) : (
               <Gamepad2 className="w-4 h-4 text-zinc-400 shrink-0" />
             )}

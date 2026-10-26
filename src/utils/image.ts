@@ -1,5 +1,16 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
 
+export function isVideoSrc(pathOrUrl?: string): boolean {
+  if (!pathOrUrl) return false;
+  const clean = pathOrUrl.split("?")[0].split("#")[0].toLowerCase();
+  return (
+    clean.endsWith(".webm") ||
+    clean.endsWith(".mp4") ||
+    clean.endsWith(".m4v") ||
+    clean.endsWith(".ogg")
+  );
+}
+
 export function resolveImageSrc(pathOrUrl?: string): string | undefined {
   if (!pathOrUrl) return undefined;
   if (

@@ -63,4 +63,6 @@ export interface Game {
   play_count?: number;
   is_hidden?: boolean;
   play_actions?: GameAction[];
+  auto_beaten?: boolean;
+  beaten_prompt_playtime?: number;
 }

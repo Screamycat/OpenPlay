@@ -17,6 +17,8 @@ import {
   Trash2,
 } from "lucide-react";
 import { LocalGamesTab } from "./library/LocalGamesTab";
+import { RetroAchievementsTab } from "./library/RetroAchievementsTab";
+import { AppConfig } from "../types/config";
 
 interface ScanResult {
   count: number;
@@ -27,6 +29,7 @@ interface ScanResult {
 export type CategoryTab =
   | "steam"
   | "epic"
+  | "retroachievements"
   | "gog"
   | "retroarch"
   | "standalone_emulators"
@@ -58,6 +61,11 @@ interface LibraryManagerModalProps {
   onSyncEpicLibrary: () => Promise<ScanResult | number | void>;
   isSyncingEpic: boolean;
   isAuthenticatingEpic: boolean;
+  // RetroAchievements
+  config?: AppConfig;
+  onSaveConfig?: (updated: AppConfig) => void;
+  onSyncRetroAchievements?: () => Promise<void>;
+  isSyncingRa?: boolean;
 }
 
 export const LibraryManagerModal: React.FC<LibraryManagerModalProps> = ({
@@ -83,6 +91,10 @@ export const LibraryManagerModal: React.FC<LibraryManagerModalProps> = ({
   onSyncEpicLibrary,
   isSyncingEpic,
   isAuthenticatingEpic,
+  config,
+  onSaveConfig,
+  onSyncRetroAchievements,
+  isSyncingRa,
 }) => {
   const [activeTab, setActiveTab] = useState<CategoryTab>(initialTab);
   const [manualInput, setManualInput] = useState("");
@@ -391,6 +403,30 @@ export const LibraryManagerModal: React.FC<LibraryManagerModalProps> = ({
                     </span>
                   ) : (
                     <span className="text-[9px] px-1.5 py-0.2 rounded bg-purple-500/10 text-purple-400 font-medium">
+                      Active
+                    </span>
+                  )}
+                </button>
+
+                {/* RetroAchievements (Active) */}
+                <button
+                  onClick={() => setActiveTab("retroachievements")}
+                  className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-all ${
+                    activeTab === "retroachievements"
+                      ? "bg-amber-950/60 text-amber-300 border border-amber-500/40 font-semibold"
+                      : "text-slate-300 hover:text-white hover:bg-[#141824]"
+                  }`}
+                >
+                  <span className="flex items-center space-x-2">
+                    <span className="w-2 h-2 rounded-full bg-amber-400" />
+                    <span>RetroAchievements</span>
+                  </span>
+                  {config?.retroachievements_username && config?.retroachievements_api_key ? (
+                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-400 font-bold">
+                      Connected
+                    </span>
+                  ) : (
+                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-500/10 text-amber-400 font-medium">
                       Active
                     </span>
                   )}
@@ -812,10 +848,17 @@ export const LibraryManagerModal: React.FC<LibraryManagerModalProps> = ({
                     className="flex items-center space-x-2 px-6 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold rounded-xl transition-all shadow-md active:scale-[0.98] disabled:opacity-50 cursor-pointer"
                   >
                     <RefreshCw className={`w-4 h-4 ${isSyncingEpic ? "animate-spin" : ""}`} />
-                    <span>{isSyncingEpic ? "Scanning Epic Library..." : "Sync Epic Games"}</span>
+                    <span>{isSyncingEpic ? "Scanning Epic Library..." : "Sync Epic Games Library"}</span>
                   </button>
                 </div>
               </div>
+            ) : activeTab === "retroachievements" && config && onSaveConfig && onSyncRetroAchievements ? (
+              <RetroAchievementsTab
+                config={config}
+                onSaveConfig={onSaveConfig}
+                onSync={onSyncRetroAchievements}
+                isSyncing={!!isSyncingRa}
+              />
             ) : activeTab === "manual_local" ? (
               <LocalGamesTab
                 onGameAdded={(game) => {

@@ -92,10 +92,13 @@ impl Database {
         let _ = conn.execute("ALTER TABLE games ADD COLUMN play_count INTEGER", []);
         let _ = conn.execute("ALTER TABLE games ADD COLUMN is_hidden INTEGER NOT NULL DEFAULT 0", []);
         let _ = conn.execute("ALTER TABLE games ADD COLUMN play_actions TEXT", []);
+        let _ = conn.execute("ALTER TABLE games ADD COLUMN auto_beaten INTEGER NOT NULL DEFAULT 0", []);
+        let _ = conn.execute("ALTER TABLE games ADD COLUMN beaten_prompt_playtime INTEGER", []);
 
         // Normalize date_added formats to clean YYYY-MM-DD and strip broken replacement chars in titles
         let _ = conn.execute("UPDATE games SET date_added = SUBSTR(date_added, 1, 10) WHERE date_added LIKE '%T%'", []);
         let _ = conn.execute("UPDATE games SET title = REPLACE(title, char(65533), '') WHERE title LIKE '%' || char(65533) || '%'", []);
+        let _ = conn.execute("UPDATE games SET completion_status = 'Auto' WHERE completion_status IN ('Not Played', 'Playing', 'Played') OR completion_status IS NULL", []);
 
         conn.execute(
             "CREATE TABLE IF NOT EXISTS integrations (
@@ -160,7 +163,8 @@ impl Database {
                 platforms, community_score, user_rating, playtime_seconds, last_played,
                 date_added, completion_status, description, notes, links, screenshots, size_on_disk,
                 trailers, age_rating, critic_score, series, hltb_main, hltb_extra, hltb_completionist,
-                tags, categories, region, play_count, is_hidden, play_actions
+                tags, categories, region, play_count, is_hidden, play_actions,
+                auto_beaten, beaten_prompt_playtime
             FROM games ORDER BY title ASC")
             .map_err(|e| e.to_string())?;
 
@@ -189,6 +193,8 @@ impl Database {
                 let is_installed_int: i32 = row.get(8)?;
                 let is_favorite_int: i32 = row.get(9)?;
                 let is_hidden_int: i32 = row.get(42).unwrap_or(0);
+                let auto_beaten_int: i32 = row.get(44).unwrap_or(0);
+                let beaten_prompt_playtime: Option<u64> = row.get::<_, Option<i64>>(45).unwrap_or(None).map(|v| v as u64);
 
                 Ok(Game {
                     id: row.get(0)?,
@@ -235,6 +241,8 @@ impl Database {
                     play_count: row.get(41)?,
                     is_hidden: is_hidden_int != 0,
                     play_actions,
+                    auto_beaten: auto_beaten_int != 0,
+                    beaten_prompt_playtime,
                 })
             })
             .map_err(|e| e.to_string())?;
@@ -268,11 +276,12 @@ impl Database {
                 platforms, community_score, user_rating, playtime_seconds, last_played,
                 date_added, completion_status, description, notes, links, screenshots, size_on_disk,
                 trailers, age_rating, critic_score, series, hltb_main, hltb_extra, hltb_completionist,
-                tags, categories, region, play_count, is_hidden, play_actions
+                tags, categories, region, play_count, is_hidden, play_actions,
+                auto_beaten, beaten_prompt_playtime
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
                 ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31,
-                ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44
+                ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44, ?45, ?46
             ) ON CONFLICT(id) DO UPDATE SET
                 title = excluded.title,
                 sorting_title = COALESCE(excluded.sorting_title, games.sorting_title),
@@ -328,7 +337,9 @@ impl Database {
                 region = COALESCE(excluded.region, games.region),
                 play_count = COALESCE(excluded.play_count, games.play_count),
                 is_hidden = COALESCE(excluded.is_hidden, games.is_hidden),
-                play_actions = CASE WHEN excluded.play_actions != '[]' THEN excluded.play_actions ELSE games.play_actions END",
+                play_actions = CASE WHEN excluded.play_actions != '[]' THEN excluded.play_actions ELSE games.play_actions END,
+                auto_beaten = games.auto_beaten,
+                beaten_prompt_playtime = games.beaten_prompt_playtime",
             params![
                 game.id,
                 game.title,
@@ -374,6 +385,8 @@ impl Database {
                 game.play_count,
                 if game.is_hidden { 1 } else { 0 },
                 play_actions_json,
+                if game.auto_beaten { 1 } else { 0 },
+                game.beaten_prompt_playtime.map(|v| v as i64),
             ],
         ).map_err(|e| e.to_string())?;
 
@@ -436,8 +449,10 @@ impl Database {
                 region = ?40,
                 play_count = ?41,
                 is_hidden = ?42,
-                play_actions = ?43
-            WHERE id = ?44",
+                play_actions = ?43,
+                auto_beaten = ?44,
+                beaten_prompt_playtime = ?45
+            WHERE id = ?46",
             params![
                 game.title,
                 game.sorting_title,
@@ -482,6 +497,8 @@ impl Database {
                 game.play_count,
                 if game.is_hidden { 1 } else { 0 },
                 play_actions_json,
+                if game.auto_beaten { 1 } else { 0 },
+                game.beaten_prompt_playtime.map(|v| v as i64),
                 game.id,
             ],
         ).map_err(|e| e.to_string())?;

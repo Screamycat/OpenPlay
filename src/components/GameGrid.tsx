@@ -1,8 +1,10 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { Game } from "../types/game";
-import { resolveGridCoverSrc } from "../utils/image";
+import { resolveGridCoverSrc, isVideoSrc } from "../utils/image";
 import { Star, Gamepad2, Cloud, Loader2 } from "lucide-react";
 import { GroupByOption } from "./TopNav";
+import { getEffectiveCompletionStatus } from "../utils/completionStatus";
+import { formatReleaseYear } from "../utils/date";
 
 interface GameGridProps {
   games: Game[];
@@ -14,6 +16,7 @@ interface GameGridProps {
   runningGameIds?: string[];
   onContextMenu?: (game: Game, x: number, y: number) => void;
   groupBy?: GroupByOption;
+  achievementSummaryMap?: Record<string, { total_achievements: number; unlocked_achievements: number; is_perfect: boolean }>;
 }
 
 interface GameGroup {
@@ -24,7 +27,11 @@ interface GameGroup {
 // Keep first ~5 rows (7 cols x 5 rows = 35 cards) eagerly rendered above the initial fold
 const ABOVE_FOLD_CARD_COUNT = 35;
 
-function getGroupKey(game: Game, groupBy: GroupByOption): string {
+function getGroupKey(
+  game: Game,
+  groupBy: GroupByOption,
+  summary?: { total_achievements: number; unlocked_achievements: number; is_perfect: boolean }
+): string {
   switch (groupBy) {
     case "source":
       return game.source || "Manual";
@@ -35,22 +42,40 @@ function getGroupKey(game: Game, groupBy: GroupByOption): string {
       return /[A-Z]/.test(char) ? char : "#";
     }
     case "completion_status":
-      return game.completion_status || "Not Played";
+      return getEffectiveCompletionStatus(game, summary).status;
     default:
       return "";
   }
 }
 
-function buildGameGroups(games: Game[], groupBy: GroupByOption): GameGroup[] {
+function buildGameGroups(
+  games: Game[],
+  groupBy: GroupByOption,
+  summaryMap?: Record<string, { total_achievements: number; unlocked_achievements: number; is_perfect: boolean }>
+): GameGroup[] {
   if (groupBy === "none") {
     return [{ name: "", games }];
   }
 
   const map = new Map<string, Game[]>();
   for (const game of games) {
-    const key = getGroupKey(game, groupBy);
+    const key = getGroupKey(game, groupBy, summaryMap?.[game.id]);
     if (!map.has(key)) map.set(key, []);
     map.get(key)!.push(game);
+  }
+
+  if (groupBy === "completion_status") {
+    const order = ["Mastered", "Hunting", "Beaten", "In Progress", "Forgotten", "Untouched"];
+    return Array.from(map.entries())
+      .map(([name, gList]) => ({ name, games: gList }))
+      .sort((a, b) => {
+        const ia = order.indexOf(a.name);
+        const ib = order.indexOf(b.name);
+        if (ia !== -1 && ib !== -1) return ia - ib;
+        if (ia !== -1) return -1;
+        if (ib !== -1) return 1;
+        return a.name.localeCompare(b.name);
+      });
   }
 
   return Array.from(map.entries())
@@ -90,13 +115,17 @@ const GameCard = React.memo<GameCardProps>(
     const videoRef = useRef<HTMLVideoElement>(null);
     const cardHeight = Math.round(cardWidth * 1.5);
 
+    const [imgError, setImgError] = useState(false);
+
     const coverSrc = resolveGridCoverSrc(
       game.cover_image,
       cardWidth > 220 ? 720 : 540
     );
-    const isVideoCover = Boolean(
-      coverSrc && (coverSrc.endsWith(".webm") || coverSrc.endsWith(".mp4"))
-    );
+    const isVideoCover = Boolean(coverSrc && isVideoSrc(coverSrc));
+
+    useEffect(() => {
+      setImgError(false);
+    }, [coverSrc]);
 
     // Pause offscreen <video> covers via contentvisibilityautostatechange (for deferred below-the-fold cards)
     // paired with shared IntersectionObserver (for above-the-fold cards scrolled out of view & fallback)
@@ -176,7 +205,7 @@ const GameCard = React.memo<GameCardProps>(
         )}
 
         {/* Cover Art Image or Hardware-Decoded WebM/MP4 Video */}
-        {coverSrc ? (
+        {coverSrc && !imgError ? (
           isVideoCover ? (
             <video
               ref={videoRef}
@@ -188,6 +217,7 @@ const GameCard = React.memo<GameCardProps>(
               playsInline
               width={600}
               height={900}
+              onError={() => setImgError(true)}
               className="w-full h-full object-cover pointer-events-none"
             />
           ) : (
@@ -201,9 +231,7 @@ const GameCard = React.memo<GameCardProps>(
               className={`w-full h-full object-cover ${
                 !game.is_installed ? "grayscale brightness-75" : ""
               }`}
-              onError={(e) => {
-                (e.target as HTMLElement).style.display = "none";
-              }}
+              onError={() => setImgError(true)}
             />
           )
         ) : (
@@ -213,9 +241,9 @@ const GameCard = React.memo<GameCardProps>(
             <span className="text-xs font-bold text-zinc-100 line-clamp-2 leading-tight">
               {game.title}
             </span>
-            {game.release_date && (
+            {formatReleaseYear(game.release_date) && (
               <span className="text-[10px] text-zinc-400 mt-1">
-                {game.release_date.slice(0, 4)}
+                {formatReleaseYear(game.release_date)}
               </span>
             )}
           </div>
@@ -272,6 +300,7 @@ export const GameGrid: React.FC<GameGridProps> = ({
   runningGameIds = [],
   onContextMenu,
   groupBy = "none",
+  achievementSummaryMap,
 }) => {
   const [justLaunchedId, setJustLaunchedId] = useState<string | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -392,7 +421,10 @@ export const GameGrid: React.FC<GameGridProps> = ({
   }, []);
 
   const runningSet = useMemo(() => new Set(runningGameIds), [runningGameIds]);
-  const groups = useMemo(() => buildGameGroups(games, groupBy), [games, groupBy]);
+  const groups = useMemo(
+    () => buildGameGroups(games, groupBy, achievementSummaryMap),
+    [games, groupBy, achievementSummaryMap]
+  );
 
   let flatIndex = 0;
 

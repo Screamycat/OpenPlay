@@ -16,15 +16,16 @@ Welcome to the central tracking document for **OpenPlay**. Use this document to 
 - [x] **Achievements Showcase Tab**: Interactive visual achievement cards with unlock dates and rarity percentages. Should support all stores having and achivments for roms with correct hash.
 - [x] **Application config**: A config that saves your settings, layout, last selected game, previous active filters, sorting, and so on. So it's a close, and open back to where you closed.
 - [x] **Expanded settings**: Categorized settings that grants full control over OpenPlay. And a API tab for steamgriddb, retroachivements and so on.
-- [ ] **Metadata**: It needs to fetch all the metadata and fill all the field in the game settings. It needs support for gathering metadata for non steam games and so on.
+- [x] **Metadata**: It needs to fetch all the metadata and fill all the field in the game settings. It needs support for gathering metadata for non steam games and so on.
 - [x] **SFW SteamGridDB**: A NSFW toggle when selecting artwork to show or hide NSFW content.
-- [ ] **Playnite backup**: Make it possible to import data from a playnite backup file.
+- [x] **Playnite backup**: Make it possible to import data from a playnite backup file.
 - [x] **Full refresh**: Have a way to fetch minimal data for all games, like description, time played, last played and much more.
 - [ ] **Dual launch (Not tested)**: Make it possible to choose on play what exe to launhc. (for mod managers or something other) Much Like playnite actions.
 - [ ] **Emulation backup support**: Roms imported from playnite backup appears as local games, once emulators is implemented, roms should be supported through backups as well.
 - [ ] **Reocurring backups**: Settings, configs data, metadat and so on shuld be backed up from time to time.
 - [ ] **Online saving**: Store all data online. So it's accessible from all devices.
-- [ ] **Auto status**: In the completionist status it should feature statuses like,"Untouched", "Forgotten", "In Progress", "Hunting", "Beaten", "Mastered" and "Auto". Auto should auto assign these statuses based on time played and last played and achivements.
+- [x] **Auto status**: In the completionist status it should feature statuses like,"Untouched", "Forgotten", "In Progress", "Hunting", "Beaten", "Mastered" and "Auto". Auto should auto assign these statuses based on time played and last played and achivements.
+- [ ] **Update in app**: Updating should not open a installer, it should update within the app.
 
 ### 🟡 Medium Priority / Future Enhancements
 - [ ] **Custom Game Integrations (Epic Games / GOG / Xbox)**: Connect accounts or import local installed libraries automatically.
@@ -77,14 +78,9 @@ Welcome to the central tracking document for **OpenPlay**. Use this document to 
 ---
 
 ## 🐛 Bug Tracker
-
-### 🔴 Active / Investigating
 | ID | Issue Description | Severity | Thoughts / Reproduce | Status |
 |:---|:------------------|:--------:|:-------------------|:------:|
-| *001* | *Window completely disappears sometimes after restarting the application and imeaditly try to move it.* | Medium | *This can be becasue of VITE or something with the window management?* | Resolved (Ready for Verification) |
+| *001* | *Window completely disappears sometimes after restarting the application and imeaditly try to move it.* | Medium | *This can be becasue of VITE or something with the window management?* | Resolved |
 | *002* | *Incomming artwork from steam is null in the metadata window* | Small | *Fetching manual steam emtadata* | Resolved
-| *003* | *Random selected artwork covers can appear empty* | Small | *This issue  occurance is uknown but is easliy fixed buy restarting, or via VITE update.* | Needs attention
-
-### 🟢 Recently Resolved
-- [ ] **Bug 001**: Window completely disappears sometimes after restarting the application and immediately trying to move it. (Removed redundant startDragging mouse-down listeners that collided with Tauri v2 data-tauri-drag-region, and added window screen boundary safeguards in Rust setup).
-- [x] **Bug 002**: Incoming artwork from Steam is null in the metadata window. (Added artwork extraction to PartialSteamMetadata, enabled numeric AppID matching and exact title searching, added fallback from vertical poster to header_image, and added full click-to-unselect and visual dimming support in MetadataDiffModal).
+| *003* | *Random selected artwork covers can appear empty* | Small | *This issue  occurance is uknown but is easliy fixed buy restarting, or via VITE update.* | Testing fix
+| *004* | *Animated artwork covers are null (with the iamge icon) in places like game settings and achivement hub* | Medium | *This happens only with animated covers, which should be animated in these instances* | Resolved

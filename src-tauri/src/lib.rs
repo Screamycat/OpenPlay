@@ -382,6 +382,7 @@ async fn scan_epic_library(state: State<'_, AppState>) -> Result<ScanResult, Str
                     play_count: if playtime > 0 { Some(1) } else { Some(0) },
                     is_hidden: false,
                     play_actions: Vec::new(),
+                    ..Default::default()
                 };
 
                 let _ = state.db.upsert_game(&uninstalled_game);
@@ -777,7 +778,20 @@ async fn fetch_metadata_from_source(
                         .to_string()
                 })?;
 
-            metadata::igdb::IgdbFetcher::fetch_metadata(&client_id, &client_secret, &title).await
+            let platform_hint = if let Some(ref gid) = game_id {
+                state.db.get_all_games().ok().and_then(|all| {
+                    all.into_iter().find(|g| &g.id == gid).map(|g| g.platforms)
+                })
+            } else {
+                None
+            };
+
+            metadata::igdb::IgdbFetcher::fetch_metadata(
+                &client_id,
+                &client_secret,
+                &title,
+                platform_hint.as_deref(),
+            ).await
         }
         _ => Err(format!("Unsupported metadata provider: {}", provider)),
     }
@@ -1099,6 +1113,136 @@ async fn check_for_app_updates() -> Result<UpdateCheckResult, String> {
             })
         }
         Err(e) => Err(format!("Failed to connect to GitHub: {}", e)),
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateProgressPayload {
+    pub downloaded: u64,
+    pub total: u64,
+    pub percentage: u32,
+}
+
+#[tauri::command]
+async fn download_app_update(
+    download_url: String,
+    target_version: String,
+    app_handle: AppHandle,
+) -> Result<String, String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(300))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let mut resp = client
+        .get(&download_url)
+        .header("User-Agent", format!("OpenPlay/{}", env!("CARGO_PKG_VERSION")))
+        .send()
+        .await
+        .map_err(|e| format!("Failed to connect to download URL: {}", e))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("Download failed with status HTTP {}", resp.status()));
+    }
+
+    let total = resp.content_length().unwrap_or(0);
+    let temp_dir = std::env::temp_dir();
+    let clean_version = target_version.trim_start_matches(|c| c == 'v' || c == 'V');
+    let file_name = format!("OpenPlay-Setup-{}.exe", clean_version);
+    let dest_path = temp_dir.join(file_name);
+
+    let mut file = std::fs::File::create(&dest_path)
+        .map_err(|e| format!("Failed to create destination file: {}", e))?;
+
+    use std::io::Write;
+    let mut downloaded: u64 = 0;
+    let mut last_percentage: u32 = 0;
+
+    let _ = app_handle.emit(
+        "app-update-progress",
+        UpdateProgressPayload {
+            downloaded: 0,
+            total,
+            percentage: 0,
+        },
+    );
+
+    while let Some(chunk) = resp.chunk().await.map_err(|e| format!("Error receiving chunk: {}", e))? {
+        file.write_all(&chunk)
+            .map_err(|e| format!("Error writing chunk to file: {}", e))?;
+        downloaded += chunk.len() as u64;
+
+        let percentage = if total > 0 {
+            ((downloaded as f64 / total as f64) * 100.0).round() as u32
+        } else {
+            0
+        };
+
+        if percentage != last_percentage || downloaded == total {
+            last_percentage = percentage;
+            let _ = app_handle.emit(
+                "app-update-progress",
+                UpdateProgressPayload {
+                    downloaded,
+                    total,
+                    percentage,
+                },
+            );
+        }
+    }
+
+    file.flush().map_err(|e| e.to_string())?;
+
+    let _ = app_handle.emit(
+        "app-update-progress",
+        UpdateProgressPayload {
+            downloaded,
+            total: downloaded,
+            percentage: 100,
+        },
+    );
+
+    Ok(dest_path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+async fn apply_update_and_restart(
+    installer_path: String,
+    app_handle: AppHandle,
+) -> Result<(), String> {
+    let path = std::path::PathBuf::from(&installer_path);
+    if !path.exists() {
+        return Err("Installer file not found on disk".to_string());
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        const DETACHED_PROCESS: u32 = 0x00000008;
+
+        let current_exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        let current_exe_str = current_exe.to_string_lossy().to_string();
+        let installer_str = path.to_string_lossy().to_string();
+
+        let script = format!(
+            "timeout /t 2 /nobreak >nul & start \"\" /wait \"{}\" /S & timeout /t 1 /nobreak >nul & start \"\" \"{}\"",
+            installer_str, current_exe_str
+        );
+
+        std::process::Command::new("cmd")
+            .args(["/C", &script])
+            .creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS)
+            .spawn()
+            .map_err(|e| format!("Failed to launch updater: {}", e))?;
+
+        app_handle.exit(0);
+        Ok(())
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        Err("In-app update restart is currently supported on Windows".to_string())
     }
 }
 
@@ -1705,9 +1849,9 @@ async fn sync_retroachievements_core(
     username: &str,
     api_key: &str,
 ) -> Result<(), String> {
-    let progress_list = RetroAchievementsClient::fetch_user_completion_progress(username, api_key)
+    let progress_list = RetroAchievementsClient::fetch_all_user_played_games(username, api_key)
         .await
-        .map_err(|e| format!("Failed to fetch RetroAchievements user progress: {}", e))?;
+        .map_err(|e| format!("Failed to fetch RetroAchievements user games: {}", e))?;
 
     let all_games = db.get_all_games()?;
     let mut game_map_by_source_id: std::collections::HashMap<String, Game> = std::collections::HashMap::new();
@@ -1723,93 +1867,107 @@ async fn sync_retroachievements_core(
         game_map_by_title.insert(g.title.to_lowercase().trim().to_string(), g);
     }
 
-    let semaphore = Arc::new(tokio::sync::Semaphore::new(4));
-    let mut join_set = tokio::task::JoinSet::new();
-
     for prog in progress_list {
-        let sem = semaphore.clone();
-        let u = username.to_string();
-        let k = api_key.to_string();
-        let prog_clone = prog.clone();
+        let detail = match RetroAchievementsClient::fetch_game_info_and_progress(prog.game_id, username, api_key).await {
+            Ok(d) => d,
+            Err(e) => {
+                eprintln!("[RetroAchievements] Failed to fetch game {} ({}): {}", prog.game_id, prog.title, e);
+                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                continue;
+            }
+        };
 
-        join_set.spawn(async move {
-            let _permit = sem.acquire_owned().await.ok()?;
-            let detail = RetroAchievementsClient::fetch_game_info_and_progress(prog_clone.game_id, &u, &k)
-                .await
-                .ok()?;
-            Some((prog_clone, detail))
-        });
-    }
+        let game_id_str = prog.game_id.to_string();
+        let title_key = detail.title.to_lowercase().trim().to_string();
 
-    while let Some(res) = join_set.join_next().await {
-        if let Ok(Some((prog, detail))) = res {
-            let game_id_str = prog.game_id.to_string();
-            let title_key = detail.title.to_lowercase().trim().to_string();
+        let mut game = if let Some(existing) = game_map_by_source_id.get(&game_id_str) {
+            existing.clone()
+        } else if let Some(existing) = game_map_by_title.get(&title_key) {
+            existing.clone()
+        } else {
+            Game {
+                id: format!("ra_{}", prog.game_id),
+                title: detail.title.clone(),
+                source: "RetroAchievements".to_string(),
+                source_id: Some(game_id_str.clone()),
+                platforms: detail.console_name.as_ref().map(|c| vec![c.clone()]).unwrap_or_else(|| vec!["Retro".to_string()]),
+                is_installed: false,
+                date_added: Some(chrono::Utc::now().to_rfc3339()),
+                ..Default::default()
+            }
+        };
 
-            let mut game = if let Some(existing) = game_map_by_source_id.get(&game_id_str) {
-                existing.clone()
-            } else if let Some(existing) = game_map_by_title.get(&title_key) {
-                existing.clone()
-            } else {
-                Game {
-                    id: format!("ra_{}", prog.game_id),
-                    title: detail.title.clone(),
-                    source: "RetroAchievements".to_string(),
-                    source_id: Some(game_id_str.clone()),
-                    platforms: detail.console_name.as_ref().map(|c| vec![c.clone()]).unwrap_or_else(|| vec!["Retro".to_string()]),
-                    is_installed: false,
-                    date_added: Some(chrono::Utc::now().to_rfc3339()),
-                    ..Default::default()
-                }
-            };
-
-            if game.cover_image.is_none() || game.cover_image.as_deref().unwrap_or("").is_empty() {
-                game.cover_image = RetroAchievementsClient::to_media_url(detail.image_box_art.as_deref());
+        if let Some(ref console) = detail.console_name {
+            if !game.platforms.iter().any(|p| p.eq_ignore_ascii_case(console)) {
+                game.platforms.push(console.clone());
             }
-            if game.icon_image.is_none() || game.icon_image.as_deref().unwrap_or("").is_empty() {
-                game.icon_image = RetroAchievementsClient::to_media_url(detail.image_icon.as_deref());
-            }
-            if game.background_image.is_none() || game.background_image.as_deref().unwrap_or("").is_empty() {
-                game.background_image = RetroAchievementsClient::to_media_url(detail.image_title.as_deref());
-            }
-            if game.developer.is_none() {
-                game.developer = detail.developer.clone();
-            }
-            if game.publisher.is_none() {
-                game.publisher = detail.publisher.clone();
-            }
-            if let Some(playtime) = detail.user_total_playtime {
-                if playtime > game.playtime_seconds {
-                    game.playtime_seconds = playtime;
-                }
-            }
-            if let Some(ref recent_date) = prog.most_recent_awarded_date {
-                let date_str = if recent_date.len() >= 10 { &recent_date[..10] } else { recent_date.as_str() };
-                if game.last_played.is_none() || game.last_played.as_deref() < Some(date_str) {
-                    game.last_played = Some(date_str.to_string());
-                }
-            }
-
-            if prog.highest_award_kind.as_deref() == Some("mastered") {
-                game.completion_status = Some("Completed".to_string());
-            } else if prog.highest_award_kind.is_some() {
-                game.completion_status = Some("Completed".to_string());
-            } else if game.playtime_seconds > 0 || prog.num_awarded.unwrap_or(0) > 0 {
-                if game.completion_status.is_none() || game.completion_status.as_deref() == Some("Not Played") {
-                    game.completion_status = Some("Played".to_string());
-                }
-            }
-
-            let _ = db.upsert_game(&game);
-
-            let achs = RetroAchievementsClient::extract_achievements(&game.id, &detail);
-            if !achs.is_empty() {
-                let _ = db.save_game_achievements(&game.id, &achs);
-            }
-
-            let _ = app_handle.emit("game-updated", &game);
-            let _ = app_handle.emit("achievements-updated", &game.id);
         }
+        if !game.platforms.iter().any(|p| p.eq_ignore_ascii_case("Retro")) {
+            game.platforms.push("Retro".to_string());
+        }
+
+        if game.cover_image.is_none() || game.cover_image.as_deref().unwrap_or("").is_empty() {
+            game.cover_image = RetroAchievementsClient::to_media_url(detail.image_box_art.as_deref());
+        }
+        if game.icon_image.is_none() || game.icon_image.as_deref().unwrap_or("").is_empty() {
+            game.icon_image = RetroAchievementsClient::to_media_url(detail.image_icon.as_deref());
+        }
+        if game.background_image.is_none() || game.background_image.as_deref().unwrap_or("").is_empty() {
+            game.background_image = RetroAchievementsClient::to_media_url(detail.image_title.as_deref());
+        }
+        if game.developer.is_none() {
+            game.developer = detail.developer.clone();
+        }
+        if game.publisher.is_none() {
+            game.publisher = detail.publisher.clone();
+        }
+        if let Some(playtime) = detail.user_total_playtime {
+            if playtime > game.playtime_seconds {
+                game.playtime_seconds = playtime;
+            }
+        }
+        if let Some(ref lp) = prog.last_played {
+            let date_str = if lp.len() >= 10 { &lp[..10] } else { lp.as_str() };
+            if game.last_played.is_none() || game.last_played.as_deref() < Some(date_str) {
+                game.last_played = Some(date_str.to_string());
+            }
+        } else if let Some(ref recent_date) = prog.most_recent_awarded_date {
+            let date_str = if recent_date.len() >= 10 { &recent_date[..10] } else { recent_date.as_str() };
+            if game.last_played.is_none() || game.last_played.as_deref() < Some(date_str) {
+                game.last_played = Some(date_str.to_string());
+            }
+        }
+
+        if let Some(ref award) = prog.highest_award_kind {
+            let award_lower = award.to_lowercase();
+            if award_lower.contains("mastered") {
+                if game.completion_status.is_none() || game.completion_status.as_deref() == Some("Auto") {
+                    game.completion_status = Some("Mastered".to_string());
+                }
+            } else if award_lower.contains("beaten") || award_lower == "completed" {
+                if game.completion_status.is_none() || game.completion_status.as_deref() == Some("Auto") {
+                    game.completion_status = Some("Beaten".to_string());
+                }
+            }
+        }
+        if game.completion_status.is_none() {
+            game.completion_status = Some("Auto".to_string());
+        }
+
+        let _ = db.upsert_game(&game);
+        game_map_by_source_id.insert(game_id_str, game.clone());
+        game_map_by_title.insert(title_key, game.clone());
+
+        let achs = RetroAchievementsClient::extract_achievements(&game.id, &detail);
+        if !achs.is_empty() {
+            let _ = db.save_game_achievements(&game.id, &achs);
+        }
+
+        let _ = app_handle.emit("game-updated", &game);
+        let _ = app_handle.emit("achievements-updated", &game.id);
+
+        // Polite pace between requests to prevent HTTP 429 rate limiting
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
     }
 
     Ok(())
@@ -1826,7 +1984,7 @@ async fn sync_retroachievements(
         let k = cfg.retroachievements_api_key.as_deref().unwrap_or("").trim().to_string();
         if u.is_empty() || k.is_empty() {
             return Err(
-                "RetroAchievements credentials not configured. Please enter your username and Web API key in Settings -> APIs & Services."
+                "RetroAchievements credentials not configured. Please enter your username and Web API key in Library Integrations & Managers."
                     .to_string(),
             );
         }
@@ -2047,8 +2205,8 @@ async fn refresh_game_live_data(
         game.hltb_completionist = Some(hltb.completionist_hours);
     }
 
-    if game.playtime_seconds > 0 && (game.completion_status.as_deref() == Some("Not Played") || game.completion_status.is_none()) {
-        game.completion_status = Some("Played".to_string());
+    if game.completion_status.is_none() || game.completion_status.as_deref() == Some("Not Played") || game.completion_status.as_deref() == Some("Played") {
+        game.completion_status = Some("Auto".to_string());
     }
 
     // 4. Refresh Size on Disk if missing or unmeasured
@@ -2163,8 +2321,8 @@ async fn sync_live_playtimes(
             }
         }
 
-        if game.playtime_seconds > 0 && (game.completion_status.as_deref() == Some("Not Played") || game.completion_status.is_none()) {
-            game.completion_status = Some("Played".to_string());
+        if game.completion_status.is_none() || game.completion_status.as_deref() == Some("Not Played") || game.completion_status.as_deref() == Some("Played") {
+            game.completion_status = Some("Auto".to_string());
             changed = true;
         }
 
@@ -2520,6 +2678,8 @@ pub fn run() {
             get_game_news,
             set_game_hidden,
             check_for_app_updates,
+            download_app_update,
+            apply_update_and_restart,
             optimize_animated_artwork
         ])
         .run(tauri::generate_context!())

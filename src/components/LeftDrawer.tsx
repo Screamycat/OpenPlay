@@ -21,7 +21,7 @@ interface LeftDrawerProps {
   isOpen: boolean;
   onClose: () => void;
   onOpenLibraryManager: () => void;
-  onOpenSettings: () => void;
+  onOpenSettings: (tab?: string) => void;
   gameCount?: number;
   onRefreshAll: () => void;
   onRefreshAllLibraries: () => void;
@@ -283,6 +283,24 @@ export const LeftDrawer: React.FC<LeftDrawerProps> = ({
                     </div>
                     <span className="text-[10px] text-zinc-500 group-hover:text-zinc-300 font-mono">
                       Scan
+                    </span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      onClose();
+                      onRefreshLibrary("retroachievements");
+                    }}
+                    className="w-full text-left px-2.5 py-2 rounded-xl hover:bg-white/10 transition-colors flex items-center justify-between text-xs text-zinc-300 hover:text-white cursor-pointer group border border-transparent hover:border-white/10"
+                  >
+                    <div className="flex items-center space-x-2.5">
+                      <span className="w-4 h-4 rounded bg-amber-500/20 text-amber-300 font-mono text-[9px] flex items-center justify-center font-bold border border-amber-500/30">
+                        R
+                      </span>
+                      <span className="font-medium">RetroAchievements</span>
+                    </div>
+                    <span className="text-[10px] text-zinc-500 group-hover:text-zinc-300 font-mono">
+                      Sync
                     </span>
                   </button>
                 </div>

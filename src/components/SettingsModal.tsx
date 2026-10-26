@@ -18,27 +18,12 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { AppConfig, DEFAULT_APP_CONFIG } from "../types/config";
 import { PlayniteBackupTab } from "./library/PlayniteBackupTab";
-
-interface ReleaseAssetInfo {
-  name: string;
-  download_url: string;
-  size: number;
-}
-
-interface UpdateCheckResult {
-  current_version: string;
-  latest_version: string;
-  is_update_available: boolean;
-  release_name?: string | null;
-  release_notes?: string | null;
-  published_at?: string | null;
-  html_url?: string | null;
-  download_url?: string | null;
-  assets?: ReleaseAssetInfo[];
-}
+import { formatFileSize } from "../utils/image";
+import { UpdateCheckResult, UpdateProgressPayload } from "../types/update";
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -49,6 +34,8 @@ interface SettingsModalProps {
   totalGames?: number;
   config: AppConfig;
   onSaveConfig: (updated: AppConfig) => void;
+  initialTab?: string;
+  initialUpdateResult?: UpdateCheckResult | null;
 }
 
 type SettingsTab =
@@ -65,42 +52,71 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   config: initialConfig,
   onSaveConfig,
   onReloadGames,
+  initialTab,
+  initialUpdateResult,
 }) => {
-  const [activeTab, setActiveTab] = useState<SettingsTab>("general");
+  const [activeTab, setActiveTab] = useState<SettingsTab>(
+    (initialTab as SettingsTab) || "general"
+  );
   const [formConfig, setFormConfig] = useState<AppConfig>({
     ...DEFAULT_APP_CONFIG,
     ...initialConfig,
   });
   const [showSgdbKey, setShowSgdbKey] = useState(false);
-  const [showRaKey, setShowRaKey] = useState(false);
   const [showIgdbSecret, setShowIgdbSecret] = useState(false);
   const [isSavedNotice, setIsSavedNotice] = useState(false);
-  const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(null);
+  const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(
+    initialUpdateResult || null
+  );
   const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
   const [updateError, setUpdateError] = useState<string | null>(null);
-  const [isSyncingRa, setIsSyncingRa] = useState(false);
-  const [raSyncStatus, setRaSyncStatus] = useState<string | null>(null);
 
-  const handleSyncRetroAchievements = async () => {
-    setIsSyncingRa(true);
-    setRaSyncStatus(null);
-    try {
-      onSaveConfig(formConfig);
-      await invoke("sync_retroachievements");
-      setRaSyncStatus("RetroAchievements synchronized successfully!");
-      if (onReloadGames) {
-        await onReloadGames();
-      }
-    } catch (err: any) {
-      setRaSyncStatus(`Sync failed: ${String(err)}`);
-    } finally {
-      setIsSyncingRa(false);
+  // In-app updater states: "idle" | "downloading" | "ready" | "restarting"
+  const [updateStatus, setUpdateStatus] = useState<
+    "idle" | "downloading" | "ready" | "restarting"
+  >("idle");
+  const [downloadProgress, setDownloadProgress] = useState<UpdateProgressPayload>({
+    downloaded: 0,
+    total: 0,
+    percentage: 0,
+  });
+  const [installerPath, setInstallerPath] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isOpen && initialTab) {
+      setActiveTab(initialTab as SettingsTab);
     }
-  };
+  }, [isOpen, initialTab]);
+
+  useEffect(() => {
+    if (initialUpdateResult) {
+      setUpdateResult(initialUpdateResult);
+    }
+  }, [initialUpdateResult]);
+
+  useEffect(() => {
+    let isMounted = true;
+    const unlistenPromise = listen<UpdateProgressPayload>(
+      "app-update-progress",
+      (event) => {
+        if (!isMounted) return;
+        setDownloadProgress(event.payload);
+        if (event.payload.percentage >= 100) {
+          setUpdateStatus("ready");
+        }
+      }
+    );
+
+    return () => {
+      isMounted = false;
+      unlistenPromise.then((unlisten) => unlisten());
+    };
+  }, []);
 
   const handleCheckForUpdates = async () => {
     setIsCheckingUpdate(true);
     setUpdateError(null);
+    setUpdateStatus("idle");
     try {
       const res = await invoke<UpdateCheckResult>("check_for_app_updates");
       setUpdateResult(res);
@@ -108,6 +124,36 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       setUpdateError(String(err));
     } finally {
       setIsCheckingUpdate(false);
+    }
+  };
+
+  const handleStartUpdate = async () => {
+    if (!updateResult?.download_url) return;
+    setUpdateStatus("downloading");
+    setUpdateError(null);
+    setDownloadProgress({ downloaded: 0, total: 0, percentage: 0 });
+
+    try {
+      const path = await invoke<string>("download_app_update", {
+        downloadUrl: updateResult.download_url,
+        targetVersion: updateResult.latest_version,
+      });
+      setInstallerPath(path);
+      setUpdateStatus("ready");
+    } catch (err: any) {
+      setUpdateError(String(err));
+      setUpdateStatus("idle");
+    }
+  };
+
+  const handleApplyUpdateAndRestart = async () => {
+    if (!installerPath) return;
+    setUpdateStatus("restarting");
+    try {
+      await invoke("apply_update_and_restart", { installerPath });
+    } catch (err: any) {
+      setUpdateError(String(err));
+      setUpdateStatus("ready");
     }
   };
 
@@ -656,92 +702,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <ExternalLink className="w-3 h-3" />
                   </button>
                 </div>
-
-                {/* RetroAchievements Configuration */}
-                <div className="bg-white/[0.02] border border-white/5 rounded-xl p-4 space-y-3.5">
-                  <div className="flex items-center justify-between">
-                    <div className="font-semibold text-white">RetroAchievements</div>
-                    <span
-                      className={`text-[10px] px-2 py-0.5 rounded-full font-bold border ${
-                        formConfig.retroachievements_api_key
-                          ? "bg-white/10 text-zinc-200 border-white/20"
-                          : "bg-white/5 text-zinc-400 border-white/10"
-                      }`}
-                    >
-                      {formConfig.retroachievements_api_key ? "Configured" : "Optional"}
-                    </span>
-                  </div>
-
-                  <p className="text-[11px] text-zinc-400 leading-relaxed">
-                    Used to fetch and display retro game achievements, badges, and unlock times for emulation ROMs.
-                  </p>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1.5">
-                      <label className="text-[11px] text-zinc-400 font-medium">Username</label>
-                      <input
-                        type="text"
-                        value={formConfig.retroachievements_username || ""}
-                        onChange={(e) => updateField("retroachievements_username", e.target.value)}
-                        placeholder="RetroAchievements username..."
-                        className="w-full px-3 py-1.5 bg-black/40 border border-white/10 rounded-lg text-xs text-white focus:outline-none focus:border-white/30"
-                      />
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <label className="text-[11px] text-zinc-400 font-medium">Web API Key</label>
-                      <div className="relative">
-                        <input
-                          type={showRaKey ? "text" : "password"}
-                          value={formConfig.retroachievements_api_key || ""}
-                          onChange={(e) => updateField("retroachievements_api_key", e.target.value)}
-                          placeholder="Web API key..."
-                          className="w-full px-3 py-1.5 pr-8 bg-black/40 border border-white/10 rounded-lg text-xs text-white focus:outline-none focus:border-white/30 font-mono"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setShowRaKey((prev) => !prev)}
-                          className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-white"
-                        >
-                          {showRaKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-1">
-                    <button
-                      type="button"
-                      onClick={() => openUrl("https://retroachievements.org/controlpanel.php")}
-                      className="text-[11px] text-zinc-400 hover:text-white flex items-center space-x-1 underline cursor-pointer"
-                    >
-                      <span>Find your RetroAchievements Web API key</span>
-                      <ExternalLink className="w-3 h-3" />
-                    </button>
-
-                    <button
-                      type="button"
-                      disabled={isSyncingRa || !formConfig.retroachievements_username || !formConfig.retroachievements_api_key}
-                      onClick={handleSyncRetroAchievements}
-                      className="px-3 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 font-medium text-xs transition-colors flex items-center space-x-1.5 disabled:opacity-40 cursor-pointer w-fit"
-                    >
-                      <RefreshCw className={`w-3.5 h-3.5 ${isSyncingRa ? "animate-spin" : ""}`} />
-                      <span>{isSyncingRa ? "Syncing Progress..." : "Sync RetroAchievements Now"}</span>
-                    </button>
-                  </div>
-
-                  {raSyncStatus && (
-                    <div
-                      className={`text-[11px] px-3 py-2 rounded-lg border ${
-                        raSyncStatus.includes("failed")
-                          ? "bg-red-500/10 border-red-500/20 text-red-300"
-                          : "bg-emerald-500/10 border-emerald-500/20 text-emerald-300"
-                      }`}
-                    >
-                      {raSyncStatus}
-                    </div>
-                  )}
-                </div>
               </div>
             )}
 
@@ -783,7 +743,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                               borderColor: "color-mix(in srgb, var(--app-accent-color, #a855f7) 50%, transparent)",
                             }}
                           >
-                            v0.1.0
+                            v{updateResult?.current_version || "0.1.1"}
                           </span>
                         </div>
                         <div className="text-[11px] text-zinc-400">
@@ -915,16 +875,64 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         </div>
 
                         <div className="flex items-center space-x-2 shrink-0">
-                          {updateResult.download_url && (
+                          {updateStatus === "idle" && updateResult.download_url && (
                             <button
                               type="button"
-                              onClick={() => openUrl(updateResult.download_url!)}
-                              className="px-3.5 py-1.5 rounded-xl bg-white text-black font-extrabold text-xs flex items-center space-x-1.5 hover:bg-zinc-200 transition-all cursor-pointer shadow-md"
+                              onClick={handleStartUpdate}
+                              className="px-3.5 py-1.5 rounded-xl bg-white text-black font-extrabold text-xs flex items-center space-x-1.5 hover:bg-zinc-200 transition-all cursor-pointer shadow-md active:scale-95"
                             >
                               <Download className="w-3.5 h-3.5 stroke-[2.5]" />
                               <span>Update to v{updateResult.latest_version}</span>
                             </button>
                           )}
+
+                          {updateStatus === "downloading" && (
+                            <div className="w-56 sm:w-64 bg-black/60 border border-white/10 rounded-xl p-2.5 space-y-1.5 shadow-inner animate-in fade-in">
+                              <div className="flex items-center justify-between text-[11px] font-semibold text-zinc-300">
+                                <span className="flex items-center space-x-1.5">
+                                  <RefreshCw className="w-3 h-3 animate-spin text-purple-400" />
+                                  <span>Downloading update...</span>
+                                </span>
+                                <span className="font-mono text-purple-300 font-bold">{downloadProgress.percentage}%</span>
+                              </div>
+                              <div className="w-full bg-zinc-800 h-2 rounded-full overflow-hidden">
+                                <div
+                                  className="h-full rounded-full transition-all duration-150 ease-out"
+                                  style={{
+                                    width: `${downloadProgress.percentage}%`,
+                                    backgroundColor: "var(--app-accent-color, #a855f7)",
+                                  }}
+                                />
+                              </div>
+                              {downloadProgress.total > 0 && (
+                                <div className="text-[10px] text-zinc-400 text-right font-mono">
+                                  {formatFileSize(downloadProgress.downloaded)} / {formatFileSize(downloadProgress.total)}
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {updateStatus === "ready" && (
+                            <button
+                              type="button"
+                              onClick={handleApplyUpdateAndRestart}
+                              className="px-4 py-2 rounded-xl text-white font-extrabold text-xs flex items-center space-x-2 transition-all cursor-pointer shadow-lg active:scale-95 animate-pulse"
+                              style={{
+                                backgroundColor: "var(--app-accent-color, #a855f7)",
+                              }}
+                            >
+                              <CheckCircle2 className="w-4 h-4 text-white" />
+                              <span>Restart Now</span>
+                            </button>
+                          )}
+
+                          {updateStatus === "restarting" && (
+                            <div className="flex items-center space-x-2 px-3.5 py-1.5 rounded-xl bg-purple-950/40 border border-purple-500/30 text-purple-200 text-xs font-bold animate-pulse">
+                              <RefreshCw className="w-3.5 h-3.5 animate-spin text-purple-400" />
+                              <span>Relaunching OpenPlay...</span>
+                            </div>
+                          )}
+
                           {updateResult.html_url && (
                             <button
                               type="button"

@@ -29,6 +29,7 @@ import { AchievementHunterHub } from "./components/AchievementHunterHub";
 import { HunterProfile } from "./types/achievement";
 import { Gamepad2, Loader2, Sparkles, RefreshCw } from "lucide-react";
 import { resolveImageSrc } from "./utils/image";
+import { UpdateCheckResult } from "./types/update";
 import "./App.css";
 
 interface ScanResult {
@@ -159,6 +160,13 @@ export function App() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [editingGame, setEditingGame] = useState<Game | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [settingsInitialTab, setSettingsInitialTab] = useState<string>("general");
+  const [availableUpdate, setAvailableUpdate] = useState<UpdateCheckResult | null>(null);
+
+  const handleOpenSettings = (tab = "general") => {
+    setSettingsInitialTab(tab);
+    setIsSettingsOpen(true);
+  };
 
   // Context Menu state
   const [contextMenu, setContextMenu] = useState<{
@@ -174,6 +182,20 @@ export function App() {
   // Achievement Hunter Hub state
   const [isHunterHubOpen, setIsHunterHubOpen] = useState(false);
   const [hunterProfile, setHunterProfile] = useState<HunterProfile | null>(null);
+
+  const achievementSummaryMap = useMemo(() => {
+    const map: Record<string, { total_achievements: number; unlocked_achievements: number; is_perfect: boolean }> = {};
+    if (hunterProfile?.games_summaries) {
+      for (const s of hunterProfile.games_summaries) {
+        map[s.game_id] = {
+          total_achievements: s.total_achievements,
+          unlocked_achievements: s.unlocked_achievements,
+          is_perfect: s.is_perfect,
+        };
+      }
+    }
+    return map;
+  }, [hunterProfile]);
 
   const loadHunterStats = async () => {
     try {
@@ -202,6 +224,7 @@ export function App() {
   });
   const [isAuthenticatingEpic, setIsAuthenticatingEpic] = useState(false);
   const [isScanningEpic, setIsScanningEpic] = useState(false);
+  const [isSyncingRa, setIsSyncingRa] = useState(false);
   const [isWindowMaximized, setIsWindowMaximized] = useState(false);
 
   useEffect(() => {
@@ -362,6 +385,17 @@ export function App() {
 
   useEffect(() => {
     loadInitialData();
+
+    // Passive background check for application updates on launch
+    invoke<UpdateCheckResult>("check_for_app_updates")
+      .then((res) => {
+        if (res && res.is_update_available) {
+          setAvailableUpdate(res);
+        }
+      })
+      .catch((err) => {
+        console.warn("Background update check skipped:", err);
+      });
 
     const unlistenLaunched = listen<{ id: string; last_played: string } | string>(
       "game-launched",
@@ -810,9 +844,28 @@ export function App() {
     }
   };
 
+  // Sync RetroAchievements Library
+  const handleSyncRetroAchievements = async () => {
+    setIsSyncingRa(true);
+    try {
+      await invoke("sync_retroachievements");
+      const list = await invoke<Game[]>("get_games");
+      setGames(list);
+    } catch (err: any) {
+      console.error("Failed to sync RetroAchievements:", err);
+      throw err;
+    } finally {
+      setIsSyncingRa(false);
+    }
+  };
+
   // Refresh All Libraries
   const handleRefreshAllLibraries = async () => {
-    await Promise.allSettled([handleScanLibrary(), handleScanEpicLibrary()]);
+    await Promise.allSettled([
+      handleScanLibrary(),
+      handleScanEpicLibrary(),
+      handleSyncRetroAchievements(),
+    ]);
   };
 
   // Refresh All Metadata (Replaces only empty fields from native stores)
@@ -845,10 +898,13 @@ export function App() {
 
   // Refresh Specific Library Provider
   const handleRefreshLibrary = async (provider: string) => {
-    if (provider.toLowerCase() === "steam") {
+    const p = provider.toLowerCase();
+    if (p === "steam") {
       await handleScanLibrary();
-    } else if (provider.toLowerCase() === "epic") {
+    } else if (p === "epic") {
       await handleScanEpicLibrary();
+    } else if (p === "retroachievements") {
+      await handleSyncRetroAchievements();
     }
   };
 
@@ -1311,7 +1367,8 @@ export function App() {
           }
           groupBy={groupBy}
           onGroupByChange={handleGroupByChange}
-          onOpenSettings={() => setIsSettingsOpen(true)}
+          onOpenSettings={handleOpenSettings}
+          availableUpdate={availableUpdate}
           onOpenAchievementHub={() => setIsHunterHubOpen(true)}
           hunterLevel={hunterProfile?.level}
           hunterScore={hunterProfile?.total_score}
@@ -1382,6 +1439,7 @@ export function App() {
                   runningGameIds={runningGameIds}
                   onContextMenu={handleOpenContextMenu}
                   groupBy={groupBy}
+                  achievementSummaryMap={achievementSummaryMap}
                 />
                 <PosterZoomSlider
                   cardWidth={cardWidth}
@@ -1441,6 +1499,7 @@ export function App() {
                 runningGameIds={runningGameIds}
                 onContextMenu={handleOpenContextMenu}
                 groupBy={groupBy}
+                achievementSummaryMap={achievementSummaryMap}
               />
               <PosterZoomSlider
                 cardWidth={cardWidth}
@@ -1525,7 +1584,7 @@ export function App() {
           setLibraryManagerTab("steam");
           setIsLibraryManagerOpen(true);
         }}
-        onOpenSettings={() => setIsSettingsOpen(true)}
+        onOpenSettings={handleOpenSettings}
         gameCount={filteredGames.length}
         onRefreshAll={handleRefreshAll}
         onRefreshAllLibraries={handleRefreshAllLibraries}
@@ -1564,6 +1623,16 @@ export function App() {
         onSyncEpicLibrary={handleScanEpicLibrary}
         isSyncingEpic={isScanningEpic}
         isAuthenticatingEpic={isAuthenticatingEpic}
+        config={appConfig}
+        onSaveConfig={(updated) => {
+          setAppConfig(updated);
+          invoke("save_app_config", { config: updated }).catch((e) =>
+            console.warn("Failed to persist config:", e)
+          );
+          if (updated.view_mode) setViewMode(updated.view_mode as ViewMode);
+        }}
+        onSyncRetroAchievements={handleSyncRetroAchievements}
+        isSyncingRa={isSyncingRa}
       />
 
       {/* Add Manual Game Modal */}
@@ -1587,6 +1656,8 @@ export function App() {
       <SettingsModal
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
+        initialTab={settingsInitialTab}
+        initialUpdateResult={availableUpdate}
         onScanLibrary={handleScanLibrary}
         onReloadGames={handleReloadGames}
         isScanning={isScanning}

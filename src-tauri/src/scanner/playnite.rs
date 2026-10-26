@@ -773,6 +773,7 @@ impl PlayniteScanner {
                 play_count,
                 is_hidden: false,
                 play_actions: Vec::new(),
+                ..Default::default()
             });
 
             if let Some(handle) = app_handle {

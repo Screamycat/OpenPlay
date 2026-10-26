@@ -76,4 +76,8 @@ pub struct Game {
     pub is_hidden: bool,
     #[serde(default)]
     pub play_actions: Vec<GameAction>,
+    #[serde(default)]
+    pub auto_beaten: bool,
+    #[serde(default)]
+    pub beaten_prompt_playtime: Option<u64>,
 }

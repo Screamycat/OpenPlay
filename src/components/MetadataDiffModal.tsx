@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { X, Check, ArrowRight, Sparkles } from "lucide-react";
 import { Game } from "../types/game";
-import { resolveImageSrc } from "../utils/image";
+import { resolveImageSrc, isVideoSrc } from "../utils/image";
 
 export interface MetadataComparison {
   provider: string;
@@ -356,11 +356,22 @@ export const MetadataDiffModal: React.FC<MetadataDiffModalProps> = ({
               <div className="grid grid-cols-2 gap-4">
                 <div className="flex items-center space-x-3 p-2 bg-black/30 rounded-lg border border-white/5">
                   {currentGame.cover_image ? (
-                    <img
-                      src={resolveImageSrc(currentGame.cover_image)}
-                      alt="Current Cover"
-                      className="w-14 h-20 object-cover rounded shadow"
-                    />
+                    isVideoSrc(currentGame.cover_image) ? (
+                      <video
+                        src={resolveImageSrc(currentGame.cover_image)}
+                        autoPlay
+                        loop
+                        muted
+                        playsInline
+                        className="w-14 h-20 object-cover rounded shadow pointer-events-none"
+                      />
+                    ) : (
+                      <img
+                        src={resolveImageSrc(currentGame.cover_image)}
+                        alt="Current Cover"
+                        className="w-14 h-20 object-cover rounded shadow"
+                      />
+                    )
                   ) : (
                     <div className="w-14 h-20 bg-white/5 rounded flex items-center justify-center text-[10px] text-zinc-600">None</div>
                   )}
@@ -379,17 +390,28 @@ export const MetadataDiffModal: React.FC<MetadataDiffModalProps> = ({
                   }`}
                 >
                   {incoming.cover_image ? (
-                    <img
-                      src={resolveImageSrc(incoming.cover_image)}
-                      alt="Incoming Cover"
-                      onError={(e) => {
-                        const target = e.currentTarget;
-                        if (target.src.includes("library_600x900_2x.jpg")) {
-                          target.src = target.src.replace("library_600x900_2x.jpg", "header.jpg");
-                        }
-                      }}
-                      className="w-14 h-20 object-cover rounded shadow"
-                    />
+                    isVideoSrc(incoming.cover_image) ? (
+                      <video
+                        src={resolveImageSrc(incoming.cover_image)}
+                        autoPlay
+                        loop
+                        muted
+                        playsInline
+                        className="w-14 h-20 object-cover rounded shadow pointer-events-none"
+                      />
+                    ) : (
+                      <img
+                        src={resolveImageSrc(incoming.cover_image)}
+                        alt="Incoming Cover"
+                        onError={(e) => {
+                          const target = e.currentTarget;
+                          if (target.src.includes("library_600x900_2x.jpg")) {
+                            target.src = target.src.replace("library_600x900_2x.jpg", "header.jpg");
+                          }
+                        }}
+                        className="w-14 h-20 object-cover rounded shadow"
+                      />
+                    )
                   ) : (
                     <div className="w-14 h-20 bg-white/5 rounded flex items-center justify-center text-[10px] text-zinc-600">
                       None

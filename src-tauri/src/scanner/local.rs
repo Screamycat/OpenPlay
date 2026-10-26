@@ -120,7 +120,7 @@ impl LocalScanner {
             playtime_seconds: 0,
             last_played: None,
             date_added: Some(now),
-            completion_status: Some("Not Played".to_string()),
+            completion_status: Some("Auto".to_string()),
             description: None,
             notes: None,
             links: Vec::new(),
@@ -138,6 +138,7 @@ impl LocalScanner {
             play_count: Some(0),
             is_hidden: false,
             play_actions: Vec::new(),
+            ..Default::default()
         })
     }
 

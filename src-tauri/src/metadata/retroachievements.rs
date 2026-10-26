@@ -31,6 +31,44 @@ pub struct RaGameProgress {
     pub highest_award_kind: Option<String>,
     #[serde(rename = "HighestAwardDate")]
     pub highest_award_date: Option<String>,
+    #[serde(rename = "LastPlayed", default)]
+    pub last_played: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RaRecentlyPlayedGame {
+    #[serde(rename = "GameID")]
+    pub game_id: u64,
+    #[serde(rename = "ConsoleID")]
+    pub console_id: Option<u64>,
+    #[serde(rename = "ConsoleName")]
+    pub console_name: Option<String>,
+    #[serde(rename = "Title")]
+    pub title: String,
+    #[serde(rename = "ImageIcon")]
+    pub image_icon: Option<String>,
+    #[serde(rename = "ImageTitle")]
+    pub image_title: Option<String>,
+    #[serde(rename = "ImageIngame")]
+    pub image_ingame: Option<String>,
+    #[serde(rename = "ImageBoxArt")]
+    pub image_box_art: Option<String>,
+    #[serde(rename = "LastPlayed")]
+    pub last_played: Option<String>,
+    #[serde(rename = "AchievementsTotal")]
+    pub achievements_total: Option<u64>,
+    #[serde(rename = "NumPossibleAchievements")]
+    pub num_possible_achievements: Option<u64>,
+    #[serde(rename = "PossibleScore")]
+    pub possible_score: Option<u64>,
+    #[serde(rename = "NumAchieved")]
+    pub num_achieved: Option<u64>,
+    #[serde(rename = "ScoreAchieved")]
+    pub score_achieved: Option<u64>,
+    #[serde(rename = "NumAchievedHardcore")]
+    pub num_achieved_hardcore: Option<u64>,
+    #[serde(rename = "ScoreAchievedHardcore")]
+    pub score_achieved_hardcore: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -135,9 +173,9 @@ impl RetroAchievementsClient {
         api_key: &str,
     ) -> Result<Vec<RaGameProgress>, String> {
         let client = Self::build_client()?;
-        // Fetch up to 250 played games
+        // Fetch up to 500 played games
         let url = format!(
-            "{}/API_GetUserCompletionProgress.php?u={}&y={}&c=250",
+            "{}/API_GetUserCompletionProgress.php?u={}&y={}&c=500",
             RA_API_BASE, username, api_key
         );
 
@@ -163,16 +201,18 @@ impl RetroAchievementsClient {
         Ok(body.results)
     }
 
-    /// Fetches detailed game metadata & achievements for a specific user and game.
-    pub async fn fetch_game_info_and_progress(
-        game_id: u64,
+    /// Fetches games recently played by user (up to count, with offset).
+    /// This captures games the user booted up or played even if they have 0 achievements.
+    pub async fn fetch_user_recently_played_games(
         username: &str,
         api_key: &str,
-    ) -> Result<RaGameDetail, String> {
+        count: u32,
+        offset: u32,
+    ) -> Result<Vec<RaRecentlyPlayedGame>, String> {
         let client = Self::build_client()?;
         let url = format!(
-            "{}/API_GetGameInfoAndUserProgress.php?u={}&y={}&g={}",
-            RA_API_BASE, username, api_key, game_id
+            "{}/API_GetUserRecentlyPlayedGames.php?u={}&y={}&c={}&o={}",
+            RA_API_BASE, username, api_key, count, offset
         );
 
         let resp = client
@@ -189,12 +229,123 @@ impl RetroAchievementsClient {
             ));
         }
 
-        let detail: RaGameDetail = resp
+        let body: Vec<RaRecentlyPlayedGame> = resp
             .json()
             .await
-            .map_err(|e| format!("Failed to parse game info & user progress: {}", e))?;
+            .map_err(|e| format!("Failed to parse recently played games: {}", e))?;
 
-        Ok(detail)
+        Ok(body)
+    }
+
+    /// Fetches all games the user has a track record of playing (both with achievements and 0 achievements).
+    pub async fn fetch_all_user_played_games(
+        username: &str,
+        api_key: &str,
+    ) -> Result<Vec<RaGameProgress>, String> {
+        let mut progress_map: std::collections::HashMap<u64, RaGameProgress> = std::collections::HashMap::new();
+
+        // 1. Fetch completion progress (games with awards/achievements)
+        match Self::fetch_user_completion_progress(username, api_key).await {
+            Ok(list) => {
+                for item in list {
+                    progress_map.insert(item.game_id, item);
+                }
+            }
+            Err(e) => {
+                eprintln!("[RetroAchievements] Could not fetch completion progress: {}", e);
+            }
+        }
+
+        // 2. Fetch recently played games (captures games played with 0 achievements)
+        let mut offset = 0;
+        let page_size = 50;
+        while offset < 500 {
+            match Self::fetch_user_recently_played_games(username, api_key, page_size, offset).await {
+                Ok(recent_games) => {
+                    if recent_games.is_empty() {
+                        break;
+                    }
+                    let count = recent_games.len();
+                    for rg in recent_games {
+                        let entry = progress_map.entry(rg.game_id).or_insert_with(|| RaGameProgress {
+                            game_id: rg.game_id,
+                            title: rg.title.clone(),
+                            image_icon: rg.image_icon.clone(),
+                            console_id: rg.console_id,
+                            console_name: rg.console_name.clone(),
+                            max_possible: rg.num_possible_achievements.or(rg.achievements_total),
+                            num_awarded: rg.num_achieved,
+                            num_awarded_hardcore: rg.num_achieved_hardcore,
+                            most_recent_awarded_date: None,
+                            highest_award_kind: None,
+                            highest_award_date: None,
+                            last_played: rg.last_played.clone(),
+                        });
+                        if entry.last_played.is_none() && rg.last_played.is_some() {
+                            entry.last_played = rg.last_played;
+                        }
+                    }
+                    if count < page_size as usize {
+                        break;
+                    }
+                    offset += page_size;
+                }
+                Err(e) => {
+                    eprintln!("[RetroAchievements] Could not fetch recently played page at offset {}: {}", offset, e);
+                    break;
+                }
+            }
+        }
+
+        if progress_map.is_empty() {
+            return Err("No played games or achievements found on RetroAchievements for this account.".to_string());
+        }
+
+        Ok(progress_map.into_values().collect())
+    }
+
+    /// Fetches detailed game metadata & achievements for a specific user and game.
+    pub async fn fetch_game_info_and_progress(
+        game_id: u64,
+        username: &str,
+        api_key: &str,
+    ) -> Result<RaGameDetail, String> {
+        let client = Self::build_client()?;
+        let url = format!(
+            "{}/API_GetGameInfoAndUserProgress.php?u={}&y={}&g={}",
+            RA_API_BASE, username, api_key, game_id
+        );
+
+        let mut attempts = 0;
+        loop {
+            attempts += 1;
+            let resp = client
+                .get(&url)
+                .header(USER_AGENT, USER_AGENT_STR)
+                .send()
+                .await
+                .map_err(|e| format!("RetroAchievements network error: {}", e))?;
+
+            if resp.status().as_u16() == 429 && attempts <= 3 {
+                eprintln!("[RetroAchievements] Rate limited (429) for game {}, retrying after backoff (attempt {})...", game_id, attempts);
+                tokio::time::sleep(Duration::from_millis(600 * attempts)).await;
+                continue;
+            }
+
+            if !resp.status().is_success() {
+                return Err(format!(
+                    "RetroAchievements API returned HTTP error {}",
+                    resp.status()
+                ));
+            }
+
+            let detail: RaGameDetail = resp
+                .json()
+                .await
+                .map_err(|e| format!("Failed to parse game info & user progress: {}", e))?;
+
+            return Ok(detail);
+        }
     }
 
     /// Extracts achievements from `RaGameDetail` into OpenPlay's standard `Achievement` models.
