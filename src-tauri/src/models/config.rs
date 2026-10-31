@@ -41,6 +41,14 @@ pub struct AppConfig {
     pub retroachievements_api_key: Option<String>,
     pub igdb_client_id: Option<String>,
     pub igdb_client_secret: Option<String>,
+
+    // Library Organization & Duplicates
+    pub merge_duplicates: Option<bool>,
+    pub unmerged_game_ids: Option<Vec<String>>,
+
+    // Background Synchronization
+    pub sync_on_startup: Option<bool>,
+    pub periodic_playtime_sync_hours: Option<u32>,
 }
 
 impl Default for AppConfig {
@@ -74,6 +82,10 @@ impl Default for AppConfig {
             retroachievements_api_key: None,
             igdb_client_id: None,
             igdb_client_secret: None,
+            merge_duplicates: Some(true),
+            unmerged_game_ids: Some(Vec::new()),
+            sync_on_startup: Some(true),
+            periodic_playtime_sync_hours: Some(0),
         }
     }
 }

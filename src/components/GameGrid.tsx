@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { Game } from "../types/game";
-import { resolveGridCoverSrc, isVideoSrc } from "../utils/image";
+import { resolveGridCoverSrc, isVideoSrc, getStaticFallbackCover } from "../utils/image";
 import { Star, Gamepad2, Cloud, Loader2 } from "lucide-react";
 import { GroupByOption } from "./TopNav";
 import { getEffectiveCompletionStatus } from "../utils/completionStatus";
@@ -116,6 +116,7 @@ const GameCard = React.memo<GameCardProps>(
     const cardHeight = Math.round(cardWidth * 1.5);
 
     const [imgError, setImgError] = useState(false);
+    const [videoFailed, setVideoFailed] = useState(false);
 
     const coverSrc = resolveGridCoverSrc(
       game.cover_image,
@@ -123,14 +124,22 @@ const GameCard = React.memo<GameCardProps>(
     );
     const isVideoCover = Boolean(coverSrc && isVideoSrc(coverSrc));
 
+    const staticPosterSrc = useMemo(
+      () => (isVideoCover ? getStaticFallbackCover(coverSrc) : undefined),
+      [isVideoCover, coverSrc]
+    );
+    const [staticSrc, setStaticSrc] = useState<string | undefined>(staticPosterSrc);
+
     useEffect(() => {
       setImgError(false);
-    }, [coverSrc]);
+      setVideoFailed(false);
+      setStaticSrc(staticPosterSrc);
+    }, [coverSrc, staticPosterSrc]);
 
     // Pause offscreen <video> covers via contentvisibilityautostatechange (for deferred below-the-fold cards)
     // paired with shared IntersectionObserver (for above-the-fold cards scrolled out of view & fallback)
     useEffect(() => {
-      if (!isVideoCover) return;
+      if (!isVideoCover || videoFailed) return;
       const cardEl = cardRef.current;
       const videoEl = videoRef.current;
       if (!cardEl || !videoEl) return;
@@ -138,9 +147,13 @@ const GameCard = React.memo<GameCardProps>(
       const handleCvStateChange = (event: Event) => {
         const skipped = (event as Event & { skipped?: boolean }).skipped;
         if (skipped) {
-          videoEl.pause();
+          if (!videoEl.paused) {
+            videoEl.pause();
+          }
         } else {
-          videoEl.play().catch(() => {});
+          if (videoEl.paused) {
+            videoEl.play().catch(() => {});
+          }
         }
       };
 
@@ -162,7 +175,7 @@ const GameCard = React.memo<GameCardProps>(
         }
         registerVideoCard?.(cardEl, null);
       };
-    }, [isVideoCover, isBelowFold, coverSrc, registerVideoCard]);
+    }, [isVideoCover, videoFailed, isBelowFold, coverSrc, registerVideoCard]);
 
     return (
       <div
@@ -206,10 +219,11 @@ const GameCard = React.memo<GameCardProps>(
 
         {/* Cover Art Image or Hardware-Decoded WebM/MP4 Video */}
         {coverSrc && !imgError ? (
-          isVideoCover ? (
+          isVideoCover && !videoFailed ? (
             <video
               ref={videoRef}
               src={coverSrc}
+              poster={staticSrc}
               autoPlay={!isBelowFold}
               preload={isBelowFold ? "metadata" : "auto"}
               loop
@@ -217,12 +231,19 @@ const GameCard = React.memo<GameCardProps>(
               playsInline
               width={600}
               height={900}
-              onError={() => setImgError(true)}
-              className="w-full h-full object-cover pointer-events-none"
+              onError={(e) => {
+                const mediaErr = e.currentTarget.error;
+                // Ignore MEDIA_ERR_ABORTED (code 1) - harmless abort when pausing or scrolling
+                if (!mediaErr || mediaErr.code === 1) return;
+                setVideoFailed(true);
+              }}
+              className={`w-full h-full object-cover pointer-events-none ${
+                !game.is_installed ? "grayscale brightness-75" : ""
+              }`}
             />
           ) : (
             <img
-              src={coverSrc}
+              src={isVideoCover ? (staticSrc || coverSrc) : coverSrc}
               alt={game.title}
               width={600}
               height={900}
@@ -231,7 +252,13 @@ const GameCard = React.memo<GameCardProps>(
               className={`w-full h-full object-cover ${
                 !game.is_installed ? "grayscale brightness-75" : ""
               }`}
-              onError={() => setImgError(true)}
+              onError={() => {
+                if (isVideoCover && staticSrc && staticSrc.includes(".png")) {
+                  setStaticSrc(staticSrc.replace(/\.png/i, ".jpg"));
+                } else {
+                  setImgError(true);
+                }
+              }}
             />
           )
         ) : (
@@ -281,8 +308,8 @@ const GameCard = React.memo<GameCardProps>(
 
         {/* Favorite Star Badge */}
         {game.is_favorite && (
-          <div className="absolute top-1.5 right-1.5 bg-[#0a0c12]/90 p-1 rounded-full shadow-md text-amber-400 z-10 border border-white/10">
-            <Star className="w-3 h-3 fill-amber-400" />
+          <div className="absolute top-1.5 right-1.5 bg-[#0a0c12]/90 p-1 rounded-full shadow-md text-white z-10 border border-white/10">
+            <Star className="w-3 h-3 fill-white" />
           </div>
         )}
       </div>
@@ -320,9 +347,13 @@ export const GameGrid: React.FC<GameGridProps> = ({
           const video = videoMapRef.current.get(entry.target);
           if (!video) continue;
           if (entry.isIntersecting) {
-            video.play().catch(() => {});
+            if (video.paused) {
+              video.play().catch(() => {});
+            }
           } else {
-            video.pause();
+            if (!video.paused) {
+              video.pause();
+            }
           }
         }
       },

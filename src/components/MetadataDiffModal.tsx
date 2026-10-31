@@ -130,13 +130,13 @@ export const MetadataDiffModal: React.FC<MetadataDiffModalProps> = ({
         {/* Header */}
         <div className="px-6 py-4 border-b border-white/10 flex items-center justify-between bg-white/[0.02]">
           <div className="flex items-center space-x-3">
-            <div className="p-2 rounded-xl bg-purple-500/20 border border-purple-500/30 text-purple-300">
+            <div className="p-2 rounded-xl theme-accent-subtle-bg border theme-accent-subtle-border theme-accent-text">
               <Sparkles className="w-5 h-5" />
             </div>
             <div>
               <h2 className="text-base font-bold text-white flex items-center space-x-2">
                 <span>Review & Select Metadata</span>
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 font-mono font-medium border border-purple-500/30">
+                <span className="text-[10px] px-2 py-0.5 rounded-full theme-accent-pill font-mono font-medium">
                   {incoming.provider}
                 </span>
               </h2>
@@ -293,7 +293,7 @@ export const MetadataDiffModal: React.FC<MetadataDiffModalProps> = ({
                     checked={!!selectedFields.description}
                     onChange={() => toggleField("description")}
                     onClick={(e) => e.stopPropagation()}
-                    className="w-4 h-4 rounded bg-white/10 border-white/20 text-purple-500 accent-purple-400 cursor-pointer"
+                    className="w-4 h-4 rounded bg-white/10 border-white/20 accent-[var(--app-accent-color)] cursor-pointer"
                   />
                   <span>Description ({incoming.description.length} chars)</span>
                 </div>
@@ -306,8 +306,8 @@ export const MetadataDiffModal: React.FC<MetadataDiffModalProps> = ({
                   <div className="text-[10px] font-bold uppercase text-zinc-500 mb-1">Current</div>
                   {currentGame.description || <span className="italic text-zinc-600">No description</span>}
                 </div>
-                <div className="p-2.5 bg-purple-950/20 rounded-lg border border-purple-500/20 max-h-36 overflow-y-auto text-purple-200 leading-relaxed">
-                  <div className="text-[10px] font-bold uppercase text-purple-400 mb-1">Incoming ({incoming.provider})</div>
+                <div className="p-2.5 theme-accent-subtle-bg rounded-lg border border-[var(--app-accent-color)]/20 max-h-36 overflow-y-auto text-zinc-200 leading-relaxed">
+                  <div className="text-[10px] font-bold uppercase theme-accent-text mb-1">Incoming ({incoming.provider})</div>
                   {incoming.description}
                 </div>
               </div>
@@ -322,7 +322,7 @@ export const MetadataDiffModal: React.FC<MetadataDiffModalProps> = ({
                 !incoming.cover_image
                   ? "bg-white/[0.02] border-white/5 opacity-70 cursor-default"
                   : selectedFields.cover_image
-                  ? "bg-purple-950/20 border-purple-500/30 text-white cursor-pointer"
+                  ? "theme-accent-subtle-bg border border-[var(--app-accent-color)]/40 text-white cursor-pointer"
                   : "bg-white/[0.02] border-white/5 text-zinc-400 opacity-60 cursor-pointer"
               }`}
             >
@@ -334,7 +334,7 @@ export const MetadataDiffModal: React.FC<MetadataDiffModalProps> = ({
                     checked={!!selectedFields.cover_image}
                     onChange={() => incoming.cover_image && toggleField("cover_image")}
                     onClick={(e) => e.stopPropagation()}
-                    className="w-4 h-4 rounded bg-white/10 border-white/20 text-purple-500 accent-purple-400 cursor-pointer disabled:opacity-40"
+                    className="w-4 h-4 rounded bg-white/10 border-white/20 accent-[var(--app-accent-color)] cursor-pointer disabled:opacity-40"
                   />
                   <span>Cover Poster Artwork</span>
                 </div>
@@ -385,7 +385,7 @@ export const MetadataDiffModal: React.FC<MetadataDiffModalProps> = ({
                 <div
                   className={`flex items-center space-x-3 p-2 rounded-lg border transition-all ${
                     selectedFields.cover_image && incoming.cover_image
-                      ? "bg-purple-950/30 border-purple-500/30"
+                      ? "theme-accent-subtle-bg border border-[var(--app-accent-color)]/30"
                       : "bg-black/20 border-white/5 opacity-50"
                   }`}
                 >
@@ -418,8 +418,8 @@ export const MetadataDiffModal: React.FC<MetadataDiffModalProps> = ({
                     </div>
                   )}
                   <div className="min-w-0">
-                    <span className="text-xs font-semibold text-purple-300 block">Incoming Cover</span>
-                    <span className="text-[10px] text-purple-400/80 block truncate">
+                    <span className="text-xs font-semibold theme-accent-text block">Incoming Cover</span>
+                    <span className="text-[10px] text-[var(--app-accent-color)]/80 block truncate">
                       {incoming.cover_image ? `From ${incoming.provider}` : "Not Available"}
                     </span>
                   </div>
@@ -436,7 +436,7 @@ export const MetadataDiffModal: React.FC<MetadataDiffModalProps> = ({
                 !incoming.background_image
                   ? "bg-white/[0.02] border-white/5 opacity-70 cursor-default"
                   : selectedFields.background_image
-                  ? "bg-purple-950/20 border-purple-500/30 text-white cursor-pointer"
+                  ? "theme-accent-subtle-bg border border-[var(--app-accent-color)]/30 text-white cursor-pointer"
                   : "bg-white/[0.02] border-white/5 text-zinc-400 opacity-60 cursor-pointer"
               }`}
             >
@@ -448,7 +448,7 @@ export const MetadataDiffModal: React.FC<MetadataDiffModalProps> = ({
                     checked={!!selectedFields.background_image}
                     onChange={() => incoming.background_image && toggleField("background_image")}
                     onClick={(e) => e.stopPropagation()}
-                    className="w-4 h-4 rounded bg-white/10 border-white/20 text-purple-500 accent-purple-400 cursor-pointer disabled:opacity-40"
+                    className="w-4 h-4 rounded bg-white/10 border-white/20 accent-[var(--app-accent-color)] cursor-pointer disabled:opacity-40"
                   />
                   <span>Hero Background Artwork</span>
                 </div>
@@ -488,7 +488,7 @@ export const MetadataDiffModal: React.FC<MetadataDiffModalProps> = ({
                 <div
                   className={`flex items-center space-x-3 p-2 rounded-lg border transition-all ${
                     selectedFields.background_image && incoming.background_image
-                      ? "bg-purple-950/30 border-purple-500/30"
+                      ? "theme-accent-subtle-bg border border-[var(--app-accent-color)]/30"
                       : "bg-black/20 border-white/5 opacity-50"
                   }`}
                 >
@@ -510,8 +510,8 @@ export const MetadataDiffModal: React.FC<MetadataDiffModalProps> = ({
                     </div>
                   )}
                   <div className="min-w-0">
-                    <span className="text-xs font-semibold text-purple-300 block">Incoming Hero</span>
-                    <span className="text-[10px] text-purple-400/80 block truncate">
+                    <span className="text-xs font-semibold theme-accent-text block">Incoming Hero</span>
+                    <span className="text-[10px] text-[var(--app-accent-color)]/80 block truncate">
                       {incoming.background_image ? `From ${incoming.provider}` : "Not Available"}
                     </span>
                   </div>
@@ -535,7 +535,7 @@ export const MetadataDiffModal: React.FC<MetadataDiffModalProps> = ({
             </button>
             <button
               onClick={handleApplyClick}
-              className="px-5 py-2 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-bold transition-all shadow-lg shadow-purple-600/20 flex items-center space-x-1.5 cursor-pointer"
+              className="px-5 py-2 rounded-xl theme-accent-btn text-xs font-bold transition-all flex items-center space-x-1.5 cursor-pointer"
             >
               <Check className="w-4 h-4" />
               <span>Apply Selected Fields</span>
@@ -561,7 +561,7 @@ const DiffRow: React.FC<DiffRowProps> = ({ label, checked, onToggle, current, in
       onClick={onToggle}
       className={`p-3 rounded-xl border transition-all cursor-pointer flex items-center justify-between ${
         checked
-          ? "bg-purple-950/20 border-purple-500/30"
+          ? "theme-accent-subtle-bg theme-accent-subtle-border"
           : "bg-white/[0.02] border-white/5 hover:bg-white/[0.04]"
       }`}
     >
@@ -571,7 +571,7 @@ const DiffRow: React.FC<DiffRowProps> = ({ label, checked, onToggle, current, in
           checked={checked}
           onChange={onToggle}
           onClick={(e) => e.stopPropagation()}
-          className="w-4 h-4 rounded bg-white/10 border-white/20 text-purple-500 accent-purple-400 cursor-pointer"
+          className="w-4 h-4 rounded bg-white/10 border-white/20 cursor-pointer accent-[var(--app-accent-color)]"
         />
         <span className="text-xs font-semibold text-zinc-200">{label}</span>
       </div>
@@ -581,8 +581,8 @@ const DiffRow: React.FC<DiffRowProps> = ({ label, checked, onToggle, current, in
           <span className="text-[10px] text-zinc-600 uppercase font-mono mr-1.5">Old:</span>
           {current}
         </div>
-        <div className={`truncate font-medium flex items-center space-x-1 ${checked ? "text-purple-200" : "text-zinc-400"}`}>
-          <ArrowRight className="w-3 h-3 text-purple-400 shrink-0" />
+        <div className={`truncate font-medium flex items-center space-x-1 ${checked ? "theme-accent-text" : "text-zinc-400"}`}>
+          <ArrowRight className="w-3 h-3 theme-accent-text shrink-0" />
           <span className="truncate">{incoming}</span>
         </div>
       </div>

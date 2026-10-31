@@ -294,7 +294,15 @@ impl PlayniteScanner {
                         })
                     })
                     .unwrap_or_else(|| "Local".to_string());
-                sources_set.insert(src_name.clone());
+
+                let has_roms = doc.get("Roms").and_then(|v| v.as_array()).map(|a| !a.is_empty()).unwrap_or(false);
+                let has_emu_id = doc.get("EmulatorId").and_then(|v| v.as_string()).filter(|s| s != "00000000-0000-0000-0000-000000000000").is_some();
+                let src_final = if (has_roms || has_emu_id) && (src_name == "Local" || src_name.is_empty()) {
+                    "Emulation".to_string()
+                } else {
+                    src_name
+                };
+                sources_set.insert(src_final.clone());
 
                     if let Some(plat_ids) = doc.get("PlatformIds").and_then(|v| v.as_array()) {
                         for p in plat_ids {
@@ -315,7 +323,7 @@ impl PlayniteScanner {
                     game_previews.push(PlayniteGamePreview {
                         id: gid,
                         title: name,
-                        source: src_name,
+                        source: src_final,
                         is_installed,
                         playtime_seconds: playtime_sec,
                         last_played: last_pl,
@@ -441,25 +449,51 @@ impl PlayniteScanner {
             let sorting_title = doc.get("SortingName").and_then(|v| v.as_string()).filter(|s| !s.trim().is_empty());
             let source_id = doc.get("GameId").and_then(|v| v.as_string()).filter(|s| !s.trim().is_empty());
 
-            // Source mapping: map via sources.db GUID or fallback
-            let source = doc
+            // Source mapping: map via sources.db GUID or Playnite library PluginId
+            let plugin_id = doc.get("PluginId").and_then(|v| v.as_string()).unwrap_or_default();
+            let mut source = doc
                 .get("SourceId")
                 .and_then(|v| v.as_string())
                 .filter(|s| s != "00000000-0000-0000-0000-000000000000")
                 .and_then(|sid| sources_map.get(&sid).cloned())
                 .or_else(|| {
-                    doc.get("PluginId").and_then(|v| v.as_string()).and_then(|pid| {
-                        match pid.to_lowercase().as_str() {
-                            "cb91aec9-6843-41f9-ab81-e8568377ccee" | "cb91dfc9-b977-43bf-8e70-55f46e410fad" => Some("Steam".to_string()),
-                            "00000002-dbd1-46c6-b5d0-b1ba559d10e4" | "00000002-dbd1-46c6-b5d0-b1cb55d48107" => Some("Epic".to_string()),
-                            "aebe8b7c-6dc3-4a66-af31-e7375c6b5e9e" => Some("GOG".to_string()),
-                            "00000001-bb07-432e-8a63-ec9b05c21820" | "e3c26a3d-d695-4cb7-a769-5ff7612c7ded" => Some("Battle.net".to_string()),
-                            "00000000-0000-0000-0000-000000000000" => Some("Local".to_string()),
-                            _ => None,
-                        }
-                    })
+                    match plugin_id.to_lowercase().as_str() {
+                        "cb91aec9-6843-41f9-ab81-e8568377ccee" | "cb91dfc9-b977-43bf-8e70-55f46e410fad" | "bff698d5-651e-420b-ba64-91325d5fc787" => Some("Steam".to_string()),
+                        "00000002-dbd1-46c6-b5d0-b1ba559d10e4" | "00000002-dbd1-46c6-b5d0-b1cb55d48107" | "9c469a96-755c-4fa4-89c8-22074d28fdc8" => Some("Epic".to_string()),
+                        "aebe8b7c-6dc3-4a66-af31-e7375c6b5e9e" | "6660f75b-829e-468b-99ee-a9de29317de7" => Some("GOG".to_string()),
+                        "00000001-bb07-432e-8a63-ec9b05c21820" | "e3c26a3d-d695-4cb7-a769-5ff7612c7ded" | "fb164035-12fa-429b-ac1d-bd22659cbd33" => Some("Battle.net".to_string()),
+                        "85dd7072-2f20-4e76-a007-41035e390724" | "418e2d4a-e9ee-4c34-83ee-602b1aa24d7e" => Some("EA App".to_string()),
+                        "7dc1512c-5c82-434b-9675-12ad94b74c56" | "7e17774e-f1f8-4162-bb90-ce31b452ea67" => Some("Ubisoft".to_string()),
+                        "7e4fbb5e-2ae3-48d4-8ba0-6b30e7a4e287" | "72c24dd5-d70a-438b-8a42-98424b88afb8" | "53e2adec-c959-4944-b437-33fba8d61937" => Some("Xbox".to_string()),
+                        "91d13c6f-63d3-42ed-a100-6f811a8387ea" | "4803379a-77ad-4b57-a1e7-202dc709a67c" => Some("Riot Games".to_string()),
+                        "4029fdd1-eb23-4e4b-9e56-9d7756f7e4f1" | "8f72a9ae-7c32-474c-83b2-38d5e8ff7fec" => Some("Amazon Games".to_string()),
+                        "00000000-0000-0000-0000-000000000000" => Some("Local".to_string()),
+                        _ => None,
+                    }
                 })
                 .unwrap_or_else(|| "Local".to_string());
+
+            // Normalize source name to canonical OpenPlay sources
+            let src_lower = source.to_lowercase();
+            if src_lower.contains("steam") {
+                source = "Steam".to_string();
+            } else if src_lower.contains("epic") {
+                source = "Epic".to_string();
+            } else if src_lower.contains("gog") {
+                source = "GOG".to_string();
+            } else if src_lower.contains("battle") || src_lower.contains("bnet") {
+                source = "Battle.net".to_string();
+            } else if src_lower.contains("ea") || src_lower.contains("origin") {
+                source = "EA App".to_string();
+            } else if src_lower.contains("ubisoft") || src_lower.contains("uplay") {
+                source = "Ubisoft".to_string();
+            } else if src_lower.contains("xbox") {
+                source = "Xbox".to_string();
+            } else if src_lower.contains("riot") {
+                source = "Riot Games".to_string();
+            } else if src_lower.contains("amazon") {
+                source = "Amazon Games".to_string();
+            }
 
             let install_directory = doc.get("InstallDirectory").and_then(|v| v.as_string()).filter(|s| !s.trim().is_empty());
 
@@ -492,6 +526,35 @@ impl PlayniteScanner {
                         }
                     }
                 }
+            }
+
+            // Check for Playnite emulated ROMs
+            let mut emulator_id = None;
+            let mut is_emulated = false;
+            if let Some(roms) = doc.get("Roms").and_then(|v| v.as_array()) {
+                if let Some(first_rom) = roms.first().and_then(|r| r.as_document()) {
+                    if let Some(rom_path_raw) = first_rom.get("Path").and_then(|v| v.as_string()) {
+                        let mut p = rom_path_raw.trim().to_string();
+                        if let Some(ref inst_dir) = install_directory {
+                            p = p.replace("{InstallDir}", inst_dir).replace("{installDir}", inst_dir);
+                        }
+                        if !p.is_empty() {
+                            executable_path = Some(p);
+                            is_emulated = true;
+                        }
+                    }
+                }
+            }
+
+            if let Some(eid) = doc.get("EmulatorId").and_then(|v| v.as_string()) {
+                if eid != "00000000-0000-0000-0000-000000000000" {
+                    is_emulated = true;
+                    emulator_id = Some(eid);
+                }
+            }
+
+            if is_emulated && (source == "Local" || source.is_empty()) {
+                source = "Emulation".to_string();
             }
             let is_favorite = doc.get("Favorite").and_then(|v| v.as_bool()).unwrap_or(false);
             let description = doc.get("Description").and_then(|v| v.as_string()).filter(|s| !s.trim().is_empty());
@@ -725,8 +788,73 @@ impl PlayniteScanner {
                 }
             }
 
-            // Unique ID in OpenPlay: "playnite_{guid}"
-            let openplay_id = format!("playnite_{}", gid.replace('-', ""));
+            // Canonical OpenPlay ID: Map to native store ID if known, fallback to playnite_{guid}
+            let openplay_id = match source.to_lowercase().as_str() {
+                s if s.contains("steam") => {
+                    if let Some(ref sid) = source_id {
+                        format!("steam_{}", sid)
+                    } else {
+                        format!("playnite_{}", gid.replace('-', ""))
+                    }
+                }
+                s if s.contains("epic") => {
+                    if let Some(ref sid) = source_id {
+                        format!("epic_{}", sid)
+                    } else {
+                        format!("playnite_{}", gid.replace('-', ""))
+                    }
+                }
+                s if s.contains("gog") => {
+                    if let Some(ref sid) = source_id {
+                        format!("gog_{}", sid)
+                    } else {
+                        format!("playnite_{}", gid.replace('-', ""))
+                    }
+                }
+                s if s.contains("battle") || s.contains("bnet") => {
+                    if let Some(ref sid) = source_id {
+                        format!("bnet_{}", sid.to_lowercase())
+                    } else {
+                        format!("playnite_{}", gid.replace('-', ""))
+                    }
+                }
+                s if s.contains("ea") || s.contains("origin") => {
+                    if let Some(ref sid) = source_id {
+                        format!("ea_{}", sid.replace(':', "_").replace('-', "_"))
+                    } else {
+                        format!("playnite_{}", gid.replace('-', ""))
+                    }
+                }
+                s if s.contains("ubisoft") || s.contains("uplay") => {
+                    if let Some(ref sid) = source_id {
+                        format!("ubisoft_{}", sid)
+                    } else {
+                        format!("playnite_{}", gid.replace('-', ""))
+                    }
+                }
+                s if s.contains("xbox") => {
+                    if let Some(ref sid) = source_id {
+                        format!("xbox_{}", sid.replace('!', "_").replace(':', "_"))
+                    } else {
+                        format!("playnite_{}", gid.replace('-', ""))
+                    }
+                }
+                s if s.contains("riot") => {
+                    if let Some(ref sid) = source_id {
+                        format!("riot_{}", sid)
+                    } else {
+                        format!("playnite_{}", gid.replace('-', ""))
+                    }
+                }
+                s if s.contains("amazon") => {
+                    if let Some(ref sid) = source_id {
+                        format!("amazon_{}", sid)
+                    } else {
+                        format!("playnite_{}", gid.replace('-', ""))
+                    }
+                }
+                _ => format!("playnite_{}", gid.replace('-', "")),
+            };
 
             games.push(Game {
                 id: openplay_id,
@@ -773,6 +901,7 @@ impl PlayniteScanner {
                 play_count,
                 is_hidden: false,
                 play_actions: Vec::new(),
+                emulator_id,
                 ..Default::default()
             });
 

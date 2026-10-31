@@ -65,4 +65,6 @@ export interface Game {
   play_actions?: GameAction[];
   auto_beaten?: boolean;
   beaten_prompt_playtime?: number;
+  emulator_id?: string;
+  sibling_games?: Game[];
 }

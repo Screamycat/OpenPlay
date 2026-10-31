@@ -186,7 +186,7 @@ export const TrailerModal: React.FC<TrailerModalProps> = ({
         {/* Header */}
         <div className="px-6 py-4 border-b border-[#202538] flex items-center justify-between">
           <div className="flex items-center space-x-2.5">
-            <div className="p-2 bg-cyan-500/10 rounded-xl border border-cyan-500/20 text-cyan-400">
+            <div className="p-2 theme-accent-subtle-bg rounded-xl border theme-accent-subtle-border theme-accent-text">
               <Film className="w-5 h-5" />
             </div>
             <div>
@@ -210,9 +210,9 @@ export const TrailerModal: React.FC<TrailerModalProps> = ({
         <div className="p-6 space-y-6 overflow-y-auto text-xs flex-1">
           {/* Active Preview Player (if trailer selected for preview) */}
           {previewTrailer && (
-            <div className="space-y-1.5 p-3 rounded-xl bg-black/40 border border-cyan-500/30">
+            <div className="space-y-1.5 p-3 rounded-xl bg-black/40 border theme-accent-subtle-border">
               <div className="flex items-center justify-between">
-                <span className="text-[10px] uppercase font-bold text-cyan-400 flex items-center space-x-1">
+                <span className="text-[10px] uppercase font-bold theme-accent-text flex items-center space-x-1">
                   <Play className="w-3 h-3" />
                   <span>Previewing: {previewTrailer.name}</span>
                 </span>
@@ -298,14 +298,14 @@ export const TrailerModal: React.FC<TrailerModalProps> = ({
                             className="w-full h-full object-cover"
                           />
                         ) : (
-                          <Play className="w-4 h-4 text-cyan-400" />
+                          <Play className="w-4 h-4 theme-accent-text" />
                         )}
                         <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
                           <Play className="w-3.5 h-3.5 text-white" />
                         </div>
                       </div>
                       <div className="min-w-0">
-                        <div className="font-bold text-white truncate text-xs hover:text-cyan-300 transition-colors">
+                        <div className="font-bold text-white truncate text-xs hover:theme-accent-text transition-colors">
                           {t.name}
                         </div>
                         <div className="text-[10px] text-slate-400 truncate font-mono">
@@ -343,7 +343,7 @@ export const TrailerModal: React.FC<TrailerModalProps> = ({
                 onClick={() => setActiveTab("store")}
                 className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                   activeTab === "store"
-                    ? "bg-cyan-500/20 text-cyan-400 border border-cyan-500/30"
+                    ? "theme-accent-subtle-bg theme-accent-text border theme-accent-subtle-border"
                     : "text-slate-400 hover:text-slate-200"
                 }`}
               >
@@ -355,7 +355,7 @@ export const TrailerModal: React.FC<TrailerModalProps> = ({
                 onClick={() => setActiveTab("custom")}
                 className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                   activeTab === "custom"
-                    ? "bg-cyan-500/20 text-cyan-400 border border-cyan-500/30"
+                    ? "theme-accent-subtle-bg theme-accent-text border theme-accent-subtle-border"
                     : "text-slate-400 hover:text-slate-200"
                 }`}
               >
@@ -381,14 +381,14 @@ export const TrailerModal: React.FC<TrailerModalProps> = ({
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
                       placeholder="Search game title on store..."
-                      className="w-full pl-9 pr-3 py-2 bg-[#161a29] border border-[#2b334d] rounded-xl text-xs text-white focus:outline-none focus:border-cyan-400"
+                      className="w-full pl-9 pr-3 py-2 bg-[#161a29] border border-[#2b334d] rounded-xl text-xs text-white focus:outline-none theme-accent-focus"
                     />
                     <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
                   </div>
                   <button
                     type="submit"
                     disabled={isFetchingStore}
-                    className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-slate-950 font-bold rounded-xl text-xs flex items-center space-x-1.5 transition-colors cursor-pointer shrink-0"
+                    className="px-4 py-2 theme-accent-btn disabled:opacity-50 font-bold rounded-xl text-xs flex items-center space-x-1.5 transition-colors cursor-pointer shrink-0"
                   >
                     {isFetchingStore ? (
                       <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -413,7 +413,7 @@ export const TrailerModal: React.FC<TrailerModalProps> = ({
                     </span>
                     <button
                       onClick={handleAddAllStoreTrailers}
-                      className="text-[11px] font-bold text-cyan-400 hover:text-cyan-300 cursor-pointer flex items-center space-x-1"
+                      className="text-[11px] font-bold theme-accent-text cursor-pointer flex items-center space-x-1"
                     >
                       <Plus className="w-3 h-3" />
                       <span>Add All to Game</span>
@@ -451,7 +451,7 @@ export const TrailerModal: React.FC<TrailerModalProps> = ({
                             </div>
                           </div>
                           <div className="min-w-0">
-                            <div className="font-bold text-white truncate text-xs hover:text-cyan-300 transition-colors">
+                            <div className="font-bold text-white truncate text-xs hover:theme-accent-text transition-colors">
                               {st.name}
                             </div>
                             <div className="text-[10px] text-slate-400 truncate">
@@ -477,7 +477,7 @@ export const TrailerModal: React.FC<TrailerModalProps> = ({
                           ) : (
                             <button
                               onClick={() => handleAddStoreTrailer(st)}
-                              className="inline-flex items-center space-x-1 px-3 py-1 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-slate-950 text-[11px] font-bold transition-all shadow-md cursor-pointer"
+                              className="inline-flex items-center space-x-1 px-3 py-1 rounded-lg theme-accent-btn text-[11px] font-bold transition-all shadow-md cursor-pointer"
                             >
                               <Plus className="w-3 h-3" />
                               <span>Add</span>
@@ -509,7 +509,7 @@ export const TrailerModal: React.FC<TrailerModalProps> = ({
                     value={newTitle}
                     onChange={(e) => setNewTitle(e.target.value)}
                     placeholder="e.g. Official Gameplay Trailer"
-                    className="w-full px-3.5 py-2 bg-[#161a29] border border-[#2b334d] rounded-xl text-xs text-white focus:outline-none focus:border-cyan-400"
+                    className="w-full px-3.5 py-2 bg-[#161a29] border border-[#2b334d] rounded-xl text-xs text-white focus:outline-none theme-accent-focus"
                   />
                 </div>
 
@@ -525,7 +525,7 @@ export const TrailerModal: React.FC<TrailerModalProps> = ({
                       setErrorMsg(null);
                     }}
                     placeholder="https://www.youtube.com/watch?v=... or https://.../video.mp4"
-                    className="w-full px-3.5 py-2 bg-[#161a29] border border-[#2b334d] rounded-xl text-xs text-white focus:outline-none focus:border-cyan-400 font-mono"
+                    className="w-full px-3.5 py-2 bg-[#161a29] border border-[#2b334d] rounded-xl text-xs text-white focus:outline-none theme-accent-focus font-mono"
                   />
                 </div>
 
@@ -561,7 +561,7 @@ export const TrailerModal: React.FC<TrailerModalProps> = ({
 
                 <button
                   type="submit"
-                  className="w-full py-2.5 px-4 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-bold text-xs transition-all flex items-center justify-center space-x-1.5 shadow-lg cursor-pointer mt-2"
+                  className="w-full py-2.5 px-4 rounded-xl theme-accent-btn font-bold text-xs transition-all flex items-center justify-center space-x-1.5 shadow-lg cursor-pointer mt-2"
                 >
                   <Plus className="w-4 h-4" />
                   <span>Add Trailer to Game</span>

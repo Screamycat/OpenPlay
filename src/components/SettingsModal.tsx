@@ -159,6 +159,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   useEffect(() => {
     setFormConfig({ ...DEFAULT_APP_CONFIG, ...initialConfig });
+    if (isOpen) {
+      invoke<boolean>("get_autostart_status")
+        .then((status) => {
+          setFormConfig((prev) => ({ ...prev, launch_on_startup: status }));
+        })
+        .catch((err) => console.error("Failed to query autostart status:", err));
+    }
   }, [initialConfig, isOpen]);
 
   if (!isOpen) return null;
@@ -250,23 +257,83 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </div>
 
                 <div className="space-y-3 bg-white/[0.02] border border-white/5 rounded-xl p-4">
-                  {/* Auto-Scan on Startup */}
+                  {/* Launch on Startup */}
                   <label className="flex items-center justify-between cursor-pointer group">
                     <div className="space-y-0.5">
                       <div className="font-semibold text-zinc-200 group-hover:text-white transition-colors">
-                        Auto-Scan Library on Startup
+                        Launch on System Startup
                       </div>
                       <div className="text-[11px] text-zinc-500">
-                        Automatically check for newly installed or uninstalled games when OpenPlay opens.
+                        Start OpenPlay automatically when logging into your computer.
                       </div>
                     </div>
                     <input
                       type="checkbox"
-                      checked={formConfig.auto_scan_on_startup ?? true}
-                      onChange={(e) => updateField("auto_scan_on_startup", e.target.checked)}
+                      checked={formConfig.launch_on_startup ?? false}
+                      onChange={async (e) => {
+                        const checked = e.target.checked;
+                        try {
+                          await invoke("set_autostart", { enabled: checked });
+                        } catch (err) {
+                          console.error("Failed to update autostart setting:", err);
+                        }
+                        updateField("launch_on_startup", checked);
+                      }}
                       className="w-4 h-4 rounded bg-zinc-800 border-zinc-700 text-white accent-white cursor-pointer"
                     />
                   </label>
+
+                  <div className="border-t border-white/5" />
+
+                  {/* Sync All Libraries on Startup */}
+                  <label className="flex items-center justify-between cursor-pointer group">
+                    <div className="space-y-0.5">
+                      <div className="font-semibold text-zinc-200 group-hover:text-white transition-colors">
+                        Sync Libraries on Startup
+                      </div>
+                      <div className="text-[11px] text-zinc-500">
+                        Automatically check for newly added games, playtime, and last-played dates in the background when OpenPlay launches.
+                      </div>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={formConfig.sync_on_startup ?? formConfig.auto_scan_on_startup ?? true}
+                      onChange={(e) => {
+                        const val = e.target.checked;
+                        updateField("sync_on_startup", val);
+                        updateField("auto_scan_on_startup", val);
+                      }}
+                      className="w-4 h-4 rounded bg-zinc-800 border-zinc-700 text-white accent-white cursor-pointer"
+                    />
+                  </label>
+
+                  <div className="border-t border-white/5" />
+
+                  {/* Periodic Background Playtime Sync */}
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5 pr-4">
+                      <div className="font-semibold text-zinc-200">
+                        Periodic Background Playtime Sync
+                      </div>
+                      <div className="text-[11px] text-zinc-500">
+                        Automatically sync playtime and recency in the background across devices (automatically paused during gameplay).
+                      </div>
+                    </div>
+                    <select
+                      value={formConfig.periodic_playtime_sync_hours ?? 0}
+                      onChange={(e) =>
+                        updateField("periodic_playtime_sync_hours", parseInt(e.target.value, 10))
+                      }
+                      className="bg-zinc-800 border border-zinc-700 text-xs text-white rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-zinc-500 shrink-0 cursor-pointer"
+                    >
+                      <option value={0}>Disabled</option>
+                      <option value={2}>Every 2 hours</option>
+                      <option value={4}>Every 4 hours</option>
+                      <option value={8}>Every 8 hours</option>
+                      <option value={12}>Every 12 hours</option>
+                      <option value={24}>Every 24 hours</option>
+                    </select>
+                  </div>
 
                   <div className="border-t border-white/5" />
 
@@ -304,6 +371,26 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       type="checkbox"
                       checked={formConfig.close_to_tray ?? false}
                       onChange={(e) => updateField("close_to_tray", e.target.checked)}
+                      className="w-4 h-4 rounded bg-zinc-800 border-zinc-700 text-white accent-white cursor-pointer"
+                    />
+                  </label>
+
+                  <div className="border-t border-white/5" />
+
+                  {/* Merge Duplicate Games */}
+                  <label className="flex items-center justify-between cursor-pointer group">
+                    <div className="space-y-0.5">
+                      <div className="font-semibold text-zinc-200 group-hover:text-white transition-colors">
+                        Merge Duplicate Games
+                      </div>
+                      <div className="text-[11px] text-zinc-500">
+                        Automatically combine identical titles owned across Steam, Epic, Local, and Retro into single cards.
+                      </div>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={formConfig.merge_duplicates ?? true}
+                      onChange={(e) => updateField("merge_duplicates", e.target.checked)}
                       className="w-4 h-4 rounded bg-zinc-800 border-zinc-700 text-white accent-white cursor-pointer"
                     />
                   </label>
@@ -890,10 +977,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             <div className="w-56 sm:w-64 bg-black/60 border border-white/10 rounded-xl p-2.5 space-y-1.5 shadow-inner animate-in fade-in">
                               <div className="flex items-center justify-between text-[11px] font-semibold text-zinc-300">
                                 <span className="flex items-center space-x-1.5">
-                                  <RefreshCw className="w-3 h-3 animate-spin text-purple-400" />
+                                  <RefreshCw className="w-3 h-3 animate-spin theme-accent-text" />
                                   <span>Downloading update...</span>
                                 </span>
-                                <span className="font-mono text-purple-300 font-bold">{downloadProgress.percentage}%</span>
+                                <span className="font-mono theme-accent-text font-bold">{downloadProgress.percentage}%</span>
                               </div>
                               <div className="w-full bg-zinc-800 h-2 rounded-full overflow-hidden">
                                 <div
@@ -927,8 +1014,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           )}
 
                           {updateStatus === "restarting" && (
-                            <div className="flex items-center space-x-2 px-3.5 py-1.5 rounded-xl bg-purple-950/40 border border-purple-500/30 text-purple-200 text-xs font-bold animate-pulse">
-                              <RefreshCw className="w-3.5 h-3.5 animate-spin text-purple-400" />
+                            <div className="flex items-center space-x-2 px-3.5 py-1.5 rounded-xl theme-accent-subtle-bg border border-[var(--app-accent-color)]/30 theme-accent-text text-xs font-bold animate-pulse">
+                              <RefreshCw className="w-3.5 h-3.5 animate-spin theme-accent-text" />
                               <span>Relaunching OpenPlay...</span>
                             </div>
                           )}

@@ -118,7 +118,7 @@ export const FilterPopover: React.FC<FilterPopoverProps> = ({
     <div
       ref={popoverRef}
       onMouseDown={(e) => e.stopPropagation()}
-      className="absolute top-full left-0 mt-2 w-[360px] sm:w-[420px] theme-panel-surface backdrop-blur-2xl border border-white/15 rounded-2xl shadow-2xl z-50 overflow-hidden flex flex-col text-slate-200 select-none animate-in fade-in zoom-in-95 duration-150"
+      className="absolute top-full left-0 mt-2 w-[380px] sm:w-[440px] theme-panel-surface backdrop-blur-2xl border border-white/15 rounded-2xl shadow-2xl z-50 overflow-hidden flex flex-col text-slate-200 select-none animate-in fade-in zoom-in-95 duration-150"
     >
       {/* Top Header */}
       <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between bg-black/30">
@@ -127,7 +127,7 @@ export const FilterPopover: React.FC<FilterPopoverProps> = ({
             Library Filters
           </span>
           {activeFilterCount > 0 && (
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 font-mono font-bold border border-cyan-500/30">
+            <span className="text-[10px] px-2 py-0.5 rounded-full theme-accent-pill font-mono font-bold">
               {activeFilterCount} active
             </span>
           )}
@@ -154,7 +154,7 @@ export const FilterPopover: React.FC<FilterPopoverProps> = ({
         </div>
       </div>
 
-      <div className="p-3.5 space-y-3 max-h-[460px] overflow-y-auto">
+      <div className="p-3.5 space-y-3 max-h-[calc(88vh-80px)] overflow-y-auto">
         {/* Prominent Favorites Section (Distinctly Separated at the Top) */}
         <div
           onClick={onToggleFavoritesOnly}
@@ -190,7 +190,7 @@ export const FilterPopover: React.FC<FilterPopoverProps> = ({
             onClick={onToggleHiddenOnly}
             className={`flex items-center justify-between px-3.5 py-2.5 rounded-xl border transition-all cursor-pointer ${
               showHiddenOnly
-                ? "border-purple-500/40 text-purple-200 shadow-md shadow-purple-950/30"
+                ? "theme-accent-subtle-bg theme-accent-subtle-border theme-accent-text shadow-md"
                 : "bg-white/5 hover:bg-white/10 border-white/10 text-slate-300"
             }`}
             style={
@@ -234,7 +234,7 @@ export const FilterPopover: React.FC<FilterPopoverProps> = ({
             onClick={onToggleShowHidden}
             className={`flex items-center justify-between px-3.5 py-2.5 rounded-xl border transition-all cursor-pointer ${
               showHiddenGames
-                ? "border-purple-500/40 text-purple-200 shadow-md shadow-purple-950/30"
+                ? "theme-accent-subtle-bg theme-accent-subtle-border theme-accent-text shadow-md"
                 : "bg-white/5 hover:bg-white/10 border-white/10 text-slate-300"
             }`}
             style={
@@ -293,7 +293,7 @@ export const FilterPopover: React.FC<FilterPopoverProps> = ({
             <Tag className="w-3.5 h-3.5" />
             <span>Tags</span>
             {selectedGenres.length > 0 && (
-              <span className="text-[10px] w-4 h-4 rounded-full bg-cyan-500/30 text-cyan-200 flex items-center justify-center font-mono">
+              <span className="text-[10px] w-4 h-4 rounded-full theme-accent-pill flex items-center justify-center font-mono">
                 {selectedGenres.length}
               </span>
             )}
@@ -311,7 +311,7 @@ export const FilterPopover: React.FC<FilterPopoverProps> = ({
             <Code className="w-3.5 h-3.5" />
             <span>Developer</span>
             {selectedDevelopers.length > 0 && (
-              <span className="text-[10px] w-4 h-4 rounded-full bg-cyan-500/30 text-cyan-200 flex items-center justify-center font-mono">
+              <span className="text-[10px] w-4 h-4 rounded-full theme-accent-pill flex items-center justify-center font-mono">
                 {selectedDevelopers.length}
               </span>
             )}
@@ -329,7 +329,7 @@ export const FilterPopover: React.FC<FilterPopoverProps> = ({
             <Library className="w-3.5 h-3.5" />
             <span>Library</span>
             {selectedSources.length > 0 && (
-              <span className="text-[10px] w-4 h-4 rounded-full bg-cyan-500/30 text-cyan-200 flex items-center justify-center font-mono">
+              <span className="text-[10px] w-4 h-4 rounded-full theme-accent-pill flex items-center justify-center font-mono">
                 {selectedSources.length}
               </span>
             )}
@@ -370,7 +370,7 @@ export const FilterPopover: React.FC<FilterPopoverProps> = ({
                 No matching tags found
               </div>
             ) : (
-              <div className="grid grid-cols-2 gap-1.5 max-h-[220px] overflow-y-auto pr-1">
+              <div className="grid grid-cols-2 gap-1.5 max-h-[360px] sm:max-h-[420px] overflow-y-auto pr-1">
                 {filteredGenres.map(({ name, count }) => {
                   const isChecked = selectedGenres.includes(name);
                   return (
@@ -414,7 +414,7 @@ export const FilterPopover: React.FC<FilterPopoverProps> = ({
                 No matching developers found
               </div>
             ) : (
-              <div className="space-y-1 max-h-[220px] overflow-y-auto pr-1">
+              <div className="space-y-1 max-h-[360px] sm:max-h-[420px] overflow-y-auto pr-1">
                 {filteredDevelopers.map(({ name, count }) => {
                   const isChecked = selectedDevelopers.includes(name);
                   return (
@@ -458,7 +458,7 @@ export const FilterPopover: React.FC<FilterPopoverProps> = ({
                 No libraries found
               </div>
             ) : (
-              <div className="space-y-1.5 max-h-[220px] overflow-y-auto pr-1">
+              <div className="space-y-1.5 max-h-[360px] sm:max-h-[420px] overflow-y-auto pr-1">
                 {filteredSources.map(({ name, count }) => {
                   const isChecked = selectedSources.includes(name);
                   return (
@@ -499,7 +499,7 @@ export const FilterPopover: React.FC<FilterPopoverProps> = ({
       <div className="px-4 py-2 border-t border-white/10 bg-black/40 flex items-center justify-between text-[11px] text-slate-400">
         <span>Click options to toggle filters</span>
         {activeFilterCount > 0 && (
-          <span className="text-cyan-300 font-semibold">Filters active</span>
+          <span className="theme-accent-text font-semibold">Filters active</span>
         )}
       </div>
     </div>

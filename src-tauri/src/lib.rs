@@ -1,22 +1,31 @@
+pub mod autostart;
 pub mod db;
+pub mod emulator;
 pub mod launcher;
 pub mod metadata;
 pub mod models;
 pub mod scanner;
 
+use autostart::AutostartManager;
 use db::Database;
+use emulator::EmulatorService;
 use launcher::GameLauncher;
 use metadata::hltb::{HltbData, HltbFetcher};
 use metadata::steam::{SteamMetadataFetcher, SteamNewsItem};
 use metadata::steamgriddb::{SteamGridDBAsset, SteamGridDBClient};
 use metadata::epic::EpicMetadataFetcher;
 use metadata::retroachievements::RetroAchievementsClient;
+use metadata::scores::ScoreEnrichmentEngine;
 use models::{
-    Achievement, AppConfig, Game, GameAchievementSummary, GameTrailer, HunterProfile,
-    LibraryIntegration,
+    Achievement, AppConfig, ConfiguredConsole, DiscoveredRom, EmulatorProfile, Game,
+    GameAchievementSummary, GameTrailer, HunterProfile, LibraryIntegration,
 };
 use scanner::steam::SteamScanner;
 use scanner::epic::EpicScanner;
+use scanner::providers::{
+    AmazonScanner, BattleNetScanner, EaScanner, GogScanner, GooglePlayScanner, RiotScanner,
+    RobloxScanner, UbisoftScanner, XboxScanner,
+};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State, Url, WebviewUrl, WebviewWindowBuilder};
@@ -27,6 +36,11 @@ struct AppState {
 
 #[tauri::command]
 fn get_games(state: State<'_, AppState>) -> Result<Vec<Game>, String> {
+    state.db.get_all_games()
+}
+
+#[tauri::command]
+fn get_all_games(state: State<'_, AppState>) -> Result<Vec<Game>, String> {
     state.db.get_all_games()
 }
 
@@ -223,7 +237,11 @@ fn logout_epic(state: State<'_, AppState>) -> Result<LibraryIntegration, String>
 
 #[tauri::command]
 async fn scan_epic_library(state: State<'_, AppState>) -> Result<ScanResult, String> {
-    let integration = state.db.get_integration("epic").unwrap_or_default();
+    scan_epic_library_core(&state.db).await
+}
+
+pub async fn scan_epic_library_core(db: &Arc<Database>) -> Result<ScanResult, String> {
+    let integration = db.get_integration("epic").unwrap_or_default();
 
     // 0. Query live playtime map from Epic cloud if authenticated and sync_playtime is enabled
     let playtime_map = if integration.is_authenticated && integration.sync_playtime {
@@ -286,7 +304,7 @@ async fn scan_epic_library(state: State<'_, AppState>) -> Result<ScanResult, Str
             }
         }
 
-        let _ = state.db.upsert_game(&game);
+        let _ = db.upsert_game(&game);
     }
 
     // 2. If authenticated and import_uninstalled is true, query owned cloud library
@@ -302,7 +320,7 @@ async fn scan_epic_library(state: State<'_, AppState>) -> Result<ScanResult, Str
                         let mut updated = integration.clone();
                         updated.access_token = Some(new_auth.access_token.clone());
                         updated.refresh_token = new_auth.refresh_token;
-                        let _ = state.db.save_integration(&updated);
+                        let _ = db.save_integration(&updated);
                         access_token = new_auth.access_token;
                         EpicScanner::fetch_owned_library(&access_token).await.unwrap_or_default()
                     } else {
@@ -385,15 +403,15 @@ async fn scan_epic_library(state: State<'_, AppState>) -> Result<ScanResult, Str
                     ..Default::default()
                 };
 
-                let _ = state.db.upsert_game(&uninstalled_game);
+                let _ = db.upsert_game(&uninstalled_game);
                 uninstalled_count += 1;
             }
         }
     }
 
-    let mut updated_integration = state.db.get_integration("epic").unwrap_or(integration);
+    let mut updated_integration = db.get_integration("epic").unwrap_or(integration);
     updated_integration.last_sync = Some(chrono::Local::now().format("%Y-%m-%d %H:%M").to_string());
-    let _ = state.db.save_integration(&updated_integration);
+    let _ = db.save_integration(&updated_integration);
 
     Ok(ScanResult {
         count: installed_count + uninstalled_count,
@@ -411,7 +429,11 @@ pub struct ScanResult {
 
 #[tauri::command]
 async fn scan_steam_library(state: State<'_, AppState>) -> Result<ScanResult, String> {
-    let integration = state.db.get_integration("steam").unwrap_or_default();
+    scan_steam_library_core(&state.db).await
+}
+
+pub async fn scan_steam_library_core(db: &Arc<Database>) -> Result<ScanResult, String> {
+    let integration = db.get_integration("steam").unwrap_or_default();
 
     // 1. Scan installed games from local disk
     let installed_games = SteamScanner::scan_installed_games()?;
@@ -423,7 +445,7 @@ async fn scan_steam_library(state: State<'_, AppState>) -> Result<ScanResult, St
         if let Some(ref aid) = game.source_id {
             installed_ids.insert(aid.clone());
         }
-        let _ = state.db.upsert_game(&game);
+        let _ = db.upsert_game(&game);
     }
 
     // 2. If uninstalled games enabled, scan uninstalled games from localconfig history
@@ -431,7 +453,7 @@ async fn scan_steam_library(state: State<'_, AppState>) -> Result<ScanResult, St
         if let Some(steam_dir) = SteamScanner::find_steam_install_dir() {
             let uninstalled_games = SteamScanner::scan_uninstalled_from_localconfig(&steam_dir, &installed_ids).await;
             for uninstalled in uninstalled_games {
-                let _ = state.db.upsert_game(&uninstalled);
+                let _ = db.upsert_game(&uninstalled);
                 uninstalled_count += 1;
             }
         }
@@ -439,13 +461,1389 @@ async fn scan_steam_library(state: State<'_, AppState>) -> Result<ScanResult, St
 
     let mut updated_integration = integration;
     updated_integration.last_sync = Some(chrono::Local::now().format("%Y-%m-%d %H:%M").to_string());
-    let _ = state.db.save_integration(&updated_integration);
+    let _ = db.save_integration(&updated_integration);
 
     Ok(ScanResult {
         count: installed_count + uninstalled_count,
         installed: installed_count,
         uninstalled: uninstalled_count,
     })
+}
+
+#[tauri::command]
+fn get_provider_integration(provider: String, state: State<'_, AppState>) -> Result<LibraryIntegration, String> {
+    state.db.get_integration(&provider)
+}
+
+#[tauri::command]
+fn save_provider_integration(integration: LibraryIntegration, state: State<'_, AppState>) -> Result<(), String> {
+    state.db.save_integration(&integration)
+}
+
+#[tauri::command]
+fn logout_provider(provider: String, state: State<'_, AppState>) -> Result<LibraryIntegration, String> {
+    let mut integration = state.db.get_integration(&provider).unwrap_or_default();
+    integration.provider = provider;
+    integration.is_authenticated = false;
+    integration.account_id = None;
+    integration.username = None;
+    integration.avatar_url = None;
+    integration.access_token = None;
+    integration.refresh_token = None;
+    state.db.save_integration(&integration)?;
+    Ok(integration)
+}
+
+#[tauri::command]
+async fn open_gog_login_window(app_handle: AppHandle) -> Result<(), String> {
+    if let Some(existing) = app_handle.get_webview_window("gog_login") {
+        let _ = existing.set_focus();
+        return Ok(());
+    }
+
+    let url: Url = "https://auth.gog.com/auth?client_id=46899977096215655&redirect_uri=https%3A%2F%2Fembed.gog.com%2Fon_login_success%3Forigin%3Dclient&response_type=code&layout=client2"
+        .parse()
+        .map_err(|e| format!("{:?}", e))?;
+    let app_handle_clone = app_handle.clone();
+
+    WebviewWindowBuilder::new(
+        &app_handle,
+        "gog_login",
+        WebviewUrl::External(url),
+    )
+    .title("Sign In to GOG Galaxy")
+    .inner_size(760.0, 660.0)
+    .center()
+    .resizable(true)
+    .on_navigation(move |nav_url| {
+        let url_str = nav_url.as_str();
+        if url_str.contains("code=") {
+            if let Some(pos) = url_str.find("code=") {
+                let code_part = &url_str[pos + 5..];
+                let code = code_part.split('&').next().unwrap_or("").to_string();
+                if !code.is_empty() {
+                    let _ = app_handle_clone.emit("gog-code-detected", code);
+                    if let Some(w) = app_handle_clone.get_webview_window("gog_login") {
+                        let _ = w.close();
+                    }
+                    return false;
+                }
+            }
+        }
+        true
+    })
+    .build()
+    .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn authenticate_gog_code(
+    code: String,
+    state: State<'_, AppState>,
+) -> Result<LibraryIntegration, String> {
+    let mut integration = state.db.get_integration("gog").unwrap_or_default();
+    let clean_code = if let Some(pos) = code.find("code=") {
+        let rest = &code[pos + 5..];
+        rest.split('&').next().unwrap_or(code.trim()).to_string()
+    } else {
+        code.trim().to_string()
+    };
+
+    let auth = GogScanner::exchange_code_for_token(&clean_code).await?;
+
+    integration.provider = "gog".to_string();
+    integration.account_id = Some(auth.account_id);
+    integration.username = Some(auth.display_name);
+    integration.avatar_url = auth.avatar_url;
+    integration.is_authenticated = true;
+    integration.access_token = Some(auth.access_token);
+    integration.refresh_token = auth.refresh_token;
+
+    state.db.save_integration(&integration)?;
+    Ok(integration)
+}
+
+#[tauri::command]
+async fn open_xbox_login_window(app_handle: AppHandle) -> Result<(), String> {
+    if let Some(existing) = app_handle.get_webview_window("xbox_login") {
+        let _ = existing.set_focus();
+        return Ok(());
+    }
+
+    let url: Url = "https://login.live.com/oauth20_authorize.srf?client_id=38cd2fa8-66fd-4760-afb2-405eb65d5b0c&response_type=code&approval_prompt=auto&scope=Xboxlive.signin%20Xboxlive.offline_access&redirect_uri=https://login.live.com/oauth20_desktop.srf"
+        .parse()
+        .map_err(|e| format!("{:?}", e))?;
+    let app_handle_clone = app_handle.clone();
+
+    let init_script = r#"
+        (function() {
+            function checkUrl() {
+                try {
+                    const href = window.location.href || "";
+                    const hash = window.location.hash || "";
+                    const combined = href + "&" + hash;
+                    if (combined.includes("code=")) {
+                        const match = combined.match(/[?&]code=([^&]+)/);
+                        if (match && match[1]) {
+                            window.location.href = "https://localhost/openplay_xbox_auth?code=" + match[1];
+                        }
+                    } else if (combined.includes("access_token=")) {
+                        const match = combined.match(/access_token=([^&]+)/);
+                        if (match && match[1]) {
+                            window.location.href = "https://localhost/openplay_xbox_auth?access_token=" + match[1];
+                        }
+                    }
+                } catch (e) {}
+            }
+            setInterval(checkUrl, 250);
+            window.addEventListener("DOMContentLoaded", checkUrl);
+        })();
+    "#;
+
+    WebviewWindowBuilder::new(
+        &app_handle,
+        "xbox_login",
+        WebviewUrl::External(url),
+    )
+    .title("Sign In to Xbox Live")
+    .inner_size(760.0, 680.0)
+    .center()
+    .resizable(true)
+    .initialization_script(init_script)
+    .on_navigation(move |nav_url| {
+        let url_str = nav_url.as_str();
+        if url_str.contains("code=") {
+            if let Some(pos) = url_str.find("code=") {
+                let code_part = &url_str[pos + "code=".len()..];
+                let code = code_part.split('&').next().unwrap_or("").to_string();
+                if !code.is_empty() {
+                    let decoded = scanner::providers::url_decode(&code);
+                    let _ = app_handle_clone.emit("xbox-token-detected", decoded);
+                    if let Some(w) = app_handle_clone.get_webview_window("xbox_login") {
+                        let _ = w.close();
+                    }
+                    return false;
+                }
+            }
+        } else if url_str.contains("access_token=") {
+            if let Some(pos) = url_str.find("access_token=") {
+                let token_part = &url_str[pos + "access_token=".len()..];
+                let token = token_part.split('&').next().unwrap_or("").to_string();
+                if !token.is_empty() {
+                    let decoded = scanner::providers::url_decode(&token);
+                    let _ = app_handle_clone.emit("xbox-token-detected", decoded);
+                    if let Some(w) = app_handle_clone.get_webview_window("xbox_login") {
+                        let _ = w.close();
+                    }
+                    return false;
+                }
+            }
+        }
+        true
+    })
+    .build()
+    .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn authenticate_xbox_token(
+    token: String,
+    state: State<'_, AppState>,
+) -> Result<LibraryIntegration, String> {
+    let mut integration = state.db.get_integration("xbox").unwrap_or_default();
+    let clean_token = if let Some(pos) = token.find("code=") {
+        let rest = &token[pos + "code=".len()..];
+        let raw = rest.split('&').next().unwrap_or(token.trim());
+        scanner::providers::url_decode(raw)
+    } else if let Some(pos) = token.find("access_token=") {
+        let rest = &token[pos + "access_token=".len()..];
+        let raw = rest.split('&').next().unwrap_or(token.trim());
+        scanner::providers::url_decode(raw)
+    } else {
+        token.trim().to_string()
+    };
+
+    let auth = XboxScanner::authenticate_with_ms_token(&clean_token).await?;
+
+    integration.provider = "xbox".to_string();
+    integration.account_id = Some(auth.account_id);
+    integration.username = Some(auth.display_name);
+    integration.avatar_url = auth.avatar_url;
+    integration.is_authenticated = true;
+    integration.access_token = Some(auth.access_token);
+    integration.refresh_token = auth.refresh_token.or(Some(clean_token));
+
+    state.db.save_integration(&integration)?;
+    Ok(integration)
+}
+
+#[tauri::command]
+async fn open_battlenet_login_window(app_handle: AppHandle) -> Result<(), String> {
+    if let Some(existing) = app_handle.get_webview_window("battlenet_login") {
+        let _ = existing.set_focus();
+        return Ok(());
+    }
+
+    let url: Url = "https://account.battle.net/overview"
+        .parse()
+        .map_err(|e| format!("{:?}", e))?;
+    let app_handle_clone = app_handle.clone();
+
+    let init_script = r#"
+        (function() {
+            let captured = false;
+            async function checkBnet() {
+                if (captured) return;
+                try {
+                    const host = window.location.hostname || "";
+                    const path = window.location.pathname || "";
+                    if (host.includes("account.battle.net") && !path.includes("login")) {
+                        const r1 = await fetch("https://account.battle.net/api/games-and-subs", {
+                            headers: { "Accept": "application/json" },
+                            credentials: "include"
+                        });
+                        if (!r1.ok) return;
+                        const gamesAndSubs = await r1.json();
+                        if (!gamesAndSubs || !Array.isArray(gamesAndSubs.gameAccounts)) return;
+
+                        let classicGames = [];
+                        try {
+                            const r2 = await fetch("https://account.battle.net/api/classic-games", {
+                                headers: { "Accept": "application/json" },
+                                credentials: "include"
+                            });
+                            if (r2.ok) {
+                                const cj = await r2.json();
+                                if (cj && Array.isArray(cj.classicGames)) {
+                                    classicGames = cj.classicGames;
+                                }
+                            }
+                        } catch (e) {}
+
+                        let battleTag = "Battle.net User";
+                        try {
+                            const r3 = await fetch("https://account.battle.net/api/overview", {
+                                headers: { "Accept": "application/json" },
+                                credentials: "include"
+                            });
+                            if (r3.ok) {
+                                const oj = await r3.json();
+                                battleTag = (oj && oj.accountDetails && (oj.accountDetails.battleTag || oj.accountDetails.email)) || battleTag;
+                            }
+                        } catch (e) {}
+
+                        captured = true;
+                        const payload = JSON.stringify({
+                            battleTag: battleTag,
+                            gameAccounts: gamesAndSubs.gameAccounts,
+                            classicGames: classicGames
+                        });
+                        window.location.href = "https://localhost/openplay_bnet_auth?payload=" + encodeURIComponent(payload);
+                    }
+                } catch (e) {}
+            }
+            setInterval(checkBnet, 600);
+            window.addEventListener("DOMContentLoaded", checkBnet);
+        })();
+    "#;
+
+    WebviewWindowBuilder::new(
+        &app_handle,
+        "battlenet_login",
+        WebviewUrl::External(url),
+    )
+    .title("Sign In to Battle.net")
+    .inner_size(800.0, 680.0)
+    .center()
+    .resizable(true)
+    .initialization_script(init_script)
+    .on_navigation(move |nav_url| {
+        let url_str = nav_url.as_str();
+        if url_str.contains("openplay_bnet_auth?payload=") {
+            if let Some(pos) = url_str.find("payload=") {
+                let raw = &url_str[pos + "payload=".len()..];
+                let encoded = raw.split('&').next().unwrap_or("");
+                if !encoded.is_empty() {
+                    let decoded = scanner::providers::url_decode(encoded);
+                    let _ = app_handle_clone.emit("battlenet-payload-detected", decoded);
+                    if let Some(w) = app_handle_clone.get_webview_window("battlenet_login") {
+                        let _ = w.close();
+                    }
+                    return false;
+                }
+            }
+        }
+        true
+    })
+    .build()
+    .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn authenticate_battlenet_payload(
+    payload: String,
+    state: State<'_, AppState>,
+) -> Result<LibraryIntegration, String> {
+    let mut integration = state.db.get_integration("battlenet").unwrap_or_default();
+    let val: serde_json::Value = serde_json::from_str(&payload)
+        .map_err(|e| format!("Invalid Battle.net JSON payload: {}", e))?;
+
+    let battle_tag = val["battleTag"]
+        .as_str()
+        .unwrap_or("Battle.net Account")
+        .to_string();
+
+    integration.provider = "battlenet".to_string();
+    integration.account_id = Some(battle_tag.clone());
+    integration.username = Some(battle_tag);
+    integration.is_authenticated = true;
+    integration.access_token = Some(payload);
+
+    state.db.save_integration(&integration)?;
+    Ok(integration)
+}
+
+#[tauri::command]
+async fn open_ea_login_window(app_handle: AppHandle) -> Result<(), String> {
+    if let Some(existing) = app_handle.get_webview_window("ea_login") {
+        let _ = existing.set_focus();
+        return Ok(());
+    }
+
+    let url: Url = "https://www.ea.com/login"
+        .parse()
+        .map_err(|e| format!("{:?}", e))?;
+    let app_handle_clone = app_handle.clone();
+
+    let init_script = r#"
+        (function() {
+            let captured = false;
+            async function checkEa() {
+                if (captured) return;
+                try {
+                    const href = window.location.href || "";
+                    if (href.includes("access_token=")) {
+                        const m = href.match(/access_token=([^&]+)/);
+                        if (m && m[1]) {
+                            captured = true;
+                            window.location.href = "https://localhost/openplay_ea_auth?access_token=" + m[1];
+                            return;
+                        }
+                    }
+                    const host = window.location.hostname || "";
+                    if (host.endsWith("ea.com") && !href.includes("signin.ea.com") && !href.includes("/login")) {
+                        const r = await fetch("https://accounts.ea.com/connect/auth?client_id=ORIGIN_JS_SDK&response_type=token&redirect_uri=nucleus:rest&prompt=none", {
+                            credentials: "include"
+                        });
+                        if (r.ok) {
+                            const j = await r.json();
+                            if (j && j.access_token) {
+                                captured = true;
+                                window.location.href = "https://localhost/openplay_ea_auth?access_token=" + encodeURIComponent(j.access_token);
+                            }
+                        }
+                    }
+                } catch (e) {}
+            }
+            setInterval(checkEa, 700);
+            window.addEventListener("DOMContentLoaded", checkEa);
+        })();
+    "#;
+
+    WebviewWindowBuilder::new(
+        &app_handle,
+        "ea_login",
+        WebviewUrl::External(url),
+    )
+    .title("Sign In to EA Account")
+    .inner_size(780.0, 680.0)
+    .center()
+    .resizable(true)
+    .initialization_script(init_script)
+    .on_navigation(move |nav_url| {
+        let url_str = nav_url.as_str();
+        if url_str.contains("access_token=") {
+            if let Some(pos) = url_str.find("access_token=") {
+                let raw = &url_str[pos + "access_token=".len()..];
+                let tok = raw.split('&').next().unwrap_or("");
+                if !tok.is_empty() {
+                    let decoded = scanner::providers::url_decode(tok);
+                    let _ = app_handle_clone.emit("ea-token-detected", decoded);
+                    if let Some(w) = app_handle_clone.get_webview_window("ea_login") {
+                        let _ = w.close();
+                    }
+                    return false;
+                }
+            }
+        }
+        true
+    })
+    .build()
+    .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn authenticate_ea_token(
+    token: String,
+    state: State<'_, AppState>,
+) -> Result<LibraryIntegration, String> {
+    let mut integration = state.db.get_integration("ea").unwrap_or_default();
+    let clean_token = if token.trim().starts_with('{') {
+        if let Ok(j) = serde_json::from_str::<serde_json::Value>(token.trim()) {
+            j["access_token"].as_str().unwrap_or(token.trim()).to_string()
+        } else {
+            token.trim().to_string()
+        }
+    } else if let Some(pos) = token.find("access_token=") {
+        let rest = &token[pos + "access_token=".len()..];
+        let raw = rest.split('&').next().unwrap_or(token.trim());
+        scanner::providers::url_decode(raw)
+    } else {
+        token.trim().to_string()
+    };
+
+    let auth = EaScanner::authenticate_with_token(&clean_token).await?;
+
+    integration.provider = "ea".to_string();
+    integration.account_id = Some(auth.account_id);
+    integration.username = Some(auth.display_name);
+    integration.is_authenticated = true;
+    integration.access_token = Some(auth.access_token);
+
+    state.db.save_integration(&integration)?;
+    Ok(integration)
+}
+
+#[tauri::command]
+async fn open_ubisoft_login_window(app_handle: AppHandle) -> Result<(), String> {
+    if let Some(existing) = app_handle.get_webview_window("ubisoft_login") {
+        let _ = existing.set_focus();
+        return Ok(());
+    }
+
+    // Official Ubisoft Connect WebAuth portal URL with dark theme and redirect callback
+    let url: Url = "https://connect.ubisoft.com/login?appId=74e71609-1ddf-47da-9073-71ac3aa8c90c&lang=en-US&nextUrl=https:%2F%2Fconnect.ubisoft.com%2Fready"
+        .parse()
+        .map_err(|e| format!("{:?}", e))?;
+    let app_handle_clone = app_handle.clone();
+
+    let init_script = r#"
+        (function() {
+            let captured = false;
+
+            function extractAndSend(ticket, userId, name) {
+                if (captured || !ticket) return;
+                captured = true;
+                const payload = JSON.stringify({
+                    ticket: ticket,
+                    userId: userId || "ubisoft_user",
+                    name: name || "Ubisoft User"
+                });
+                window.location.href = "https://localhost/openplay_ubi_auth?payload=" + encodeURIComponent(payload);
+            }
+
+            function checkStorage() {
+                if (captured) return;
+                try {
+                    for (const storage of [window.localStorage, window.sessionStorage]) {
+                        if (!storage) continue;
+                        const direct = storage.getItem("PRODloginData") || storage.getItem("loginData") || storage.getItem("PRODrememberMeToken");
+                        if (direct) {
+                            try {
+                                const parsed = JSON.parse(direct);
+                                const t = parsed.ticket || parsed.rememberMeTicket;
+                                if (t) {
+                                    extractAndSend(t, parsed.userId || parsed.profileId, parsed.nameOnPlatform || parsed.username);
+                                    return;
+                                }
+                            } catch (_) {}
+                        }
+
+                        for (let i = 0; i < storage.length; i++) {
+                            const k = storage.key(i);
+                            const v = storage.getItem(k);
+                            if (v && (v.includes('"ticket"') || v.includes('"rememberMeTicket"'))) {
+                                try {
+                                    const parsed = JSON.parse(v);
+                                    const t = parsed.ticket || parsed.rememberMeTicket;
+                                    if (t) {
+                                        extractAndSend(t, parsed.userId || parsed.profileId, parsed.nameOnPlatform || parsed.username);
+                                        return;
+                                    }
+                                } catch (_) {}
+                            }
+                        }
+                    }
+                } catch (e) {}
+            }
+
+            function checkUrl() {
+                if (captured) return;
+                try {
+                    const href = window.location.href;
+                    if (href.includes("rememberMeTicket=") || href.includes("ticket=")) {
+                        const urlObj = new URL(href);
+                        const hashClean = (urlObj.hash || "").replace(/^#/, "");
+                        const hashParams = new URLSearchParams(hashClean);
+                        const searchParams = urlObj.searchParams;
+
+                        const ticket = searchParams.get("rememberMeTicket")
+                            || hashParams.get("rememberMeTicket")
+                            || searchParams.get("ticket")
+                            || hashParams.get("ticket");
+
+                        if (ticket) {
+                            const userId = searchParams.get("userId")
+                                || hashParams.get("userId")
+                                || searchParams.get("profileId")
+                                || hashParams.get("profileId");
+                            const name = searchParams.get("username")
+                                || hashParams.get("username")
+                                || searchParams.get("name")
+                                || hashParams.get("name");
+
+                            extractAndSend(ticket, userId, name);
+                            return;
+                        }
+                    }
+                } catch (e) {}
+            }
+
+            function runChecks() {
+                checkUrl();
+                checkStorage();
+            }
+
+            setInterval(runChecks, 400);
+            window.addEventListener("DOMContentLoaded", runChecks);
+            window.addEventListener("load", runChecks);
+        })();
+    "#;
+
+    WebviewWindowBuilder::new(
+        &app_handle,
+        "ubisoft_login",
+        WebviewUrl::External(url),
+    )
+    .title("Sign In to Ubisoft Connect")
+    .inner_size(480.0, 700.0)
+    .center()
+    .resizable(true)
+    .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+    .initialization_script(init_script)
+    .on_navigation(move |nav_url| {
+        let url_str = nav_url.as_str();
+
+        // 1. Intercepted via local redirect scheme from init_script
+        if url_str.contains("openplay_ubi_auth?payload=") {
+            if let Some(pos) = url_str.find("payload=") {
+                let raw = &url_str[pos + "payload=".len()..];
+                let encoded = raw.split('&').next().unwrap_or("");
+                if !encoded.is_empty() {
+                    let decoded = scanner::providers::url_decode(encoded);
+                    let _ = app_handle_clone.emit("ubisoft-ticket-detected", decoded);
+                    if let Some(w) = app_handle_clone.get_webview_window("ubisoft_login") {
+                        let _ = w.close();
+                    }
+                    return false;
+                }
+            }
+        }
+
+        // 2. Intercepted directly from URL parameters or hash upon redirect
+        if url_str.contains("rememberMeTicket=") || (url_str.contains("/ready") && url_str.contains("ticket=")) {
+            let find_val = |key: &str| -> Option<String> {
+                let pattern = format!("{}=", key);
+                if let Some(idx) = url_str.find(&pattern) {
+                    let slice = &url_str[idx + pattern.len()..];
+                    let val = slice.split(|c| c == '&' || c == '#' || c == ' ').next().unwrap_or("");
+                    if !val.is_empty() {
+                        return Some(scanner::providers::url_decode(val));
+                    }
+                }
+                None
+            };
+
+            let ticket = find_val("rememberMeTicket").or_else(|| find_val("ticket"));
+            if let Some(t) = ticket {
+                let user_id = find_val("userId")
+                    .or_else(|| find_val("profileId"))
+                    .unwrap_or_else(|| "ubisoft_user".to_string());
+                let name = find_val("username")
+                    .or_else(|| find_val("name"))
+                    .unwrap_or_else(|| "Ubisoft User".to_string());
+                let payload = serde_json::json!({
+                    "ticket": t,
+                    "userId": user_id,
+                    "name": name,
+                }).to_string();
+                let _ = app_handle_clone.emit("ubisoft-ticket-detected", payload);
+                if let Some(w) = app_handle_clone.get_webview_window("ubisoft_login") {
+                    let _ = w.close();
+                }
+                return false;
+            }
+        }
+
+        true
+    })
+    .build()
+    .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn authenticate_ubisoft_ticket(
+    payload: String,
+    state: State<'_, AppState>,
+) -> Result<LibraryIntegration, String> {
+    let mut integration = state.db.get_integration("ubisoft").unwrap_or_default();
+    let (ticket, user_id, username) = if payload.trim().starts_with('{') {
+        let j: serde_json::Value = serde_json::from_str(payload.trim()).map_err(|e| e.to_string())?;
+        (
+            j["ticket"]
+                .as_str()
+                .or_else(|| j["rememberMeTicket"].as_str())
+                .unwrap_or("")
+                .to_string(),
+            j["userId"]
+                .as_str()
+                .or_else(|| j["profileId"].as_str())
+                .unwrap_or("ubisoft_user")
+                .to_string(),
+            j["name"]
+                .as_str()
+                .or_else(|| j["username"].as_str())
+                .unwrap_or("Ubisoft User")
+                .to_string(),
+        )
+    } else {
+        (
+            payload.trim().to_string(),
+            "ubisoft_user".to_string(),
+            "Ubisoft User".to_string(),
+        )
+    };
+
+    if ticket.is_empty() {
+        return Err("Missing Ubisoft authentication ticket".to_string());
+    }
+
+    integration.provider = "ubisoft".to_string();
+    integration.account_id = Some(user_id);
+    integration.username = Some(username);
+    integration.is_authenticated = true;
+    integration.access_token = Some(ticket);
+
+    state.db.save_integration(&integration)?;
+    Ok(integration)
+}
+
+#[tauri::command]
+async fn open_amazon_login_window(app_handle: AppHandle) -> Result<(), String> {
+    if let Some(existing) = app_handle.get_webview_window("amazon_login") {
+        let _ = existing.set_focus();
+        return Ok(());
+    }
+
+    let (login_url, _, _, _) = AmazonScanner::build_login_params();
+    let url: Url = login_url.parse().map_err(|e| format!("{:?}", e))?;
+    let app_handle_clone = app_handle.clone();
+
+    WebviewWindowBuilder::new(
+        &app_handle,
+        "amazon_login",
+        WebviewUrl::External(url),
+    )
+    .title("Sign In to Amazon Games")
+    .inner_size(760.0, 680.0)
+    .center()
+    .resizable(true)
+    .user_agent("Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) @amzn/aga-electron-platform/1.0.0 Chrome/78.0.3904.130 Electron/7.1.9 Safari/537.36")
+    .on_navigation(move |nav_url| {
+        let url_str = nav_url.as_str();
+        if url_str.contains("openid.oa2.authorization_code=") {
+            if let Some(pos) = url_str.find("openid.oa2.authorization_code=") {
+                let raw = &url_str[pos + "openid.oa2.authorization_code=".len()..];
+                let code = raw.split('&').next().unwrap_or("").to_string();
+                if !code.is_empty() {
+                    let decoded = scanner::providers::url_decode(&code);
+                    let _ = app_handle_clone.emit("amazon-code-detected", decoded);
+                    if let Some(w) = app_handle_clone.get_webview_window("amazon_login") {
+                        let _ = w.close();
+                    }
+                    return false;
+                }
+            }
+        }
+        true
+    })
+    .build()
+    .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn authenticate_amazon_code(
+    code: String,
+    state: State<'_, AppState>,
+) -> Result<LibraryIntegration, String> {
+    let mut integration = state.db.get_integration("amazon").unwrap_or_default();
+    let clean_code = if let Some(pos) = code.find("openid.oa2.authorization_code=") {
+        let rest = &code[pos + "openid.oa2.authorization_code=".len()..];
+        let raw = rest.split('&').next().unwrap_or(code.trim());
+        scanner::providers::url_decode(raw)
+    } else {
+        code.trim().to_string()
+    };
+
+    let auth = AmazonScanner::exchange_code_for_token(&clean_code).await?;
+
+    integration.provider = "amazon".to_string();
+    integration.account_id = Some(auth.account_id);
+    integration.username = Some(auth.display_name);
+    integration.is_authenticated = true;
+    integration.access_token = Some(auth.access_token);
+    integration.refresh_token = auth.refresh_token;
+
+    state.db.save_integration(&integration)?;
+    Ok(integration)
+}
+
+async fn enrich_scanned_provider_game(
+    game: &mut Game,
+    igdb_creds: &Option<(String, String)>,
+) {
+    let current_status = game.completion_status.as_deref().unwrap_or("Auto");
+    if game.playtime_seconds > 0 && (current_status == "Auto" || current_status == "Not Played") {
+        game.completion_status = Some("Played".to_string());
+    }
+
+    if let Some((ref cid, ref csec)) = igdb_creds {
+        if game.cover_image.is_none() || game.description.is_none() || game.background_image.is_none() {
+            if let Ok(meta) = metadata::igdb::IgdbFetcher::fetch_metadata(
+                cid,
+                csec,
+                &game.title,
+                Some(&["PC (Microsoft Windows)".to_string()]),
+            )
+            .await
+            {
+                apply_igdb_meta(game, meta);
+            }
+        }
+    }
+
+    if game.cover_image.is_none() || game.description.is_none() {
+        if let Ok(meta) = EpicMetadataFetcher::fetch_metadata_by_title(&game.title).await {
+            if game.cover_image.is_none() {
+                game.cover_image = meta.cover_image;
+            }
+            if game.background_image.is_none() {
+                game.background_image = meta.background_image;
+            }
+            if game.description.is_none() {
+                game.description = meta.description;
+            }
+            if game.developer.is_none() {
+                game.developer = meta.developer;
+            }
+            if game.publisher.is_none() {
+                game.publisher = meta.publisher;
+            }
+            if game.release_date.is_none() {
+                game.release_date = meta.release_date;
+            }
+            if game.tags.is_empty() {
+                game.tags = meta.tags;
+            }
+            if game.genres.is_empty() {
+                game.genres = meta.genres;
+            }
+        }
+    }
+
+    if game.hltb_main.is_none() {
+        if let Some(hltb) = HltbFetcher::fetch_hltb(&game.title).await {
+            game.hltb_main = Some(hltb.main_story_hours);
+            game.hltb_extra = Some(hltb.main_extra_hours);
+            game.hltb_completionist = Some(hltb.completionist_hours);
+        }
+    }
+
+    if game.critic_score.is_none() || game.community_score.is_none() {
+        let scores = ScoreEnrichmentEngine::resolve_scores_for_game(
+            &game.title,
+            &game.source,
+            game.source_id.as_deref(),
+        )
+        .await;
+
+        if game.critic_score.is_none() && scores.critic_score.is_some() {
+            game.critic_score = scores.critic_score;
+        }
+        if game.community_score.is_none() && scores.community_score.is_some() {
+            game.community_score = scores.community_score;
+        }
+    }
+}
+
+#[tauri::command]
+async fn scan_provider_library(
+    provider: String,
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<ScanResult, String> {
+    scan_provider_library_core(&provider, &app_handle, &state.db).await
+}
+
+pub async fn scan_provider_library_core(
+    provider: &str,
+    app_handle: &AppHandle,
+    db: &Arc<Database>,
+) -> Result<ScanResult, String> {
+    let prov = provider.to_lowercase();
+    if prov == "steam" {
+        return scan_steam_library_core(db).await;
+    }
+    if prov == "epic" {
+        return scan_epic_library_core(db).await;
+    }
+
+    let integration = db.get_integration(&prov).unwrap_or_default();
+    let app_cfg = db.get_app_config().unwrap_or_default();
+    let igdb_creds = match (app_cfg.igdb_client_id, app_cfg.igdb_client_secret) {
+        (Some(cid), Some(sec)) if !cid.trim().is_empty() && !sec.trim().is_empty() => {
+            Some((cid.trim().to_string(), sec.trim().to_string()))
+        }
+        _ => None,
+    };
+
+    let mut installed_games: Vec<Game> = Vec::new();
+    let mut uninstalled_games: Vec<Game> = Vec::new();
+
+    match prov.as_str() {
+        "gog" => {
+            if integration.import_installed {
+                installed_games = GogScanner::scan_installed_games()?;
+            }
+            let installed_ids: std::collections::HashSet<String> = installed_games
+                .iter()
+                .filter_map(|g| g.source_id.clone())
+                .collect();
+
+            if integration.is_authenticated {
+                let mut token = integration.access_token.clone().unwrap_or_default();
+                let uname = integration.username.as_deref();
+                let uid = integration.account_id.as_deref();
+
+                // Also merge cloud stats into installed games if authenticated
+                if let (Some(u), Some(id)) = (uname, uid) {
+                    let (cloud_pt, cloud_lp) = GogScanner::fetch_cloud_stats(u, id, &token).await;
+                    for g in &mut installed_games {
+                        if let Some(ref sid) = g.source_id {
+                            if let Some(&cpt) = cloud_pt.get(sid) {
+                                if cpt > g.playtime_seconds {
+                                    g.playtime_seconds = cpt;
+                                }
+                            }
+                            if g.last_played.is_none() {
+                                g.last_played = cloud_lp.get(sid).cloned();
+                            }
+                        }
+                    }
+                }
+
+                if integration.import_uninstalled {
+                    let owned_res = GogScanner::fetch_owned_games(&token, uname, uid).await;
+                    let all_owned = match owned_res {
+                        Ok(list) => list,
+                        Err(_) => {
+                            if let Some(ref rtok) = integration.refresh_token {
+                                if let Ok(new_auth) = GogScanner::refresh_access_token(rtok).await {
+                                    let mut upd = integration.clone();
+                                    upd.access_token = Some(new_auth.access_token.clone());
+                                    upd.refresh_token = new_auth.refresh_token;
+                                    let _ = db.save_integration(&upd);
+                                    token = new_auth.access_token;
+                                    GogScanner::fetch_owned_games(&token, uname, uid).await.unwrap_or_default()
+                                } else {
+                                    Vec::new()
+                                }
+                            } else {
+                                Vec::new()
+                            }
+                        }
+                    };
+                    uninstalled_games = all_owned
+                        .into_iter()
+                        .filter(|g| {
+                            g.source_id
+                                .as_ref()
+                                .map(|id| !installed_ids.contains(id))
+                                .unwrap_or(true)
+                        })
+                        .collect();
+                }
+            }
+        }
+        "xbox" => {
+            if integration.import_installed {
+                installed_games = XboxScanner::scan_installed_games()?;
+            }
+            if integration.is_authenticated {
+                let mut xuid = integration.account_id.clone().unwrap_or_default();
+                let mut auth_header = integration.access_token.clone().unwrap_or_default();
+
+                let mut cloud_res = XboxScanner::fetch_cloud_library(&xuid, &auth_header).await;
+                if cloud_res.is_err() {
+                    if let Some(ref rtok) = integration.refresh_token {
+                        if let Ok(new_auth) = XboxScanner::refresh_xbox_auth(rtok).await {
+                            let mut upd = integration.clone();
+                            upd.account_id = Some(new_auth.account_id.clone());
+                            upd.access_token = Some(new_auth.access_token.clone());
+                            if new_auth.refresh_token.is_some() {
+                                upd.refresh_token = new_auth.refresh_token;
+                            }
+                            let _ = db.save_integration(&upd);
+                            xuid = new_auth.account_id;
+                            auth_header = new_auth.access_token;
+                            cloud_res = XboxScanner::fetch_cloud_library(&xuid, &auth_header).await;
+                        }
+                    }
+                }
+
+                if let Ok(cloud) = cloud_res {
+                    // Merge cloud playtime & last_played into installed Xbox games by title match
+                    for inst in &mut installed_games {
+                        if let Some(cg) = cloud.iter().find(|c| c.title.eq_ignore_ascii_case(&inst.title)) {
+                            if cg.playtime_seconds > inst.playtime_seconds {
+                                inst.playtime_seconds = cg.playtime_seconds;
+                            }
+                            if inst.last_played.is_none() && cg.last_played.is_some() {
+                                inst.last_played = cg.last_played.clone();
+                            }
+                            if inst.cover_image.is_none() && cg.cover_image.is_some() {
+                                inst.cover_image = cg.cover_image.clone();
+                            }
+                            if inst.description.is_none() && cg.description.is_some() {
+                                inst.description = cg.description.clone();
+                            }
+                        }
+                    }
+
+                    if integration.import_uninstalled {
+                        let installed_titles: std::collections::HashSet<String> = installed_games
+                            .iter()
+                            .map(|g| g.title.to_lowercase())
+                            .collect();
+                        uninstalled_games = cloud
+                            .into_iter()
+                            .filter(|g| !installed_titles.contains(&g.title.to_lowercase()))
+                            .collect();
+                    }
+                }
+            }
+        }
+        "battlenet" => {
+            if integration.import_installed {
+                installed_games = BattleNetScanner::scan_installed_games()?;
+            }
+            if integration.is_authenticated && integration.import_uninstalled {
+                if let Some(ref payload) = integration.access_token {
+                    if let Ok(cloud) = BattleNetScanner::parse_cloud_games_json(payload) {
+                        let installed_codes: std::collections::HashSet<String> = installed_games
+                            .iter()
+                            .filter_map(|g| g.source_id.clone())
+                            .collect();
+                        let installed_titles: std::collections::HashSet<String> = installed_games
+                            .iter()
+                            .map(|g| g.title.to_lowercase())
+                            .collect();
+                        uninstalled_games = cloud
+                            .into_iter()
+                            .filter(|g| {
+                                let code_ok = g.source_id.as_ref().map(|c| !installed_codes.contains(c)).unwrap_or(true);
+                                code_ok && !installed_titles.contains(&g.title.to_lowercase())
+                            })
+                            .collect();
+                    }
+                }
+            }
+        }
+        "ea" => {
+            if integration.import_installed {
+                installed_games = EaScanner::scan_installed_games()?;
+            }
+            if integration.is_authenticated {
+                if let (Some(ref pid), Some(ref token)) = (&integration.account_id, &integration.access_token) {
+                    if let Ok(cloud) = EaScanner::fetch_cloud_library(pid, token).await {
+                        // Merge cloud playtime & last_played into installed EA games, or promote cloud games detected as installed via installCheckOverride!
+                        for cg in cloud {
+                            if let Some(inst) = installed_games.iter_mut().find(|i| {
+                                i.source_id == cg.source_id || i.title.eq_ignore_ascii_case(&cg.title)
+                            }) {
+                                if cg.playtime_seconds > inst.playtime_seconds {
+                                    inst.playtime_seconds = cg.playtime_seconds;
+                                }
+                                if inst.last_played.is_none() && cg.last_played.is_some() {
+                                    inst.last_played = cg.last_played.clone();
+                                }
+                                if inst.cover_image.is_none() && cg.cover_image.is_some() {
+                                    inst.cover_image = cg.cover_image.clone();
+                                }
+                                if cg.source_id.is_some() {
+                                    inst.source_id = cg.source_id.clone();
+                                }
+                            } else if cg.is_installed {
+                                if integration.import_installed {
+                                    installed_games.push(cg);
+                                }
+                            } else if integration.import_uninstalled {
+                                uninstalled_games.push(cg);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        "ubisoft" => {
+            if integration.import_installed {
+                installed_games = UbisoftScanner::scan_installed_games()?;
+            }
+            let installed_ids: std::collections::HashSet<String> = installed_games
+                .iter()
+                .filter_map(|g| g.source_id.clone())
+                .collect();
+
+            if integration.is_authenticated {
+                if let Some(ref ticket) = integration.access_token {
+                    if let Ok(cloud) = UbisoftScanner::fetch_cloud_library(ticket).await {
+                        for inst in &mut installed_games {
+                            if let Some(cg) = cloud.iter().find(|c| c.title.eq_ignore_ascii_case(&inst.title)) {
+                                if cg.playtime_seconds > inst.playtime_seconds {
+                                    inst.playtime_seconds = cg.playtime_seconds;
+                                }
+                                if inst.last_played.is_none() && cg.last_played.is_some() {
+                                    inst.last_played = cg.last_played.clone();
+                                }
+                                if inst.cover_image.is_none() && cg.cover_image.is_some() {
+                                    inst.cover_image = cg.cover_image.clone();
+                                }
+                            }
+                        }
+
+                        if integration.import_uninstalled {
+                            let installed_titles: std::collections::HashSet<String> = installed_games
+                                .iter()
+                                .map(|g| g.title.to_lowercase())
+                                .collect();
+                            uninstalled_games = cloud
+                                .into_iter()
+                                .filter(|g| !installed_titles.contains(&g.title.to_lowercase()))
+                                .collect();
+                        }
+                    }
+                }
+            }
+
+            if integration.import_uninstalled && uninstalled_games.is_empty() {
+                uninstalled_games = UbisoftScanner::scan_local_configurations_owned(&installed_ids);
+            }
+        }
+        "riot" => {
+            if integration.import_installed {
+                installed_games = RiotScanner::scan_installed_games()?;
+            }
+            if integration.import_uninstalled {
+                let installed_ids: std::collections::HashSet<String> = installed_games
+                    .iter()
+                    .filter_map(|g| g.source_id.clone())
+                    .collect();
+                uninstalled_games = RiotScanner::get_uninstalled_catalog(&installed_ids);
+            }
+        }
+        "amazon" => {
+            let local_all = AmazonScanner::scan_installed_games()?;
+            if integration.import_installed {
+                installed_games = local_all.iter().filter(|g| g.is_installed).cloned().collect();
+            }
+            let installed_titles: std::collections::HashSet<String> = installed_games
+                .iter()
+                .map(|g| g.title.to_lowercase())
+                .collect();
+
+            if integration.import_uninstalled {
+                if integration.is_authenticated {
+                    if let Some(ref token) = integration.access_token {
+                        if let Ok(cloud) = AmazonScanner::fetch_cloud_library(token).await {
+                            uninstalled_games = cloud
+                                .into_iter()
+                                .filter(|g| !installed_titles.contains(&g.title.to_lowercase()))
+                                .collect();
+                        }
+                    }
+                }
+                if uninstalled_games.is_empty() {
+                    uninstalled_games = local_all
+                        .into_iter()
+                        .filter(|g| !g.is_installed && !installed_titles.contains(&g.title.to_lowercase()))
+                        .collect();
+                }
+            }
+        }
+        "googleplay" => {
+            if integration.import_installed {
+                installed_games = GooglePlayScanner::scan_installed_games()?;
+            }
+        }
+        "roblox" => {
+            if integration.import_installed {
+                installed_games = RobloxScanner::scan_installed_games()?;
+            }
+        }
+        _ => return Err(format!("Unsupported provider: {}", provider)),
+    }
+
+    let installed_count = installed_games.len();
+    let uninstalled_count = uninstalled_games.len();
+
+    for mut game in installed_games {
+        enrich_scanned_provider_game(&mut game, &igdb_creds).await;
+        let _ = db.upsert_game(&game);
+        let _ = app_handle.emit("game-updated", &game);
+    }
+
+    for mut game in uninstalled_games {
+        enrich_scanned_provider_game(&mut game, &igdb_creds).await;
+        let _ = db.upsert_game(&game);
+        let _ = app_handle.emit("game-updated", &game);
+    }
+
+    let mut updated_integration = db.get_integration(&prov).unwrap_or(integration);
+    updated_integration.provider = prov;
+    updated_integration.last_sync = Some(chrono::Local::now().format("%Y-%m-%d %H:%M").to_string());
+    let _ = db.save_integration(&updated_integration);
+
+    Ok(ScanResult {
+        count: installed_count + uninstalled_count,
+        installed: installed_count,
+        uninstalled: uninstalled_count,
+    })
+}
+
+#[tauri::command]
+async fn sync_all_libraries(
+    playtime_only: Option<bool>,
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<ScanResult, String> {
+    sync_all_libraries_core(&app_handle, &state.db, playtime_only.unwrap_or(false)).await
+}
+
+pub async fn sync_all_libraries_core(
+    app_handle: &AppHandle,
+    db: &Arc<Database>,
+    playtime_only: bool,
+) -> Result<ScanResult, String> {
+    // 1. Gaming-aware guard: if any game launched via OpenPlay is running, pause/defer immediately
+    let running = GameLauncher::get_running_games(Some(app_handle), Some(db));
+    if !running.is_empty() {
+        eprintln!("[BackgroundSync] Deferred: active game process running: {:?}", running);
+        return Ok(ScanResult { count: 0, installed: 0, uninstalled: 0 });
+    }
+
+    let _ = app_handle.emit("library-sync-started", serde_json::json!({ "playtime_only": playtime_only }));
+
+    if playtime_only {
+        // Fast periodic playtime/recency sync (only updates timestamps, zero disk/metadata overhead)
+        let mut total_updated = 0usize;
+
+        // A. Steam: read localconfig.vdf in milliseconds
+        if let Some(steam_dir) = SteamScanner::find_steam_install_dir() {
+            let history = SteamScanner::get_user_play_history(&steam_dir);
+            if let Ok(mut all_games) = db.get_all_games() {
+                for g in &mut all_games {
+                    if g.source.eq_ignore_ascii_case("steam") {
+                        if let Some(ref sid) = g.source_id {
+                            if let Some((pt, lp)) = history.get(sid) {
+                                let mut changed = false;
+                                if *pt > 0 && *pt != g.playtime_seconds {
+                                    g.playtime_seconds = *pt;
+                                    changed = true;
+                                }
+                                if lp.is_some() && *lp != g.last_played {
+                                    g.last_played = lp.clone();
+                                    changed = true;
+                                }
+                                if changed {
+                                    let _ = db.upsert_game(g);
+                                    let _ = app_handle.emit("game-updated", &g);
+                                    total_updated += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // B. Epic: fetch live cloud playtimes if authenticated
+        let epic_int = db.get_integration("epic").unwrap_or_default();
+        if epic_int.is_authenticated && epic_int.sync_playtime {
+            if let (Some(aid), Some(tok)) = (epic_int.account_id.as_deref(), epic_int.access_token.as_deref()) {
+                if let Ok(pts) = EpicScanner::fetch_playtime(aid, tok).await {
+                    let last_played_map = EpicScanner::get_user_last_played();
+                    if let Ok(mut all_games) = db.get_all_games() {
+                        for g in &mut all_games {
+                            if g.source.eq_ignore_ascii_case("epic") {
+                                if let Some(ref sid) = g.source_id {
+                                    let mut changed = false;
+                                    if let Some(&pt) = pts.get(sid).or_else(|| pts.get(&sid.to_lowercase())) {
+                                        if pt > 0 && pt != g.playtime_seconds {
+                                            g.playtime_seconds = pt;
+                                            changed = true;
+                                        }
+                                    }
+                                    if let Some(lp) = last_played_map.get(sid).or_else(|| last_played_map.get(&sid.to_lowercase())) {
+                                        if g.last_played.as_deref() != Some(lp) {
+                                            g.last_played = Some(lp.clone());
+                                            changed = true;
+                                        }
+                                    }
+                                    if changed {
+                                        let _ = db.upsert_game(g);
+                                        let _ = app_handle.emit("game-updated", &g);
+                                        total_updated += 1;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // C. GOG: fetch cloud stats if authenticated
+        let gog_int = db.get_integration("gog").unwrap_or_default();
+        if gog_int.is_authenticated {
+            if let (Some(u), Some(id), Some(tok)) = (gog_int.username.as_deref(), gog_int.account_id.as_deref(), gog_int.access_token.as_deref()) {
+                let (cloud_pt, cloud_lp) = GogScanner::fetch_cloud_stats(u, id, tok).await;
+                if let Ok(mut all_games) = db.get_all_games() {
+                    for g in &mut all_games {
+                        if g.source.eq_ignore_ascii_case("gog") {
+                            if let Some(ref sid) = g.source_id {
+                                let mut changed = false;
+                                if let Some(&cpt) = cloud_pt.get(sid) {
+                                    if cpt > g.playtime_seconds {
+                                        g.playtime_seconds = cpt;
+                                        changed = true;
+                                    }
+                                }
+                                if let Some(clp) = cloud_lp.get(sid) {
+                                    if g.last_played.as_ref() != Some(clp) {
+                                        g.last_played = Some(clp.clone());
+                                        changed = true;
+                                    }
+                                }
+                                if changed {
+                                    let _ = db.upsert_game(g);
+                                    let _ = app_handle.emit("game-updated", &g);
+                                    total_updated += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // D. Xbox: fetch cloud stats if authenticated
+        let xbox_int = db.get_integration("xbox").unwrap_or_default();
+        if xbox_int.is_authenticated {
+            if let (Some(xuid), Some(tok)) = (xbox_int.account_id.as_deref(), xbox_int.access_token.as_deref()) {
+                if let Ok(cloud) = XboxScanner::fetch_cloud_library(xuid, tok).await {
+                    if let Ok(mut all_games) = db.get_all_games() {
+                        for g in &mut all_games {
+                            if g.source.eq_ignore_ascii_case("xbox") {
+                                if let Some(cg) = cloud.iter().find(|c| c.title.eq_ignore_ascii_case(&g.title)) {
+                                    let mut changed = false;
+                                    if cg.playtime_seconds > g.playtime_seconds {
+                                        g.playtime_seconds = cg.playtime_seconds;
+                                        changed = true;
+                                    }
+                                    if g.last_played.is_none() && cg.last_played.is_some() {
+                                        g.last_played = cg.last_played.clone();
+                                        changed = true;
+                                    }
+                                    if changed {
+                                        let _ = db.upsert_game(g);
+                                        let _ = app_handle.emit("game-updated", &g);
+                                        total_updated += 1;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let _ = app_handle.emit("library-sync-complete", serde_json::json!({
+            "playtime_only": true,
+            "updated": total_updated
+        }));
+
+        return Ok(ScanResult {
+            count: total_updated,
+            installed: total_updated,
+            uninstalled: 0,
+        });
+    }
+
+    // Full Library Scan (on startup or manual refresh across all providers)
+    let providers = ["steam", "epic", "gog", "xbox", "battlenet", "ea", "ubisoft", "riot", "amazon"];
+    let mut total_res = ScanResult { count: 0, installed: 0, uninstalled: 0 };
+
+    for p in providers {
+        // Gaming guard check before each provider
+        let running = GameLauncher::get_running_games(Some(app_handle), Some(db));
+        if !running.is_empty() {
+            eprintln!("[BackgroundSync] Aborting remaining sync: game launched ({:?})", running);
+            break;
+        }
+
+        match scan_provider_library_core(p, app_handle, db).await {
+            Ok(res) => {
+                total_res.count += res.count;
+                total_res.installed += res.installed;
+                total_res.uninstalled += res.uninstalled;
+            }
+            Err(e) => {
+                // Silent logging, never interrupt the user
+                eprintln!("[BackgroundSync] Notice while scanning provider '{}': {}", p, e);
+            }
+        }
+    }
+
+    let _ = app_handle.emit("library-sync-complete", serde_json::json!({
+        "playtime_only": false,
+        "count": total_res.count,
+        "installed": total_res.installed,
+        "uninstalled": total_res.uninstalled
+    }));
+
+    Ok(total_res)
 }
 
 #[tauri::command]
@@ -505,6 +1903,22 @@ async fn fetch_game_metadata(game_id: String, state: State<'_, AppState>) -> Res
         }
     }
 
+    // Also enrich with critic & community scores if missing
+    if game.critic_score.is_none() || game.community_score.is_none() {
+        let scores = ScoreEnrichmentEngine::resolve_scores_for_game(
+            &game.title,
+            &game.source,
+            game.source_id.as_deref(),
+        ).await;
+
+        if game.critic_score.is_none() && scores.critic_score.is_some() {
+            game.critic_score = scores.critic_score;
+        }
+        if game.community_score.is_none() && scores.community_score.is_some() {
+            game.community_score = scores.community_score;
+        }
+    }
+
     state.db.save_game_exact(&game)?;
     Ok(game)
 }
@@ -512,6 +1926,48 @@ async fn fetch_game_metadata(game_id: String, state: State<'_, AppState>) -> Res
 #[tauri::command]
 async fn get_steam_current_players(appid: String) -> Result<u32, String> {
     SteamMetadataFetcher::fetch_current_players(&appid).await
+}
+
+#[tauri::command]
+async fn get_game_current_players(
+    title: Option<String>,
+    appid: Option<serde_json::Value>,
+) -> Result<u32, String> {
+    let resolved_appid = if let Some(ref val) = appid {
+        if let Some(s) = val.as_str() {
+            let trimmed = s.trim();
+            if !trimmed.is_empty() && trimmed.chars().all(|c| c.is_ascii_digit()) {
+                Some(trimmed.to_string())
+            } else {
+                None
+            }
+        } else if let Some(n) = val.as_u64() {
+            Some(n.to_string())
+        } else if let Some(n) = val.as_i64() {
+            Some(n.to_string())
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    let final_aid = match resolved_appid {
+        Some(aid) => Some(aid),
+        None => {
+            if let Some(ref t) = title {
+                SteamMetadataFetcher::search_appid_by_title(t).await
+            } else {
+                None
+            }
+        }
+    };
+
+    if let Some(aid) = final_aid {
+        SteamMetadataFetcher::fetch_current_players(&aid).await
+    } else {
+        Err("Could not resolve Steam App ID for player count".to_string())
+    }
 }
 
 #[tauri::command]
@@ -739,6 +2195,8 @@ async fn fetch_metadata_from_source(
                 url: format!("https://store.epicgames.com/p/{}", slug),
             }];
 
+            let scores = ScoreEnrichmentEngine::resolve_scores_for_game(&title, "epic", None).await;
+
             Ok(metadata::igdb::MetadataComparison {
                 provider: "Epic Games".to_string(),
                 title: Some(title),
@@ -749,8 +2207,8 @@ async fn fetch_metadata_from_source(
                 genres: meta.genres.clone(),
                 tags: meta.tags,
                 features: Vec::new(),
-                critic_score: None,
-                community_score: None,
+                critic_score: scores.critic_score,
+                community_score: scores.community_score,
                 age_rating: None,
                 series: None,
                 cover_image: meta.cover_image,
@@ -886,6 +2344,17 @@ async fn sync_all_metadata(
                     if game.tags.is_empty() && !meta.tags.is_empty() { game.tags = meta.tags; changed = true; }
                     if game.genres.is_empty() && !meta.genres.is_empty() { game.genres = meta.genres; changed = true; }
                 }
+            } else if game.source.to_lowercase() == "emulation" || game.source.to_lowercase() == "local" || game.source.to_lowercase().contains("retro") {
+                let config = state.db.get_app_config().unwrap_or_default();
+                if let (Some(ref client_id), Some(ref client_secret)) = (&config.igdb_client_id, &config.igdb_client_secret) {
+                    if !client_id.trim().is_empty() && !client_secret.trim().is_empty() {
+                        let hint = if !game.platforms.is_empty() { Some(game.platforms.as_slice()) } else { None };
+                        if let Ok(meta) = metadata::igdb::IgdbFetcher::fetch_metadata(client_id, client_secret, &game.title, hint).await {
+                            apply_igdb_meta(&mut game, meta);
+                            changed = true;
+                        }
+                    }
+                }
             }
         }
 
@@ -928,6 +2397,11 @@ fn toggle_favorite(game_id: String, state: State<'_, AppState>) -> Result<bool, 
 }
 
 #[tauri::command]
+fn set_game_favorite(game_id: String, is_favorite: bool, state: State<'_, AppState>) -> Result<bool, String> {
+    state.db.set_favorite(&game_id, is_favorite)
+}
+
+#[tauri::command]
 fn launch_game(
     game_id: String,
     action_id: Option<String>,
@@ -962,7 +2436,324 @@ fn launch_game(
         game.executable_path,
         game.install_directory,
         game.launch_arguments,
+        game.emulator_id,
     )
+}
+
+#[tauri::command]
+fn install_game(game_id: String, state: State<'_, AppState>) -> Result<(), String> {
+    let all = state.db.get_all_games()?;
+    let game = all
+        .into_iter()
+        .find(|g| g.id == game_id)
+        .ok_or_else(|| "Game not found".to_string())?;
+
+    let src = game.source.to_lowercase();
+    if src == "steam" {
+        if let Some(ref appid) = game.source_id {
+            let url = format!("steam://install/{}", appid);
+            #[cfg(target_os = "windows")]
+            {
+                std::process::Command::new("cmd")
+                    .args(["/C", "start", "", &url])
+                    .spawn()
+                    .map_err(|e| e.to_string())?;
+            }
+            #[cfg(target_os = "linux")]
+            {
+                std::process::Command::new("xdg-open")
+                    .arg(&url)
+                    .spawn()
+                    .map_err(|e| e.to_string())?;
+            }
+            return Ok(());
+        }
+    } else if src == "epic" {
+        if let Some(ref app_name) = game.source_id {
+            let url = format!("com.epicgames.launcher://apps/{}?action=install", app_name);
+            #[cfg(target_os = "windows")]
+            {
+                std::process::Command::new("cmd")
+                    .args(["/C", "start", "", &url])
+                    .spawn()
+                    .map_err(|e| e.to_string())?;
+            }
+            return Ok(());
+        }
+    }
+
+    Err("Direct store installation is not supported for this source".to_string())
+}
+
+#[tauri::command]
+fn get_emulator_profiles(state: State<'_, AppState>) -> Result<Vec<EmulatorProfile>, String> {
+    state.db.get_emulator_profiles()
+}
+
+#[tauri::command]
+fn save_emulator_profile(profile: EmulatorProfile, state: State<'_, AppState>) -> Result<(), String> {
+    state.db.save_emulator_profile(&profile)
+}
+
+#[tauri::command]
+fn delete_emulator_profile(id: String, state: State<'_, AppState>) -> Result<(), String> {
+    state.db.delete_emulator_profile(&id)
+}
+
+#[tauri::command]
+fn get_configured_consoles(state: State<'_, AppState>) -> Result<Vec<ConfiguredConsole>, String> {
+    state.db.get_configured_consoles()
+}
+
+#[tauri::command]
+fn save_configured_console(console: ConfiguredConsole, state: State<'_, AppState>) -> Result<(), String> {
+    state.db.save_configured_console(&console)
+}
+
+#[tauri::command]
+fn delete_configured_console(id: String, state: State<'_, AppState>) -> Result<(), String> {
+    state.db.delete_configured_console(&id)
+}
+
+#[tauri::command]
+fn scan_console_roms(
+    dir_path: String,
+    console_id: String,
+    console_name: String,
+    extensions: Vec<String>,
+) -> Result<Vec<DiscoveredRom>, String> {
+    EmulatorService::scan_console_roms(&dir_path, &console_id, &console_name, &extensions)
+}
+
+fn apply_igdb_meta(game: &mut Game, meta: metadata::igdb::MetadataComparison) {
+    if (game.cover_image.is_none() || game.cover_image.as_deref().unwrap_or("").is_empty()) && meta.cover_image.is_some() {
+        game.cover_image = meta.cover_image;
+    }
+    if (game.background_image.is_none() || game.background_image.as_deref().unwrap_or("").is_empty()) && meta.background_image.is_some() {
+        game.background_image = meta.background_image;
+    }
+    if (game.description.is_none() || game.description.as_deref().unwrap_or("").is_empty()) && meta.description.is_some() {
+        game.description = meta.description;
+    }
+    if (game.developer.is_none() || game.developer.as_deref().unwrap_or("").is_empty()) && meta.developer.is_some() {
+        game.developer = meta.developer;
+    }
+    if (game.publisher.is_none() || game.publisher.as_deref().unwrap_or("").is_empty()) && meta.publisher.is_some() {
+        game.publisher = meta.publisher;
+    }
+    if game.release_date.is_none() && meta.release_date.is_some() {
+        game.release_date = meta.release_date;
+    }
+    if game.genres.is_empty() && !meta.genres.is_empty() {
+        game.genres = meta.genres;
+    }
+    if game.tags.is_empty() && !meta.tags.is_empty() {
+        game.tags = meta.tags;
+    }
+    if game.features.is_empty() && !meta.features.is_empty() {
+        game.features = meta.features;
+    }
+    if game.critic_score.is_none() && meta.critic_score.is_some() {
+        game.critic_score = meta.critic_score;
+    }
+    if game.community_score.is_none() && meta.community_score.is_some() {
+        game.community_score = meta.community_score;
+    }
+    if game.age_rating.is_none() && meta.age_rating.is_some() {
+        game.age_rating = meta.age_rating;
+    }
+    if game.series.is_none() && meta.series.is_some() {
+        game.series = meta.series;
+    }
+    if game.links.is_empty() && !meta.links.is_empty() {
+        game.links = meta.links;
+    }
+}
+
+#[tauri::command]
+async fn scan_and_import_console_roms(
+    console_id: String,
+    state: State<'_, AppState>,
+    app_handle: AppHandle,
+) -> Result<u32, String> {
+    let conf = state.db.get_configured_console(&console_id)?
+        .ok_or_else(|| format!("Console '{}' not found", console_id))?;
+
+    let discovered = EmulatorService::scan_console_roms(
+        &conf.rom_directory,
+        &conf.id,
+        &conf.name,
+        &conf.extensions,
+    )?;
+
+    let mut existing_games = state.db.get_all_games().unwrap_or_default();
+    let now_date = chrono::Local::now().format("%Y-%m-%d").to_string();
+
+    let app_cfg = state.db.get_app_config().unwrap_or_default();
+    let igdb_creds = match (app_cfg.igdb_client_id, app_cfg.igdb_client_secret) {
+        (Some(cid), Some(sec)) if !cid.trim().is_empty() && !sec.trim().is_empty() => {
+            Some((cid.trim().to_string(), sec.trim().to_string()))
+        }
+        _ => None,
+    };
+
+    let mut added_count: u32 = 0;
+
+    for rom in discovered {
+        let norm_rom = ScoreEnrichmentEngine::normalize_title(&rom.clean_title);
+
+        let existing_by_path_idx = existing_games.iter().position(|g| {
+            g.executable_path.as_deref().unwrap_or("").eq_ignore_ascii_case(&rom.file_path)
+        });
+
+        let existing_by_title_idx = if existing_by_path_idx.is_none() {
+            existing_games.iter().position(|g| {
+                ScoreEnrichmentEngine::normalize_title(&g.title) == norm_rom
+            })
+        } else {
+            None
+        };
+
+        if let Some(idx) = existing_by_path_idx {
+            // Already in DB with this exact file path; ensure emulator and platform linkage, and enrich metadata if missing
+            let game = &mut existing_games[idx];
+            let mut modified = false;
+            if game.emulator_id.is_none() {
+                game.emulator_id = Some(conf.id.clone());
+                modified = true;
+            }
+            if !game.platforms.iter().any(|p| p.eq_ignore_ascii_case(&conf.name)) {
+                game.platforms.push(conf.name.clone());
+                modified = true;
+            }
+            if !game.is_installed {
+                game.is_installed = true;
+                modified = true;
+            }
+            if let Some((ref cid, ref csec)) = igdb_creds {
+                if game.description.is_none() || game.cover_image.is_none() || game.background_image.is_none() {
+                    if let Ok(meta) = metadata::igdb::IgdbFetcher::fetch_metadata(
+                        cid,
+                        csec,
+                        &rom.clean_title,
+                        Some(&[conf.name.clone()]),
+                    ).await {
+                        apply_igdb_meta(game, meta);
+                        modified = true;
+                    }
+                }
+            }
+            if modified {
+                let _ = state.db.upsert_game(game);
+                let _ = app_handle.emit("game-updated", &game);
+            }
+        } else if let Some(idx) = existing_by_title_idx {
+            // Merging local ROM into existing matching title (e.g. from RetroAchievements cloud sync ra_XXXX)
+            let game = &mut existing_games[idx];
+            game.executable_path = Some(rom.file_path.clone());
+            game.is_installed = true;
+            game.emulator_id = Some(conf.id.clone());
+            if game.size_on_disk.is_none() || game.size_on_disk == Some(0) {
+                game.size_on_disk = Some(rom.file_size_bytes);
+            }
+            if !game.platforms.iter().any(|p| p.eq_ignore_ascii_case(&conf.name)) {
+                game.platforms.push(conf.name.clone());
+            }
+            if game.cover_image.is_none() && rom.local_cover_path.is_some() {
+                game.cover_image = rom.local_cover_path.clone();
+            }
+
+            if let Some((ref cid, ref csec)) = igdb_creds {
+                if game.description.is_none() || game.cover_image.is_none() || game.background_image.is_none() {
+                    if let Ok(meta) = metadata::igdb::IgdbFetcher::fetch_metadata(
+                        cid,
+                        csec,
+                        &rom.clean_title,
+                        Some(&[conf.name.clone()]),
+                    ).await {
+                        apply_igdb_meta(game, meta);
+                    }
+                }
+            }
+
+            let _ = state.db.upsert_game(game);
+            let _ = app_handle.emit("game-updated", &game);
+            added_count += 1;
+        } else {
+            // New local ROM title
+            let mut new_game = Game {
+                id: format!("rom_{}_{}", chrono::Utc::now().timestamp_millis(), &rom.clean_title.chars().filter(|c| c.is_alphanumeric()).take(8).collect::<String>()),
+                title: rom.clean_title.clone(),
+                source: "Emulation".to_string(),
+                executable_path: Some(rom.file_path.clone()),
+                emulator_id: Some(conf.id.clone()),
+                platforms: vec![conf.name.clone()],
+                is_installed: true,
+                is_favorite: false,
+                size_on_disk: Some(rom.file_size_bytes),
+                date_added: Some(now_date.clone()),
+                cover_image: rom.local_cover_path.clone(),
+                completion_status: Some("Auto".to_string()),
+                ..Default::default()
+            };
+
+            // Fetch rich IGDB store metadata if credentials are configured
+            if let Some((ref cid, ref csec)) = igdb_creds {
+                if let Ok(meta) = metadata::igdb::IgdbFetcher::fetch_metadata(
+                    cid,
+                    csec,
+                    &rom.clean_title,
+                    Some(&[conf.name.clone()]),
+                ).await {
+                    apply_igdb_meta(&mut new_game, meta);
+                }
+            }
+
+            // Also check HowLongToBeat
+            if let Some(hltb) = HltbFetcher::fetch_hltb(&new_game.title).await {
+                new_game.hltb_main = Some(hltb.main_story_hours);
+                new_game.hltb_extra = Some(hltb.main_extra_hours);
+                new_game.hltb_completionist = Some(hltb.completionist_hours);
+            }
+
+            if let Ok(()) = state.db.upsert_game(&new_game) {
+                added_count += 1;
+                let _ = app_handle.emit("game-updated", &new_game);
+                existing_games.push(new_game);
+            }
+        }
+    }
+
+    Ok(added_count)
+}
+
+#[tauri::command]
+fn get_community_systems() -> Result<Option<String>, String> {
+    Ok(EmulatorService::read_community_systems())
+}
+
+#[tauri::command]
+fn save_community_systems(content: String) -> Result<(), String> {
+    EmulatorService::write_community_systems(&content)
+}
+
+#[tauri::command]
+fn open_systems_folder() -> Result<(), String> {
+    let p = EmulatorService::get_community_systems_path();
+    let target = p.parent().unwrap_or(&p);
+    let _ = std::fs::create_dir_all(target);
+    open_in_explorer(target.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn scan_retroarch_cores(retroarch_path: String) -> Result<Vec<String>, String> {
+    Ok(EmulatorService::scan_retroarch_cores(&retroarch_path))
+}
+
+#[tauri::command]
+fn scan_rom_directory(dir_path: String, state: State<'_, AppState>) -> Result<Vec<DiscoveredRom>, String> {
+    let configured = state.db.get_emulator_profiles().unwrap_or_default();
+    EmulatorService::scan_rom_directory(&dir_path, &configured)
 }
 
 #[tauri::command]
@@ -1316,14 +3107,116 @@ async fn import_playnite_backup(
     let mut updated = 0;
     let mut sources_set = std::collections::HashSet::new();
 
-    for game in games {
+    // Cache existing games once for fast, accurate matching & non-destructive preservation
+    let mut all_existing = state.db.get_all_games().unwrap_or_default();
+
+    for mut game in games {
         sources_set.insert(game.source.clone());
-        let is_existing = state.db.get_all_games().map(|all| all.iter().any(|g| g.id == game.id)).unwrap_or(false);
-        if is_existing {
+
+        // Find existing match by ID, (source, source_id), or normalized (title, source)
+        let existing_idx = all_existing.iter().position(|eg| {
+            eg.id == game.id
+                || (!eg.source.is_empty()
+                    && eg.source.eq_ignore_ascii_case(&game.source)
+                    && eg.source_id.is_some()
+                    && eg.source_id == game.source_id)
+                || (eg.title.trim().eq_ignore_ascii_case(game.title.trim())
+                    && eg.source.trim().eq_ignore_ascii_case(game.source.trim()))
+        });
+
+        if let Some(idx) = existing_idx {
+            let existing = &all_existing[idx];
             updated += 1;
+
+            // If the existing game was stored under an older ID (e.g. legacy playnite_{guid})
+            // and the imported game now has canonical native ID (or vice versa), remove the old duplicate
+            if existing.id != game.id {
+                let _ = state.db.delete_game(&existing.id);
+            }
+
+            // --- BUG 007 FIX: Selective Non-Destructive Field Preservation ---
+            // 1. Artwork preservation: If artwork was not extracted or new game has none, preserve existing artwork
+            if !options.extract_artwork || game.cover_image.is_none() {
+                if existing.cover_image.as_ref().map(|s| !s.trim().is_empty()).unwrap_or(false) {
+                    game.cover_image = existing.cover_image.clone();
+                }
+            }
+            if !options.extract_artwork || game.background_image.is_none() {
+                if existing.background_image.as_ref().map(|s| !s.trim().is_empty()).unwrap_or(false) {
+                    game.background_image = existing.background_image.clone();
+                }
+            }
+            if !options.extract_artwork || game.icon_image.is_none() {
+                if existing.icon_image.as_ref().map(|s| !s.trim().is_empty()).unwrap_or(false) {
+                    game.icon_image = existing.icon_image.clone();
+                }
+            }
+            if game.logo_image.is_none() {
+                game.logo_image = existing.logo_image.clone();
+            }
+
+            // 2. Installation preservation: Never mark an installed game uninstalled
+            if existing.is_installed && !game.is_installed {
+                game.is_installed = true;
+                if game.install_directory.is_none() {
+                    game.install_directory = existing.install_directory.clone();
+                }
+                if game.executable_path.is_none() {
+                    game.executable_path = existing.executable_path.clone();
+                }
+            }
+
+            // 3. User modifications / selective options preservation
+            if !options.import_playtime {
+                game.playtime_seconds = existing.playtime_seconds;
+                game.play_count = existing.play_count;
+            } else if existing.playtime_seconds > game.playtime_seconds {
+                // If local playtime is higher than backup, preserve higher playtime
+                game.playtime_seconds = existing.playtime_seconds;
+            }
+
+            if !options.import_last_played {
+                game.last_played = existing.last_played.clone();
+            }
+
+            if !options.import_notes {
+                game.notes = existing.notes.clone();
+            } else if game.notes.is_none() || game.notes.as_deref().unwrap_or("").trim().is_empty() {
+                game.notes = existing.notes.clone();
+            }
+
+            if !options.import_ratings {
+                game.user_rating = existing.user_rating;
+                game.community_score = existing.community_score;
+                game.critic_score = existing.critic_score;
+            }
+
+            if !options.import_tags {
+                if !existing.genres.is_empty() {
+                    game.genres = existing.genres.clone();
+                }
+                if !existing.tags.is_empty() {
+                    game.tags = existing.tags.clone();
+                }
+                if !existing.categories.is_empty() {
+                    game.categories = existing.categories.clone();
+                }
+                if !existing.features.is_empty() {
+                    game.features = existing.features.clone();
+                }
+            }
+
+            if existing.is_favorite {
+                game.is_favorite = true;
+            }
+
+            // Update in-memory cache
+            all_existing[idx] = game.clone();
         } else {
             imported += 1;
+            all_existing.push(game.clone());
         }
+
         let _ = state.db.upsert_game(&game);
         let _ = app_handle.emit("game-updated", &game);
     }
@@ -1562,6 +3455,24 @@ async fn full_refresh_library(
             }
         }
 
+        let needs_scores = game.critic_score.is_none() || game.community_score.is_none();
+        if needs_scores {
+            let scores = ScoreEnrichmentEngine::resolve_scores_for_game(
+                &game.title,
+                &game.source,
+                game.source_id.as_deref(),
+            ).await;
+
+            if game.critic_score.is_none() && scores.critic_score.is_some() {
+                game.critic_score = scores.critic_score;
+                modified = true;
+            }
+            if game.community_score.is_none() && scores.community_score.is_some() {
+                game.community_score = scores.community_score;
+                modified = true;
+            }
+        }
+
         if modified {
             let _ = state.db.upsert_game(game);
             let _ = app_handle.emit("game-updated", &game);
@@ -1697,6 +3608,62 @@ async fn sync_game_achievements(
                 }
             }
         }
+    } else if source_lower == "gog" {
+        if let Some(ref pid) = game.source_id {
+            if !pid.is_empty() {
+                let integration = state.db.get_integration("gog").unwrap_or_default();
+                let uid = integration.account_id.as_deref();
+                let tok = integration.access_token.as_deref();
+                if let Ok(achievements) = GogScanner::fetch_gog_achievements(&game_id, pid, uid, tok).await {
+                    if !achievements.is_empty() {
+                        state.db.save_game_achievements(&game_id, &achievements)?;
+                        if let Some(latest_date) = extract_latest_unlock_date(&achievements) {
+                            if game.last_played.is_none() || game.last_played.as_deref() < Some(latest_date.as_str()) {
+                                game.last_played = Some(latest_date);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    } else if source_lower == "xbox" {
+        if let Some(ref sid) = game.source_id {
+            if !sid.is_empty() {
+                let integration = state.db.get_integration("xbox").unwrap_or_default();
+                if integration.is_authenticated {
+                    if let (Some(ref xuid), Some(ref auth_header)) = (&integration.account_id, &integration.access_token) {
+                        if let Ok(achievements) = XboxScanner::fetch_xbox_achievements(&game_id, sid, xuid, auth_header).await {
+                            if !achievements.is_empty() {
+                                state.db.save_game_achievements(&game_id, &achievements)?;
+                                if let Some(latest_date) = extract_latest_unlock_date(&achievements) {
+                                    if game.last_played.is_none() || game.last_played.as_deref() < Some(latest_date.as_str()) {
+                                        game.last_played = Some(latest_date);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    } else if source_lower == "ea app" || source_lower == "ea" {
+        if let Some(ref offer_id) = game.source_id {
+            if !offer_id.is_empty() {
+                let integration = state.db.get_integration("ea").unwrap_or_default();
+                let pid = integration.account_id.as_deref().unwrap_or("");
+                let tok = integration.access_token.as_deref();
+                if let Ok(achs) = EaScanner::fetch_ea_achievements(&game.id, offer_id, pid, tok, &game.title).await {
+                    if !achs.is_empty() {
+                        let _ = state.db.save_game_achievements(&game.id, &achs);
+                        if let Some(latest_date) = extract_latest_unlock_date(&achs) {
+                            if game.last_played.is_none() || game.last_played.as_deref() < Some(latest_date.as_str()) {
+                                game.last_played = Some(latest_date);
+                            }
+                        }
+                    }
+                }
+            }
+        }
     } else if source_lower == "retroachievements" || source_lower.contains("retro") {
         let (username, api_key) = {
             let cfg = state.db.get_app_config()?;
@@ -1776,6 +3743,18 @@ async fn sync_all_achievements(
     // Ensure Epic token is fresh if authenticated
     let (epic_aid, epic_token) = ensure_fresh_epic_auth(&state.db).await;
 
+    let gog_int = state.db.get_integration("gog").unwrap_or_default();
+    let gog_uid = gog_int.account_id.clone();
+    let gog_tok = gog_int.access_token.clone();
+
+    let xbox_int = state.db.get_integration("xbox").unwrap_or_default();
+    let xbox_xuid = if xbox_int.is_authenticated { xbox_int.account_id.clone() } else { None };
+    let xbox_tok = if xbox_int.is_authenticated { xbox_int.access_token.clone() } else { None };
+
+    let ea_int = state.db.get_integration("ea").unwrap_or_default();
+    let ea_pid = ea_int.account_id.clone().unwrap_or_default();
+    let ea_tok = ea_int.access_token.clone();
+
     let semaphore = Arc::new(tokio::sync::Semaphore::new(12));
     let mut join_set = tokio::task::JoinSet::new();
 
@@ -1784,6 +3763,12 @@ async fn sync_all_achievements(
         let sid_clone = steamid64.clone();
         let eaid_clone = epic_aid.clone();
         let etok_clone = epic_token.clone();
+        let guid_clone = gog_uid.clone();
+        let gtok_clone = gog_tok.clone();
+        let xxuid_clone = xbox_xuid.clone();
+        let xtok_clone = xbox_tok.clone();
+        let epid_clone = ea_pid.clone();
+        let eatok_clone = ea_tok.clone();
 
         join_set.spawn(async move {
             let _permit = sem.acquire_owned().await.ok()?;
@@ -1805,6 +3790,37 @@ async fn sync_all_achievements(
                     &ns,
                     eaid_clone.as_deref(),
                     etok_clone.as_deref(),
+                )
+                .await
+                .ok()?;
+                Some((game, achs))
+            } else if source_lower == "gog" {
+                let pid = game.source_id.as_deref().filter(|s| !s.is_empty())?;
+                let achs = GogScanner::fetch_gog_achievements(
+                    &game.id,
+                    pid,
+                    guid_clone.as_deref(),
+                    gtok_clone.as_deref(),
+                )
+                .await
+                .ok()?;
+                Some((game, achs))
+            } else if source_lower == "xbox" {
+                let sid = game.source_id.as_deref().filter(|s| !s.is_empty())?;
+                let xuid = xxuid_clone.as_deref()?;
+                let xtok = xtok_clone.as_deref()?;
+                let achs = XboxScanner::fetch_xbox_achievements(&game.id, sid, xuid, xtok)
+                    .await
+                    .ok()?;
+                Some((game, achs))
+            } else if source_lower == "ea app" || source_lower == "ea" {
+                let oid = game.source_id.as_deref().filter(|s| !s.is_empty())?;
+                let achs = EaScanner::fetch_ea_achievements(
+                    &game.id,
+                    oid,
+                    &epid_clone,
+                    eatok_clone.as_deref(),
+                    &game.title,
                 )
                 .await
                 .ok()?;
@@ -1856,6 +3872,7 @@ async fn sync_retroachievements_core(
     let all_games = db.get_all_games()?;
     let mut game_map_by_source_id: std::collections::HashMap<String, Game> = std::collections::HashMap::new();
     let mut game_map_by_title: std::collections::HashMap<String, Game> = std::collections::HashMap::new();
+    let mut game_map_by_norm: std::collections::HashMap<String, Game> = std::collections::HashMap::new();
 
     for g in all_games {
         let src_lower = g.source.to_lowercase();
@@ -1864,7 +3881,8 @@ async fn sync_retroachievements_core(
                 game_map_by_source_id.insert(sid.clone(), g.clone());
             }
         }
-        game_map_by_title.insert(g.title.to_lowercase().trim().to_string(), g);
+        game_map_by_title.insert(g.title.to_lowercase().trim().to_string(), g.clone());
+        game_map_by_norm.insert(ScoreEnrichmentEngine::normalize_title(&g.title), g);
     }
 
     for prog in progress_list {
@@ -1879,10 +3897,13 @@ async fn sync_retroachievements_core(
 
         let game_id_str = prog.game_id.to_string();
         let title_key = detail.title.to_lowercase().trim().to_string();
+        let norm_key = ScoreEnrichmentEngine::normalize_title(&detail.title);
 
         let mut game = if let Some(existing) = game_map_by_source_id.get(&game_id_str) {
             existing.clone()
         } else if let Some(existing) = game_map_by_title.get(&title_key) {
+            existing.clone()
+        } else if let Some(existing) = game_map_by_norm.get(&norm_key) {
             existing.clone()
         } else {
             Game {
@@ -1896,6 +3917,10 @@ async fn sync_retroachievements_core(
                 ..Default::default()
             }
         };
+
+        if game.source_id.is_none() {
+            game.source_id = Some(game_id_str.clone());
+        }
 
         if let Some(ref console) = detail.console_name {
             if !game.platforms.iter().any(|p| p.eq_ignore_ascii_case(console)) {
@@ -2125,6 +4150,54 @@ async fn refresh_game_live_data(
                 }
             }
         }
+    } else if source_lower == "gog" {
+        let local_pt = GogScanner::get_local_playtimes();
+        let local_lp = GogScanner::get_local_last_played();
+        if let Some(ref pid) = game.source_id {
+            if let Some(&pt) = local_pt.get(pid) {
+                if pt > game.playtime_seconds {
+                    game.playtime_seconds = pt;
+                    game.play_count = Some(1);
+                }
+            }
+            if let Some(lp) = local_lp.get(pid) {
+                game.last_played = Some(lp.clone());
+            }
+            let integration = state.db.get_integration("gog").unwrap_or_default();
+            if integration.is_authenticated {
+                if let (Some(u), Some(id), Some(tok)) = (
+                    integration.username.as_deref(),
+                    integration.account_id.as_deref(),
+                    integration.access_token.as_deref(),
+                ) {
+                    let (cloud_pt, cloud_lp) = GogScanner::fetch_cloud_stats(u, id, tok).await;
+                    if let Some(&cpt) = cloud_pt.get(pid) {
+                        if cpt > game.playtime_seconds {
+                            game.playtime_seconds = cpt;
+                            game.play_count = Some(1);
+                        }
+                    }
+                    if let Some(clp) = cloud_lp.get(pid) {
+                        if game.last_played.is_none() {
+                            game.last_played = Some(clp.clone());
+                        }
+                    }
+                }
+            }
+        }
+    } else if source_lower == "emulation" || source_lower == "local" || source_lower.contains("retro") {
+        let (client_id, client_secret) = {
+            let cfg = state.db.get_app_config()?;
+            let c = cfg.igdb_client_id.as_deref().unwrap_or("").trim().to_string();
+            let s = cfg.igdb_client_secret.as_deref().unwrap_or("").trim().to_string();
+            (c, s)
+        };
+        if !client_id.is_empty() && !client_secret.is_empty() {
+            let hint = if !game.platforms.is_empty() { Some(game.platforms.as_slice()) } else { None };
+            if let Ok(meta) = metadata::igdb::IgdbFetcher::fetch_metadata(&client_id, &client_secret, &game.title, hint).await {
+                apply_igdb_meta(&mut game, meta);
+            }
+        }
     }
 
     // 2. Refresh Achievements
@@ -2153,6 +4226,62 @@ async fn refresh_game_live_data(
                     let _ = state.db.save_game_achievements(&game.id, &achs);
                     if let Some(latest_date) = extract_latest_unlock_date(&achs) {
                         game.last_played = Some(latest_date);
+                    }
+                }
+            }
+        }
+    } else if source_lower == "gog" {
+        if let Some(ref pid) = game.source_id {
+            if !pid.is_empty() {
+                let integration = state.db.get_integration("gog").unwrap_or_default();
+                let uid = integration.account_id.as_deref();
+                let tok = integration.access_token.as_deref();
+                if let Ok(achievements) = GogScanner::fetch_gog_achievements(&game_id, pid, uid, tok).await {
+                    if !achievements.is_empty() {
+                        state.db.save_game_achievements(&game_id, &achievements)?;
+                        if let Some(latest_date) = extract_latest_unlock_date(&achievements) {
+                            if game.last_played.is_none() || game.last_played.as_deref() < Some(latest_date.as_str()) {
+                                game.last_played = Some(latest_date);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    } else if source_lower == "xbox" {
+        if let Some(ref sid) = game.source_id {
+            if !sid.is_empty() {
+                let integration = state.db.get_integration("xbox").unwrap_or_default();
+                if integration.is_authenticated {
+                    if let (Some(ref xuid), Some(ref auth_header)) = (&integration.account_id, &integration.access_token) {
+                        if let Ok(achievements) = XboxScanner::fetch_xbox_achievements(&game_id, sid, xuid, auth_header).await {
+                            if !achievements.is_empty() {
+                                state.db.save_game_achievements(&game_id, &achievements)?;
+                                if let Some(latest_date) = extract_latest_unlock_date(&achievements) {
+                                    if game.last_played.is_none() || game.last_played.as_deref() < Some(latest_date.as_str()) {
+                                        game.last_played = Some(latest_date);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    } else if source_lower == "ea app" || source_lower == "ea" {
+        if let Some(ref offer_id) = game.source_id {
+            if !offer_id.is_empty() {
+                let integration = state.db.get_integration("ea").unwrap_or_default();
+                let pid = integration.account_id.as_deref().unwrap_or("");
+                let tok = integration.access_token.as_deref();
+                if let Ok(achs) = EaScanner::fetch_ea_achievements(&game.id, offer_id, pid, tok, &game.title).await {
+                    if !achs.is_empty() {
+                        let _ = state.db.save_game_achievements(&game.id, &achs);
+                        if let Some(latest_date) = extract_latest_unlock_date(&achs) {
+                            if game.last_played.is_none() || game.last_played.as_deref() < Some(latest_date.as_str()) {
+                                game.last_played = Some(latest_date);
+                            }
+                        }
                     }
                 }
             }
@@ -2256,6 +4385,8 @@ async fn sync_live_playtimes(
 
     let epic_playtimes = fetch_epic_playtimes_fresh(&state.db).await;
     let epic_last_played = EpicScanner::get_user_last_played();
+    let gog_playtimes = GogScanner::get_local_playtimes();
+    let gog_last_played = GogScanner::get_local_last_played();
 
     let mut updated_count = 0;
 
@@ -2273,6 +4404,22 @@ async fn sync_live_playtimes(
                     }
                     if lp.is_some() && *lp != game.last_played {
                         game.last_played = lp.clone();
+                        changed = true;
+                    }
+                }
+            }
+        } else if source_lower == "gog" {
+            if let Some(ref pid) = game.source_id {
+                if let Some(&pt) = gog_playtimes.get(pid) {
+                    if pt > 0 && pt != game.playtime_seconds {
+                        game.playtime_seconds = pt;
+                        game.play_count = Some(1);
+                        changed = true;
+                    }
+                }
+                if let Some(lp) = gog_last_played.get(pid) {
+                    if game.last_played.as_deref() != Some(lp.as_str()) {
+                        game.last_played = Some(lp.clone());
                         changed = true;
                     }
                 }
@@ -2351,8 +4498,8 @@ async fn warmup_active_achievements(
         .into_iter()
         .filter(|g| {
             let src = g.source.to_lowercase();
-            (src == "steam" || src == "epic")
-                && (g.is_installed || g.playtime_seconds > 0)
+            (src == "steam" || src == "epic" || src == "gog" || src == "xbox" || src == "ea app" || src == "ea")
+                && (g.is_installed || g.playtime_seconds > 0 || g.last_played.is_some())
                 && !checked_set.contains(&g.id)
         })
         .filter(|g| {
@@ -2391,6 +4538,18 @@ async fn warmup_active_achievements(
         None
     };
 
+    let gog_int = state.db.get_integration("gog").unwrap_or_default();
+    let gog_uid = gog_int.account_id;
+    let gog_tok = gog_int.access_token;
+
+    let xbox_int = state.db.get_integration("xbox").unwrap_or_default();
+    let xbox_xuid = if xbox_int.is_authenticated { xbox_int.account_id } else { None };
+    let xbox_tok = if xbox_int.is_authenticated { xbox_int.access_token } else { None };
+
+    let ea_int = state.db.get_integration("ea").unwrap_or_default();
+    let ea_pid = ea_int.account_id.unwrap_or_default();
+    let ea_tok = ea_int.access_token;
+
     let semaphore = Arc::new(tokio::sync::Semaphore::new(6));
     let mut join_set = tokio::task::JoinSet::new();
 
@@ -2399,6 +4558,12 @@ async fn warmup_active_achievements(
         let sid_clone = steamid64.clone();
         let eaid_clone = epic_aid.clone();
         let etok_clone = epic_token.clone();
+        let guid_clone = gog_uid.clone();
+        let gtok_clone = gog_tok.clone();
+        let xxuid_clone = xbox_xuid.clone();
+        let xtok_clone = xbox_tok.clone();
+        let epid_clone = ea_pid.clone();
+        let eatok_clone = ea_tok.clone();
 
         join_set.spawn(async move {
             let _permit = sem.acquire_owned().await.ok()?;
@@ -2420,6 +4585,37 @@ async fn warmup_active_achievements(
                     &ns,
                     eaid_clone.as_deref(),
                     etok_clone.as_deref(),
+                )
+                .await
+                .ok()?;
+                Some((game, achs))
+            } else if src == "gog" {
+                let pid = game.source_id.as_deref().filter(|s| !s.is_empty())?;
+                let achs = GogScanner::fetch_gog_achievements(
+                    &game.id,
+                    pid,
+                    guid_clone.as_deref(),
+                    gtok_clone.as_deref(),
+                )
+                .await
+                .ok()?;
+                Some((game, achs))
+            } else if src == "xbox" {
+                let sid = game.source_id.as_deref().filter(|s| !s.is_empty())?;
+                let xuid = xxuid_clone.as_deref()?;
+                let xtok = xtok_clone.as_deref()?;
+                let achs = XboxScanner::fetch_xbox_achievements(&game.id, sid, xuid, xtok)
+                    .await
+                    .ok()?;
+                Some((game, achs))
+            } else if src == "ea app" || src == "ea" {
+                let oid = game.source_id.as_deref().filter(|s| !s.is_empty())?;
+                let achs = EaScanner::fetch_ea_achievements(
+                    &game.id,
+                    oid,
+                    &epid_clone,
+                    eatok_clone.as_deref(),
+                    &game.title,
                 )
                 .await
                 .ok()?;
@@ -2589,41 +4785,137 @@ async fn optimize_animated_artwork(
     Ok(upgraded_games)
 }
 
+#[tauri::command]
+fn get_autostart_status() -> Result<bool, String> {
+    Ok(AutostartManager::is_enabled())
+}
+
+#[tauri::command]
+fn set_autostart(enabled: bool) -> Result<(), String> {
+    AutostartManager::set_enabled(enabled)
+}
+
+#[tauri::command]
+async fn enrich_missing_scores(
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<usize, String> {
+    let mut all = state.db.get_all_games().map_err(|e| e.to_string())?;
+    let mut updated_count = 0;
+    for game in &mut all {
+        if game.critic_score.is_none() || game.community_score.is_none() {
+            let scores = ScoreEnrichmentEngine::resolve_scores_for_game(
+                &game.title,
+                &game.source,
+                game.source_id.as_deref(),
+            ).await;
+            let mut changed = false;
+            if game.critic_score.is_none() && scores.critic_score.is_some() {
+                game.critic_score = scores.critic_score;
+                changed = true;
+            }
+            if game.community_score.is_none() && scores.community_score.is_some() {
+                game.community_score = scores.community_score;
+                changed = true;
+            }
+            if changed {
+                let _ = state.db.save_game_exact(game);
+                let _ = app_handle.emit("game-updated", &*game);
+                updated_count += 1;
+            }
+        }
+    }
+    Ok(updated_count)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let database = Arc::new(Database::new().expect("Failed to initialize OpenPlay SQLite database"));
+    let db_for_setup = database.clone();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(AppState { db: database })
-        .setup(|app| {
+        .setup(move |app| {
             if let Some(window) = app.get_webview_window("main") {
                 if let Some(icon) = app.default_window_icon() {
                     let _ = window.set_icon(icon.clone());
                 }
                 let win_clone = window.clone();
-                // Ensure the window starts inside valid screen bounds
+                // Ensure the window starts inside valid screen bounds (only if not minimized)
                 if let Ok(pos) = window.outer_position() {
-                    if pos.x < -10000 || pos.y < -10000 {
+                    let is_minimized = window.is_minimized().unwrap_or(false);
+                    if !is_minimized && (pos.x < -10000 || pos.y < -10000) {
                         let _ = window.center();
                     }
                 }
                 // Safeguard against sudden off-screen cursor drops during dragging
                 window.on_window_event(move |event| {
                     if let tauri::WindowEvent::Moved(pos) = event {
+                        // On Windows, minimized windows are parked at (-32000, -32000).
+                        // Calling center() while minimized corrupts Win32 placement and
+                        // prevents the taskbar icon from restoring the window!
+                        if win_clone.is_minimized().unwrap_or(false) {
+                            return;
+                        }
                         if pos.x < -10000 || pos.y < -10000 {
                             let _ = win_clone.center();
                         }
                     }
                 });
             }
+
+            let app_handle_bg = app.handle().clone();
+            let db_bg = db_for_setup.clone();
+
+            tauri::async_runtime::spawn(async move {
+                // 1. Initial 5-second grace period so the UI window displays instantly
+                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+
+                // 2. Check if startup sync is enabled in config
+                if let Ok(cfg) = db_bg.get_app_config() {
+                    let should_sync = cfg.sync_on_startup.unwrap_or(true);
+                    if should_sync {
+                        eprintln!("[BackgroundSync] Running startup library sync across connected providers...");
+                        let _ = sync_all_libraries_core(&app_handle_bg, &db_bg, false).await;
+                    }
+                }
+
+                // 3. Periodic playtime & recency loop (polls every 10 minutes)
+                let mut last_periodic_sync = std::time::Instant::now();
+                loop {
+                    tokio::time::sleep(tokio::time::Duration::from_secs(600)).await;
+
+                    if let Ok(cfg) = db_bg.get_app_config() {
+                        let interval_hours = cfg.periodic_playtime_sync_hours.unwrap_or(0);
+                        if interval_hours > 0 {
+                            let required_secs = (interval_hours as u64) * 3600;
+                            if last_periodic_sync.elapsed().as_secs() >= required_secs {
+                                // Gaming-aware check: don't sync if user is currently playing
+                                let running = GameLauncher::get_running_games(Some(&app_handle_bg), Some(&db_bg));
+                                if !running.is_empty() {
+                                    eprintln!("[BackgroundSync] Periodic sync deferred: active game running ({:?})", running);
+                                    continue;
+                                }
+
+                                eprintln!("[BackgroundSync] Executing periodic background playtime sync ({}h interval)...", interval_hours);
+                                let _ = sync_all_libraries_core(&app_handle_bg, &db_bg, true).await;
+                                last_periodic_sync = std::time::Instant::now();
+                            }
+                        }
+                    }
+                }
+            });
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             get_games,
+            get_all_games,
             scan_steam_library,
             fetch_game_metadata,
             get_steam_current_players,
+            get_game_current_players,
             get_steam_news,
             get_store_trailers,
             get_game_hltb,
@@ -2651,7 +4943,9 @@ pub fn run() {
             save_game,
             delete_game,
             toggle_favorite,
+            set_game_favorite,
             launch_game,
+            install_game,
             stop_game,
             get_running_games,
             select_file,
@@ -2680,7 +4974,40 @@ pub fn run() {
             check_for_app_updates,
             download_app_update,
             apply_update_and_restart,
-            optimize_animated_artwork
+            optimize_animated_artwork,
+            get_autostart_status,
+            set_autostart,
+            enrich_missing_scores,
+            get_emulator_profiles,
+            save_emulator_profile,
+            delete_emulator_profile,
+            get_configured_consoles,
+            save_configured_console,
+            delete_configured_console,
+            scan_console_roms,
+            scan_and_import_console_roms,
+            get_community_systems,
+            save_community_systems,
+            open_systems_folder,
+            scan_retroarch_cores,
+            scan_rom_directory,
+            get_provider_integration,
+            save_provider_integration,
+            logout_provider,
+            open_gog_login_window,
+            authenticate_gog_code,
+            open_xbox_login_window,
+            authenticate_xbox_token,
+            open_battlenet_login_window,
+            authenticate_battlenet_payload,
+            open_ea_login_window,
+            authenticate_ea_token,
+            open_ubisoft_login_window,
+            authenticate_ubisoft_ticket,
+            open_amazon_login_window,
+            authenticate_amazon_code,
+            scan_provider_library,
+            sync_all_libraries
         ])
         .run(tauri::generate_context!())
         .expect("error while running OpenPlay application");

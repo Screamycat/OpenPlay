@@ -172,13 +172,13 @@ export const LeftDrawer: React.FC<LeftDrawerProps> = ({
                     onClose();
                     onRefreshAll();
                   }}
-                  className="w-full text-left p-2.5 rounded-xl bg-purple-500/15 hover:bg-purple-500/25 border border-purple-500/30 hover:border-purple-500/50 transition-all group flex items-start space-x-2.5 cursor-pointer"
+                  className="w-full text-left p-2.5 rounded-xl theme-accent-subtle-bg border border-[var(--app-accent-color)]/30 hover:border-[var(--app-accent-color)]/50 transition-all group flex items-start space-x-2.5 cursor-pointer"
                 >
-                  <Sparkles className="w-4 h-4 text-purple-400 group-hover:text-purple-300 mt-0.5 shrink-0 transition-colors" />
+                  <Sparkles className="w-4 h-4 theme-accent-text group-hover:opacity-90 mt-0.5 shrink-0 transition-colors" />
                   <div>
-                    <div className="font-semibold text-xs text-purple-200 group-hover:text-white flex items-center space-x-1.5">
+                    <div className="font-semibold text-xs text-zinc-100 group-hover:text-white flex items-center space-x-1.5">
                       <span>Refresh All</span>
-                      <span className="text-[9px] px-1.5 py-0.2 rounded bg-purple-500/30 text-purple-200 font-mono font-bold">ALL</span>
+                      <span className="text-[9px] px-1.5 py-0.2 rounded theme-accent-pill font-mono font-bold">ALL</span>
                     </div>
                     <div className="text-[10px] text-zinc-400 leading-tight mt-0.5">
                       Refreshes all libraries and updates missing metadata across your collection
@@ -276,7 +276,7 @@ export const LeftDrawer: React.FC<LeftDrawerProps> = ({
                     className="w-full text-left px-2.5 py-2 rounded-xl hover:bg-white/10 transition-colors flex items-center justify-between text-xs text-zinc-300 hover:text-white cursor-pointer group border border-transparent hover:border-white/10"
                   >
                     <div className="flex items-center space-x-2.5">
-                      <span className="w-4 h-4 rounded bg-purple-900/60 text-purple-300 font-mono text-[9px] flex items-center justify-center font-bold border border-purple-500/30">
+                      <span className="w-4 h-4 rounded theme-accent-subtle-bg theme-accent-text font-mono text-[9px] flex items-center justify-center font-bold border border-[var(--app-accent-color)]/30">
                         E
                       </span>
                       <span className="font-medium">Epic Games</span>

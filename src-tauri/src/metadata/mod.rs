@@ -4,4 +4,5 @@ pub mod steamgriddb;
 pub mod epic;
 pub mod igdb;
 pub mod retroachievements;
+pub mod scores;
 

@@ -216,7 +216,7 @@ export const SteamGridDBModal: React.FC<SteamGridDBModalProps> = ({
         {/* Modal Header */}
         <div className="h-14 px-6 border-b border-white/10 flex items-center justify-between bg-white/[0.02] shrink-0">
           <div className="flex items-center space-x-2.5">
-            <Sparkles className="w-5 h-5 text-cyan-400" />
+            <Sparkles className="w-5 h-5 theme-accent-text" />
             <div>
               <h2 className="text-sm font-bold text-slate-100 flex items-center space-x-2">
                 <span>SteamGridDB Artwork</span>
@@ -237,7 +237,7 @@ export const SteamGridDBModal: React.FC<SteamGridDBModalProps> = ({
         {!hasApiKey ? (
           /* API Key Prompt */
           <div className="flex-1 p-8 flex flex-col items-center justify-center text-center max-w-md mx-auto space-y-4">
-            <div className="p-3 bg-cyan-500/10 rounded-2xl border border-cyan-500/20 text-cyan-400">
+            <div className="p-3 theme-accent-subtle-bg rounded-2xl border theme-accent-subtle-border theme-accent-text">
               <Key className="w-8 h-8" />
             </div>
             <div>
@@ -255,14 +255,14 @@ export const SteamGridDBModal: React.FC<SteamGridDBModalProps> = ({
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
                 placeholder="Paste SteamGridDB API Key..."
-                className="w-full px-3.5 py-2.5 bg-[#161a29] border border-[#2b334d] rounded-xl text-xs text-white focus:outline-none focus:border-cyan-400 font-mono"
+                className="w-full px-3.5 py-2.5 bg-[#161a29] border border-[#2b334d] rounded-xl text-xs text-white focus:outline-none theme-accent-focus font-mono"
               />
 
               <div className="flex items-center justify-between pt-1">
                 <button
                   type="button"
                   onClick={() => openUrl("https://www.steamgriddb.com/profile/preferences/api")}
-                  className="text-[11px] text-cyan-400 hover:text-cyan-300 flex items-center space-x-1 underline cursor-pointer"
+                  className="text-[11px] theme-accent-text hover:brightness-110 flex items-center space-x-1 underline cursor-pointer"
                 >
                   <span>Get a free key here</span>
                   <ExternalLink className="w-3 h-3" />
@@ -270,7 +270,7 @@ export const SteamGridDBModal: React.FC<SteamGridDBModalProps> = ({
 
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-bold rounded-xl text-xs transition-all shadow-md cursor-pointer"
+                  className="px-4 py-2 theme-accent-btn font-bold rounded-xl text-xs transition-all shadow-md cursor-pointer"
                 >
                   Save & Connect
                 </button>
@@ -287,7 +287,7 @@ export const SteamGridDBModal: React.FC<SteamGridDBModalProps> = ({
                   onClick={() => setAssetType("grids")}
                   className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                     assetType === "grids"
-                      ? "bg-cyan-600 text-slate-950 font-bold"
+                      ? "theme-accent-btn font-bold"
                       : "text-slate-400 hover:text-slate-200"
                   }`}
                 >
@@ -298,7 +298,7 @@ export const SteamGridDBModal: React.FC<SteamGridDBModalProps> = ({
                   onClick={() => setAssetType("heroes")}
                   className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                     assetType === "heroes"
-                      ? "bg-cyan-600 text-slate-950 font-bold"
+                      ? "theme-accent-btn font-bold"
                       : "text-slate-400 hover:text-slate-200"
                   }`}
                 >
@@ -309,7 +309,7 @@ export const SteamGridDBModal: React.FC<SteamGridDBModalProps> = ({
                   onClick={() => setAssetType("logos")}
                   className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                     assetType === "logos"
-                      ? "bg-cyan-600 text-slate-950 font-bold"
+                      ? "theme-accent-btn font-bold"
                       : "text-slate-400 hover:text-slate-200"
                   }`}
                 >
@@ -320,7 +320,7 @@ export const SteamGridDBModal: React.FC<SteamGridDBModalProps> = ({
                   onClick={() => setAssetType("icons")}
                   className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                     assetType === "icons"
-                      ? "bg-cyan-600 text-slate-950 font-bold"
+                      ? "theme-accent-btn font-bold"
                       : "text-slate-400 hover:text-slate-200"
                   }`}
                 >
@@ -343,7 +343,7 @@ export const SteamGridDBModal: React.FC<SteamGridDBModalProps> = ({
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder="Search SteamGridDB..."
-                    className="w-full pl-8 pr-3 py-1.5 bg-[#141825] border border-[#242b3e] focus:border-cyan-500/60 rounded-xl text-xs text-slate-200 placeholder-slate-500 focus:outline-none"
+                    className="w-full pl-8 pr-3 py-1.5 bg-[#141825] border border-[#242b3e] focus:border-[var(--app-accent-color)] rounded-xl text-xs text-slate-200 placeholder-slate-500 focus:outline-none"
                   />
                 </form>
 
@@ -365,7 +365,7 @@ export const SteamGridDBModal: React.FC<SteamGridDBModalProps> = ({
             <div className="flex-1 overflow-y-auto p-6">
               {isLoading ? (
                 <div className="h-full flex flex-col items-center justify-center space-y-2 text-slate-400">
-                  <Loader2 className="w-8 h-8 text-cyan-400 animate-spin" />
+                  <Loader2 className="w-8 h-8 theme-accent-text animate-spin" />
                   <span className="text-xs">Searching SteamGridDB...</span>
                 </div>
               ) : errorMsg ? (
@@ -373,7 +373,7 @@ export const SteamGridDBModal: React.FC<SteamGridDBModalProps> = ({
                   <p className="text-xs text-rose-400">{errorMsg}</p>
                   <button
                     onClick={() => setHasApiKey(false)}
-                    className="text-xs text-cyan-400 underline cursor-pointer"
+                    className="text-xs theme-accent-text underline cursor-pointer"
                   >
                     Change API Key
                   </button>
@@ -393,7 +393,7 @@ export const SteamGridDBModal: React.FC<SteamGridDBModalProps> = ({
                     return (
                       <div
                         key={asset.id}
-                        className="group relative rounded-xl overflow-hidden border border-[#23293e] hover:border-cyan-400/80 bg-[#141826] flex flex-col transition-all hover:scale-[1.02] shadow-md"
+                        className="group relative rounded-xl overflow-hidden border border-[#23293e] hover:border-[var(--app-accent-color)] bg-[#141826] flex flex-col transition-all hover:scale-[1.02] shadow-md"
                       >
                         <div
                           className={`relative ${getAspectClass()} overflow-hidden bg-black/40 flex items-center justify-center`}
@@ -466,7 +466,7 @@ export const SteamGridDBModal: React.FC<SteamGridDBModalProps> = ({
                               className={`px-4 py-2 font-bold rounded-lg text-xs transition-all flex items-center justify-center space-x-1.5 shadow-lg cursor-pointer disabled:opacity-50 ${
                                 recentlyAppliedUrl === asset.url || recentlyAppliedUrl === asset.thumb
                                   ? "bg-emerald-500 hover:bg-emerald-400 text-slate-950"
-                                  : "bg-cyan-600 hover:bg-cyan-500 text-slate-950"
+                                  : "theme-accent-btn"
                               }`}
                             >
                               {applyingUrl === asset.url ? (

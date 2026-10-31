@@ -4,6 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { Game } from "../types/game";
 import { GameAchievementSummary } from "../types/achievement";
 import { Trophy, Lock, ChevronRight, Loader2 } from "lucide-react";
+import { formatUnlockDate } from "../utils/date";
 
 const sessionCheckedGames = new Set<string>();
 
@@ -20,7 +21,14 @@ export const AchievementsQuickWidget: React.FC<AchievementsQuickWidgetProps> = (
   const [isLoading, setIsLoading] = useState(false);
 
   const srcLower = game.source.toLowerCase();
-  const supportsAchievements = srcLower === "steam" || srcLower === "epic";
+  const supportsAchievements =
+    (srcLower === "steam" && !!game.source_id) ||
+    (srcLower === "epic" && (!!game.source_id || !!game.notes?.includes("namespace:"))) ||
+    (srcLower === "gog" && !!game.source_id) ||
+    (srcLower === "xbox" && !!game.source_id) ||
+    ((srcLower === "ea app" || srcLower === "ea") && !!game.source_id) ||
+    srcLower.includes("retro") ||
+    game.id.startsWith("ra_");
 
   useEffect(() => {
     let isMounted = true;
@@ -173,7 +181,7 @@ export const AchievementsQuickWidget: React.FC<AchievementsQuickWidgetProps> = (
               </div>
               {latest_unlocked.unlock_time && (
                 <div className="text-[10px] text-zinc-400 shrink-0 font-mono">
-                  {latest_unlocked.unlock_time}
+                  {formatUnlockDate(latest_unlocked.unlock_time, true)}
                 </div>
               )}
             </div>

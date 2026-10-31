@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Achievement } from "../types/achievement";
+import { formatUnlockDate } from "../utils/date";
 import {
   CheckCircle2,
   Lock,
@@ -177,7 +178,7 @@ export const AchievementDetailModal: React.FC<AchievementDetailModalProps> = ({
                   <span className="text-emerald-400 bg-emerald-500/10 border border-emerald-500/25 px-2.5 py-0.5 rounded-full flex items-center space-x-1">
                     <CheckCircle2 className="w-3 h-3" />
                     <span>
-                      Unlocked {achievement.unlock_time ? `• ${achievement.unlock_time}` : ""}
+                      Unlocked {achievement.unlock_time ? `• ${formatUnlockDate(achievement.unlock_time)}` : ""}
                     </span>
                   </span>
                 ) : (
@@ -245,10 +246,10 @@ export const AchievementDetailModal: React.FC<AchievementDetailModalProps> = ({
                 </span>
               </div>
               <div className="text-lg font-black text-white font-mono">
-                {achievement.rarity_percentage}%
+                {achievement.rarity_percentage > 0 ? `${achievement.rarity_percentage}%` : "Common"}
               </div>
               <div className="text-[10px] text-zinc-400">
-                of all Steam players
+                {achievement.rarity_percentage > 0 ? "Global unlock rate" : "Standard achievement tier"}
               </div>
             </div>
 

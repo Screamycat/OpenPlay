@@ -36,6 +36,9 @@ export interface GameContextMenuProps {
   isRefreshing?: boolean;
   onOpenEdit: (game: Game) => void;
   onRemoveGame?: (game: Game) => void;
+  onUnmerge?: (game: Game) => void;
+  onMerge?: (game: Game, candidate: Game) => void;
+  mergeCandidate?: Game;
 }
 
 export const GameContextMenu: React.FC<GameContextMenuProps> = ({
@@ -54,6 +57,9 @@ export const GameContextMenu: React.FC<GameContextMenuProps> = ({
   onOpenEdit,
   onRemoveGame,
   onToggleHide,
+  onUnmerge,
+  onMerge,
+  mergeCandidate,
 }) => {
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -78,18 +84,27 @@ export const GameContextMenu: React.FC<GameContextMenuProps> = ({
       }
     };
 
-    const handleScroll = () => {
+    const handleScroll = (e: Event) => {
+      // Do not close if scrolling inside the menu itself
+      if (menuRef.current && menuRef.current.contains(e.target as Node)) {
+        return;
+      }
       onClose();
     };
 
     window.addEventListener("keydown", handleKeyDown);
-    const timer = setTimeout(() => {
+    const mouseTimer = window.setTimeout(() => {
       window.addEventListener("mousedown", handleMouseDown);
-    }, 30);
-    window.addEventListener("scroll", handleScroll, true);
+    }, 120);
+
+    // Defer attaching scroll listener so initial selection and layout adjustments do not prematurely dismiss the menu
+    const scrollTimer = window.setTimeout(() => {
+      window.addEventListener("scroll", handleScroll, true);
+    }, 150);
 
     return () => {
-      clearTimeout(timer);
+      window.clearTimeout(mouseTimer);
+      window.clearTimeout(scrollTimer);
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("mousedown", handleMouseDown);
       window.removeEventListener("scroll", handleScroll, true);
@@ -161,7 +176,7 @@ export const GameContextMenu: React.FC<GameContextMenuProps> = ({
                 className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-left text-zinc-300 hover:text-white hover:bg-white/[0.08] transition-colors cursor-pointer"
               >
                 <div className="flex items-center space-x-2.5">
-                  <Layers className="w-4 h-4 text-purple-400 shrink-0" />
+                  <Layers className="w-4 h-4 theme-accent-text shrink-0" />
                   <span className="font-medium">Play Actions</span>
                 </div>
                 <ChevronRight className="w-3.5 h-3.5 text-zinc-400" />
@@ -183,11 +198,11 @@ export const GameContextMenu: React.FC<GameContextMenuProps> = ({
                       className="w-full flex items-center justify-between px-2.5 py-2 rounded-xl text-left text-zinc-200 hover:text-white hover:bg-white/10 transition-colors cursor-pointer group"
                     >
                       <div className="flex items-center space-x-2 truncate pr-2">
-                        <Play className="w-3.5 h-3.5 text-purple-400 shrink-0 group-hover:fill-purple-400" />
+                        <Play className="w-3.5 h-3.5 theme-accent-text shrink-0 group-hover:fill-[var(--app-accent-color)]" />
                         <span className="truncate font-semibold">{act.name}</span>
                       </div>
                       {act.is_primary && (
-                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 font-mono shrink-0">
+                        <span className="text-[9px] px-1.5 py-0.5 rounded theme-accent-pill font-mono shrink-0">
                           Primary
                         </span>
                       )}
@@ -215,9 +230,9 @@ export const GameContextMenu: React.FC<GameContextMenuProps> = ({
             onClose();
             if (onLaunch) onLaunch(game);
           }}
-          className="w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl text-left text-cyan-300 hover:text-white hover:bg-cyan-500/20 transition-colors cursor-pointer"
+          className="w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl text-left theme-accent-text hover:text-white hover:bg-[var(--app-accent-color)]/20 transition-colors cursor-pointer"
         >
-          <Download className="w-4 h-4 text-cyan-400 shrink-0" />
+          <Download className="w-4 h-4 theme-accent-text shrink-0" />
           <span className="font-bold">Install</span>
         </button>
       )}
@@ -226,21 +241,23 @@ export const GameContextMenu: React.FC<GameContextMenuProps> = ({
 
       {/* Manage Trailers */}
       <button
-        onClick={() => {
-          onClose();
+        onClick={(e) => {
+          e.stopPropagation();
           onOpenTrailers(game);
+          onClose();
         }}
         className="w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl text-left text-zinc-200 hover:text-white hover:bg-white/[0.08] transition-colors cursor-pointer"
       >
-        <Film className="w-4 h-4 text-cyan-400 shrink-0" />
+        <Film className="w-4 h-4 theme-accent-text shrink-0" />
         <span>{trailers.length > 0 ? "Manage Trailers" : "Add Trailer"}</span>
       </button>
 
       {/* Favorites Toggle */}
       <button
-        onClick={() => {
-          onClose();
+        onClick={(e) => {
+          e.stopPropagation();
           onToggleFavorite(game.id);
+          onClose();
         }}
         className="w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl text-left text-zinc-200 hover:text-white hover:bg-white/[0.08] transition-colors cursor-pointer"
       >
@@ -255,9 +272,10 @@ export const GameContextMenu: React.FC<GameContextMenuProps> = ({
       {/* Refresh Live Data (HLTB, Achievements, Store Playtime & Stats) */}
       {onRefreshGame && (
         <button
-          onClick={() => {
-            onClose();
+          onClick={(e) => {
+            e.stopPropagation();
             onRefreshGame(game.id);
+            onClose();
           }}
           disabled={isRefreshing}
           title="Refresh HLTB, achievements, playtime, and live store stats"
@@ -276,9 +294,10 @@ export const GameContextMenu: React.FC<GameContextMenuProps> = ({
 
       {/* Game Properties */}
       <button
-        onClick={() => {
-          onClose();
+        onClick={(e) => {
+          e.stopPropagation();
           onOpenEdit(game);
+          onClose();
         }}
         className="w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl text-left text-zinc-200 hover:text-white hover:bg-white/[0.08] transition-colors cursor-pointer"
       >
@@ -289,15 +308,16 @@ export const GameContextMenu: React.FC<GameContextMenuProps> = ({
       {/* Hide / Unhide Game */}
       {onToggleHide && (
         <button
-          onClick={() => {
-            onClose();
+          onClick={(e) => {
+            e.stopPropagation();
             onToggleHide(game);
+            onClose();
           }}
           className="w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl text-left text-zinc-200 hover:text-white hover:bg-white/[0.08] transition-colors cursor-pointer"
         >
           {game.is_hidden ? (
             <>
-              <Eye className="w-4 h-4 text-purple-400 shrink-0" />
+              <Eye className="w-4 h-4 theme-accent-text shrink-0" />
               <span>Unhide Game</span>
             </>
           ) : (
@@ -309,12 +329,42 @@ export const GameContextMenu: React.FC<GameContextMenuProps> = ({
         </button>
       )}
 
+      {/* Duplicate Merging & Unmerging */}
+      {game.sibling_games && game.sibling_games.length > 0 && onUnmerge && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onUnmerge(game);
+            onClose();
+          }}
+          className="w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl text-left text-zinc-200 hover:text-white hover:bg-white/[0.08] transition-colors cursor-pointer"
+        >
+          <Layers className="w-4 h-4 text-amber-400 shrink-0" />
+          <span>Unmerge Platforms ({game.sibling_games.length + 1})</span>
+        </button>
+      )}
+
+      {mergeCandidate && onMerge && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onMerge(game, mergeCandidate);
+            onClose();
+          }}
+          className="w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl text-left text-zinc-200 hover:text-white hover:bg-white/[0.08] transition-colors cursor-pointer"
+        >
+          <Layers className="w-4 h-4 theme-accent-text shrink-0" />
+          <span>Merge with {mergeCandidate.source} copy</span>
+        </button>
+      )}
+
       {/* Open Game Folder */}
       {folderPath && (
         <button
-          onClick={() => {
-            onClose();
+          onClick={(e) => {
+            e.stopPropagation();
             handleOpenFolder(folderPath);
+            onClose();
           }}
           className="w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl text-left text-zinc-200 hover:text-white hover:bg-white/[0.08] transition-colors cursor-pointer"
         >
@@ -333,9 +383,10 @@ export const GameContextMenu: React.FC<GameContextMenuProps> = ({
           <>
             <div className="my-1 border-t border-white/[0.08]" />
             <button
-              onClick={() => {
-                onClose();
+              onClick={(e) => {
+                e.stopPropagation();
                 onRemoveGame(game);
+                onClose();
               }}
               className="w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl text-left text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors cursor-pointer"
             >

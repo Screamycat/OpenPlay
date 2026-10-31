@@ -17,8 +17,11 @@ export interface AppConfig {
 
   // General App Behavior
   auto_scan_on_startup?: boolean;
+  launch_on_startup?: boolean;
   minimize_on_game_launch?: boolean;
   close_to_tray?: boolean;
+  merge_duplicates?: boolean;
+  unmerged_game_ids?: string[];
 
   // Appearance
   theme?: "dark" | "oled" | "midnight";
@@ -38,6 +41,10 @@ export interface AppConfig {
   retroachievements_api_key?: string;
   igdb_client_id?: string;
   igdb_client_secret?: string;
+
+  // Background Library Sync
+  sync_on_startup?: boolean;
+  periodic_playtime_sync_hours?: number;
 }
 
 export const DEFAULT_APP_CONFIG: AppConfig = {
@@ -53,8 +60,13 @@ export const DEFAULT_APP_CONFIG: AppConfig = {
   selected_developers: [],
   selected_sources: [],
   auto_scan_on_startup: true,
+  sync_on_startup: true,
+  periodic_playtime_sync_hours: 0,
+  launch_on_startup: false,
   minimize_on_game_launch: false,
   close_to_tray: false,
+  merge_duplicates: true,
+  unmerged_game_ids: [],
   theme: "dark",
   background_blur: 32,
   background_opacity: 0.75,

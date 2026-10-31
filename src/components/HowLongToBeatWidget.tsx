@@ -38,7 +38,7 @@ export const HowLongToBeatWidget: React.FC<HowLongToBeatWidgetProps> = ({
           <span>HOW LONG TO BEAT</span>
         </h3>
         {isLoading && (
-          <span className="text-[10px] text-cyan-400 animate-pulse flex items-center space-x-1">
+          <span className="text-[10px] theme-accent-text animate-pulse flex items-center space-x-1">
             <Clock className="w-3 h-3 animate-spin" />
             <span>Fetching...</span>
           </span>

@@ -11,6 +11,21 @@ export function isVideoSrc(pathOrUrl?: string): boolean {
   );
 }
 
+export function getStaticFallbackCover(pathOrUrl?: string): string | undefined {
+  if (!pathOrUrl) return undefined;
+  if (!isVideoSrc(pathOrUrl)) return resolveImageSrc(pathOrUrl);
+
+  const resolved = resolveImageSrc(pathOrUrl);
+  if (!resolved) return undefined;
+
+  // If SteamGridDB webm thumb, fallback to png thumb or jpg thumb
+  if (resolved.includes("steamgriddb.com")) {
+    return resolved.replace(/\.webm$/i, ".png");
+  }
+
+  return resolved.replace(/\.(webm|mp4|m4v|ogg)$/i, ".jpg");
+}
+
 export function resolveImageSrc(pathOrUrl?: string): string | undefined {
   if (!pathOrUrl) return undefined;
   if (

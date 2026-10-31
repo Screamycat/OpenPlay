@@ -25,6 +25,7 @@ pub struct GameAction {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
 pub struct Game {
     pub id: String,
     pub title: String,
@@ -80,4 +81,6 @@ pub struct Game {
     pub auto_beaten: bool,
     #[serde(default)]
     pub beaten_prompt_playtime: Option<u64>,
+    #[serde(default)]
+    pub emulator_id: Option<String>,
 }

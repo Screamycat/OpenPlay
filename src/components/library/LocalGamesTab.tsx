@@ -151,7 +151,7 @@ export const LocalGamesTab: React.FC<LocalGamesTabProps> = ({
       {/* Title & Introduction */}
       <div>
         <h3 className="text-lg font-bold text-white flex items-center space-x-2">
-          <span className="p-1.5 rounded-xl bg-cyan-500/20 text-cyan-400 border border-cyan-500/30">
+          <span className="p-1.5 rounded-xl theme-accent-subtle-bg theme-accent-text border theme-accent-subtle-border">
             <HardDrive className="w-4 h-4" />
           </span>
           <span>Local Games & Executables</span>
@@ -168,13 +168,13 @@ export const LocalGamesTab: React.FC<LocalGamesTabProps> = ({
           type="button"
           disabled={isScanning}
           onClick={handleSelectSingleExe}
-          className="p-4 rounded-xl bg-[#12141f] border border-white/10 hover:border-cyan-500/40 hover:bg-cyan-500/10 text-left transition-all cursor-pointer group flex flex-col justify-between space-y-3"
+          className="p-4 rounded-xl bg-[#12141f] border border-white/10 hover:border-[var(--app-accent-color)] hover:bg-white/[0.04] text-left transition-all cursor-pointer group flex flex-col justify-between space-y-3"
         >
-          <div className="p-2 rounded-lg bg-white/5 border border-white/10 text-cyan-400 group-hover:scale-105 transition-transform w-fit">
+          <div className="p-2 rounded-lg bg-white/5 border border-white/10 theme-accent-text group-hover:scale-105 transition-transform w-fit">
             <FileCode className="w-5 h-5" />
           </div>
           <div>
-            <span className="text-xs font-bold text-white block group-hover:text-cyan-300 transition-colors">
+            <span className="text-xs font-bold text-white block group-hover:theme-accent-text transition-colors">
               Select Executable (.exe)
             </span>
             <span className="text-[10px] text-zinc-400 leading-tight block mt-0.5">
@@ -188,13 +188,13 @@ export const LocalGamesTab: React.FC<LocalGamesTabProps> = ({
           type="button"
           disabled={isScanning}
           onClick={handleSelectFolder}
-          className="p-4 rounded-xl bg-[#12141f] border border-white/10 hover:border-purple-500/40 hover:bg-purple-500/10 text-left transition-all cursor-pointer group flex flex-col justify-between space-y-3"
+          className="p-4 rounded-xl bg-[#12141f] border border-white/10 hover:border-[var(--app-accent-color)] hover:bg-white/[0.04] text-left transition-all cursor-pointer group flex flex-col justify-between space-y-3"
         >
-          <div className="p-2 rounded-lg bg-white/5 border border-white/10 text-purple-400 group-hover:scale-105 transition-transform w-fit">
+          <div className="p-2 rounded-lg bg-white/5 border border-white/10 theme-accent-text group-hover:scale-105 transition-transform w-fit">
             <FolderOpen className="w-5 h-5" />
           </div>
           <div>
-            <span className="text-xs font-bold text-white block group-hover:text-purple-300 transition-colors">
+            <span className="text-xs font-bold text-white block group-hover:theme-accent-text transition-colors">
               Scan Game Folder
             </span>
             <span className="text-[10px] text-zinc-400 leading-tight block mt-0.5">
@@ -226,8 +226,8 @@ export const LocalGamesTab: React.FC<LocalGamesTabProps> = ({
 
       {/* Loading Indicator */}
       {isScanning && (
-        <div className="p-3 bg-cyan-500/10 border border-cyan-500/20 rounded-xl text-xs text-cyan-300 flex items-center space-x-2">
-          <Loader2 className="w-4 h-4 animate-spin text-cyan-400" />
+        <div className="p-3 theme-accent-subtle-bg border theme-accent-subtle-border rounded-xl text-xs theme-accent-text flex items-center space-x-2">
+          <Loader2 className="w-4 h-4 animate-spin theme-accent-text" />
           <span>Scanning executable and folder contents...</span>
         </div>
       )}
@@ -253,7 +253,7 @@ export const LocalGamesTab: React.FC<LocalGamesTabProps> = ({
         <div className="bg-[#12141f] border border-white/10 rounded-xl p-4 space-y-3.5 animate-in zoom-in-95 duration-150">
           <div className="flex items-center justify-between border-b border-white/5 pb-2">
             <span className="text-xs font-bold text-white uppercase tracking-wider flex items-center space-x-1.5">
-              <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+              <Sparkles className="w-3.5 h-3.5 theme-accent-text" />
               <span>Review Scanned Game</span>
             </span>
             <span className="text-[10px] text-zinc-500 font-mono">1 Game Detected</span>
@@ -270,7 +270,7 @@ export const LocalGamesTab: React.FC<LocalGamesTabProps> = ({
                 onChange={(e) =>
                   setSingleCandidate({ ...singleCandidate, title: e.target.value })
                 }
-                className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-xl text-white font-semibold focus:outline-none focus:border-cyan-500 text-xs"
+                className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-xl text-white font-semibold focus:outline-none theme-accent-focus text-xs"
               />
             </div>
 
@@ -310,9 +310,9 @@ export const LocalGamesTab: React.FC<LocalGamesTabProps> = ({
             <button
               type="button"
               onClick={handleSaveSingle}
-              className="px-5 py-2 bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-bold rounded-xl text-xs flex items-center space-x-1.5 cursor-pointer transition-all shadow-md active:scale-98"
+              className="px-5 py-2 theme-accent-btn font-bold rounded-xl text-xs flex items-center space-x-1.5 cursor-pointer transition-all shadow-md active:scale-98"
             >
-              <Plus className="w-4 h-4 text-slate-950" />
+              <Plus className="w-4 h-4 text-white" />
               <span>Add to Library</span>
             </button>
           </div>
@@ -324,7 +324,7 @@ export const LocalGamesTab: React.FC<LocalGamesTabProps> = ({
         <div className="bg-[#12141f] border border-white/10 rounded-xl p-4 space-y-3.5 animate-in zoom-in-95 duration-150">
           <div className="flex items-center justify-between border-b border-white/5 pb-2">
             <span className="text-xs font-bold text-white uppercase tracking-wider flex items-center space-x-1.5">
-              <Layers className="w-3.5 h-3.5 text-purple-400" />
+              <Layers className="w-3.5 h-3.5 theme-accent-text" />
               <span>Detected Executables ({folderCandidates.length})</span>
             </span>
             <div className="flex items-center space-x-2 text-xs">
@@ -356,7 +356,7 @@ export const LocalGamesTab: React.FC<LocalGamesTabProps> = ({
                 key={candidate.id}
                 className={`p-2.5 rounded-lg border transition-all flex items-center justify-between cursor-pointer ${
                   selectedFolderIds[candidate.id]
-                    ? "bg-purple-950/25 border-purple-500/40 text-white"
+                    ? "theme-accent-subtle-bg theme-accent-subtle-border text-white"
                     : "bg-white/[0.02] border-white/5 text-zinc-400 opacity-60"
                 }`}
               >
@@ -370,7 +370,7 @@ export const LocalGamesTab: React.FC<LocalGamesTabProps> = ({
                         [candidate.id]: e.target.checked,
                       })
                     }
-                    className="w-4 h-4 rounded bg-white/10 border-white/20 text-purple-500 accent-purple-500 cursor-pointer"
+                    className="w-4 h-4 rounded bg-white/10 border-white/20 cursor-pointer accent-[var(--app-accent-color)]"
                   />
                   <div className="min-w-0">
                     <span className="text-xs font-semibold block truncate">
@@ -405,7 +405,7 @@ export const LocalGamesTab: React.FC<LocalGamesTabProps> = ({
               <button
                 type="button"
                 onClick={handleSaveBatch}
-                className="px-5 py-2 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-xl text-xs flex items-center space-x-1.5 cursor-pointer transition-all shadow-md active:scale-98"
+                className="px-5 py-2 theme-accent-btn font-bold rounded-xl text-xs flex items-center space-x-1.5 cursor-pointer transition-all shadow-md active:scale-98"
               >
                 <Plus className="w-4 h-4" />
                 <span>Import Selected Games</span>

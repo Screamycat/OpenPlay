@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { Game, GameLink, GameAction } from "../types/game";
+import { ConfiguredConsole, EmulatorProfile } from "../types/emulator";
 import { resolveImageSrc, formatFileSize, isVideoSrc } from "../utils/image";
 import { MetadataDiffModal, MetadataComparison } from "./MetadataDiffModal";
 import { normalizeCompletionStatus } from "../utils/completionStatus";
@@ -215,10 +216,23 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
   // Tab 2: Installation & Execution
   const [source, setSource] = useState(game.source || "Manual");
   const [sourceId, setSourceId] = useState(game.source_id || "");
+  const [emulatorId, setEmulatorId] = useState<string>(game.emulator_id || "");
+  const [configuredConsoles, setConfiguredConsoles] = useState<ConfiguredConsole[]>([]);
+  const [emulatorProfiles, setEmulatorProfiles] = useState<EmulatorProfile[]>([]);
   const [isInstalled, setIsInstalled] = useState(game.is_installed ?? true);
   const [installDirectory, setInstallDirectory] = useState(game.install_directory || "");
   const [executablePath, setExecutablePath] = useState(game.executable_path || "");
   const [launchArguments, setLaunchArguments] = useState(game.launch_arguments || "");
+
+  useEffect(() => {
+    invoke<ConfiguredConsole[]>("get_configured_consoles")
+      .then((c) => setConfiguredConsoles(c || []))
+      .catch((err) => console.warn("Failed to load configured consoles in EditGameModal:", err));
+
+    invoke<EmulatorProfile[]>("get_emulator_profiles")
+      .then((profs) => setEmulatorProfiles(profs || []))
+      .catch((err) => console.warn("Failed to load emulator profiles in EditGameModal:", err));
+  }, []);
 
   // Tab 3: Play Actions (Dual Launch & Alternate Executables)
   const [playActions, setPlayActions] = useState<GameAction[]>(game.play_actions || []);
@@ -346,6 +360,20 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
     }
   };
 
+  const handleBrowseRom = async () => {
+    try {
+      const selected = await invoke<string | null>("select_file", {
+        filter:
+          "ROM and Disc Images (*.iso;*.cue;*.chd;*.rvz;*.wbfs;*.cso;*.gba;*.gbc;*.gb;*.nes;*.sfc;*.smc;*.n64;*.z64;*.v64;*.nds;*.3ds;*.cia;*.nsp;*.xci;*.pkg;*.bin;*.zip;*.7z)|*.iso;*.cue;*.chd;*.rvz;*.wbfs;*.cso;*.gba;*.gbc;*.gb;*.nes;*.sfc;*.smc;*.n64;*.z64;*.v64;*.nds;*.3ds;*.cia;*.nsp;*.xci;*.pkg;*.bin;*.zip;*.7z|All files (*.*)|*.*",
+      });
+      if (selected) {
+        setExecutablePath(selected);
+      }
+    } catch (e) {
+      console.warn("Browse ROM file error:", e);
+    }
+  };
+
   const handleBrowseArtwork = async (onSelected: (path: string) => void) => {
     try {
       const selected = await invoke<string | null>("select_file", {
@@ -458,6 +486,7 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
 
       source: source.trim() || "Manual",
       source_id: sourceId.trim() || undefined,
+      emulator_id: emulatorId.trim() || undefined,
       is_installed: isInstalled,
       install_directory: installDirectory.trim() || undefined,
       executable_path: executablePath.trim() || undefined,
@@ -790,7 +819,7 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
                         type="checkbox"
                         checked={isHidden}
                         onChange={(e) => setIsHidden(e.target.checked)}
-                        className="w-4 h-4 rounded bg-zinc-800 border-zinc-700 text-purple-600 focus:ring-purple-500 cursor-pointer"
+                        className="w-4 h-4 rounded bg-zinc-800 border-zinc-700 cursor-pointer accent-[var(--app-accent-color)]"
                       />
                       <div className="space-y-0.5">
                         <div className="text-zinc-200 font-semibold group-hover:text-white transition-colors">
@@ -858,85 +887,166 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
                     </div>
                   </div>
 
-                  {/* Installation Folder */}
-                  <div>
-                    <label className="block text-zinc-300 font-medium mb-1 flex items-center space-x-1.5">
-                      <FolderOpen className="w-3.5 h-3.5 text-zinc-400" />
-                      <span>Installation Folder</span>
-                    </label>
-                    <div className="flex items-center space-x-2">
-                      <input
-                        type="text"
-                        value={installDirectory}
-                        onChange={(e) => setInstallDirectory(e.target.value)}
-                        className="flex-1 px-3 py-2 bg-white/[0.04] hover:bg-white/[0.06] border border-white/10 rounded-xl text-white font-mono text-[11px] focus:outline-none focus:border-white/30 focus:bg-white/[0.08] transition-all truncate"
-                        placeholder="C:\Program Files (x86)\Steam\steamapps\common\..."
-                      />
-                      <button
-                        type="button"
-                        onClick={handleBrowseDirectory}
-                        title="Browse for folder"
-                        className="px-3 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-medium flex items-center space-x-1.5 cursor-pointer shrink-0 transition-colors border border-white/10"
-                      >
-                        <FolderOpen className="w-3.5 h-3.5 text-zinc-300" />
-                        <span>Browse...</span>
-                      </button>
-                      {installDirectory && (
-                        <button
-                          type="button"
-                          onClick={() => handleOpenFolder(installDirectory)}
-                          title="Open folder in File Explorer"
-                          className="px-3 py-2 bg-white/5 hover:bg-white/15 text-zinc-300 hover:text-white rounded-xl text-xs cursor-pointer shrink-0 transition-colors border border-white/10"
+                  {/* Installation Folder & Executable / ROM Configuration */}
+                  {source.toLowerCase() === "emulation" ? (
+                    <>
+                      {/* ROM File Path */}
+                      <div>
+                        <label className="block text-zinc-300 font-medium mb-1 flex items-center space-x-1.5">
+                          <FileCode className="w-3.5 h-3.5 text-zinc-400" />
+                          <span>ROM / ISO Image Path</span>
+                        </label>
+                        <div className="flex items-center space-x-2">
+                          <input
+                            type="text"
+                            value={executablePath}
+                            onChange={(e) => setExecutablePath(e.target.value)}
+                            className="flex-1 px-3 py-2 bg-white/[0.04] hover:bg-white/[0.06] border border-white/10 rounded-xl text-white font-mono text-[11px] focus:outline-none focus:border-white/30 focus:bg-white/[0.08] transition-all truncate"
+                            placeholder="e.g. D:\ROMs\SNES\Super Mario World.sfc"
+                          />
+                          <button
+                            type="button"
+                            onClick={handleBrowseRom}
+                            title="Browse for ROM image"
+                            className="px-3 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-medium flex items-center space-x-1.5 cursor-pointer shrink-0 transition-colors border border-white/10"
+                          >
+                            <FolderOpen className="w-3.5 h-3.5 text-zinc-300" />
+                            <span>Select ROM...</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Emulator Profile Selector */}
+                      <div>
+                        <label className="block text-zinc-300 font-medium mb-1 flex items-center space-x-1.5">
+                          <Gamepad2 className="w-3.5 h-3.5 text-zinc-400" />
+                          <span>Configured Emulator Profile</span>
+                        </label>
+                        <select
+                          value={emulatorId}
+                          onChange={(e) => setEmulatorId(e.target.value)}
+                          className="w-full px-3 py-2 bg-[#18181b] border border-white/10 rounded-xl text-white focus:outline-none focus:border-white/30 transition-all cursor-pointer text-xs"
                         >
-                          Open
-                        </button>
-                      )}
-                    </div>
-                  </div>
+                          <option value="">-- None / System Default --</option>
+                          {configuredConsoles.map((conf) => (
+                            <option key={conf.id} value={conf.id}>
+                              {conf.name} ({conf.emulator_name}{conf.core_name ? ` - ${conf.core_name}` : ""})
+                            </option>
+                          ))}
+                          {emulatorProfiles.map((prof) => (
+                            <option key={prof.id} value={prof.id}>
+                              {prof.name}{" "}
+                              {prof.emulator_type === "retroarch" && prof.selected_core
+                                ? `(Core: ${prof.selected_core})`
+                                : prof.supported_platforms.length > 0
+                                ? `(${prof.supported_platforms.join(", ")})`
+                                : ""}
+                            </option>
+                          ))}
+                        </select>
+                        <span className="text-[10px] text-zinc-500 mt-1 block">
+                          Select which emulator binary and core launches this ROM. Manage profiles in Library → Emulation.
+                        </span>
+                      </div>
 
-                  {/* Executable Path */}
-                  <div>
-                    <label className="block text-zinc-300 font-medium mb-1 flex items-center space-x-1.5">
-                      <FileCode className="w-3.5 h-3.5 text-zinc-400" />
-                      <span>Executable Path (.exe)</span>
-                    </label>
-                    <div className="flex items-center space-x-2">
-                      <input
-                        type="text"
-                        value={executablePath}
-                        onChange={(e) => setExecutablePath(e.target.value)}
-                        className="flex-1 px-3 py-2 bg-white/[0.04] hover:bg-white/[0.06] border border-white/10 rounded-xl text-white font-mono text-[11px] focus:outline-none focus:border-white/30 focus:bg-white/[0.08] transition-all truncate"
-                        placeholder="e.g. C:\Games\Terraria\Terraria.exe"
-                      />
-                      <button
-                        type="button"
-                        onClick={handleBrowseFile}
-                        title="Browse executable file"
-                        className="px-3 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-medium flex items-center space-x-1.5 cursor-pointer shrink-0 transition-colors border border-white/10"
-                      >
-                        <FileCode className="w-3.5 h-3.5 text-zinc-300" />
-                        <span>Select .exe</span>
-                      </button>
-                    </div>
-                  </div>
+                      {/* Custom Launch Arguments Override */}
+                      <div>
+                        <label className="block text-zinc-300 font-medium mb-1 flex items-center space-x-1.5">
+                          <Terminal className="w-3.5 h-3.5 text-zinc-400" />
+                          <span>Custom Launch Arguments (Override)</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={launchArguments}
+                          onChange={(e) => setLaunchArguments(e.target.value)}
+                          className="w-full px-3 py-2 bg-white/[0.04] hover:bg-white/[0.06] border border-white/10 rounded-xl text-white font-mono text-[11px] focus:outline-none focus:border-white/30 focus:bg-white/[0.08] transition-all"
+                          placeholder="Leave empty to use emulator profile default arguments"
+                        />
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      {/* Installation Folder */}
+                      <div>
+                        <label className="block text-zinc-300 font-medium mb-1 flex items-center space-x-1.5">
+                          <FolderOpen className="w-3.5 h-3.5 text-zinc-400" />
+                          <span>Installation Folder</span>
+                        </label>
+                        <div className="flex items-center space-x-2">
+                          <input
+                            type="text"
+                            value={installDirectory}
+                            onChange={(e) => setInstallDirectory(e.target.value)}
+                            className="flex-1 px-3 py-2 bg-white/[0.04] hover:bg-white/[0.06] border border-white/10 rounded-xl text-white font-mono text-[11px] focus:outline-none focus:border-white/30 focus:bg-white/[0.08] transition-all truncate"
+                            placeholder="C:\Program Files (x86)\Steam\steamapps\common\..."
+                          />
+                          <button
+                            type="button"
+                            onClick={handleBrowseDirectory}
+                            title="Browse for folder"
+                            className="px-3 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-medium flex items-center space-x-1.5 cursor-pointer shrink-0 transition-colors border border-white/10"
+                          >
+                            <FolderOpen className="w-3.5 h-3.5 text-zinc-300" />
+                            <span>Browse...</span>
+                          </button>
+                          {installDirectory && (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenFolder(installDirectory)}
+                              title="Open folder in File Explorer"
+                              className="px-3 py-2 bg-white/5 hover:bg-white/15 text-zinc-300 hover:text-white rounded-xl text-xs cursor-pointer shrink-0 transition-colors border border-white/10"
+                            >
+                              Open
+                            </button>
+                          )}
+                        </div>
+                      </div>
 
-                  {/* Launch Arguments / Options */}
-                  <div>
-                    <label className="block text-zinc-300 font-medium mb-1 flex items-center space-x-1.5">
-                      <Terminal className="w-3.5 h-3.5 text-zinc-400" />
-                      <span>Launch Arguments / Options</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={launchArguments}
-                      onChange={(e) => setLaunchArguments(e.target.value)}
-                      className="w-full px-3 py-2 bg-white/[0.04] hover:bg-white/[0.06] border border-white/10 rounded-xl text-white font-mono text-[11px] focus:outline-none focus:border-white/30 focus:bg-white/[0.08] transition-all"
-                      placeholder="-windowed -novid +exec autoexec.cfg"
-                    />
-                    <span className="text-[10px] text-zinc-500 mt-1 block">
-                      Arguments passed directly to the binary or launcher command at startup.
-                    </span>
-                  </div>
+                      {/* Executable Path */}
+                      <div>
+                        <label className="block text-zinc-300 font-medium mb-1 flex items-center space-x-1.5">
+                          <FileCode className="w-3.5 h-3.5 text-zinc-400" />
+                          <span>Executable Path (.exe)</span>
+                        </label>
+                        <div className="flex items-center space-x-2">
+                          <input
+                            type="text"
+                            value={executablePath}
+                            onChange={(e) => setExecutablePath(e.target.value)}
+                            className="flex-1 px-3 py-2 bg-white/[0.04] hover:bg-white/[0.06] border border-white/10 rounded-xl text-white font-mono text-[11px] focus:outline-none focus:border-white/30 focus:bg-white/[0.08] transition-all truncate"
+                            placeholder="e.g. C:\Games\Terraria\Terraria.exe"
+                          />
+                          <button
+                            type="button"
+                            onClick={handleBrowseFile}
+                            title="Browse executable file"
+                            className="px-3 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-medium flex items-center space-x-1.5 cursor-pointer shrink-0 transition-colors border border-white/10"
+                          >
+                            <FileCode className="w-3.5 h-3.5 text-zinc-300" />
+                            <span>Select .exe</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Launch Arguments / Options */}
+                      <div>
+                        <label className="block text-zinc-300 font-medium mb-1 flex items-center space-x-1.5">
+                          <Terminal className="w-3.5 h-3.5 text-zinc-400" />
+                          <span>Launch Arguments / Options</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={launchArguments}
+                          onChange={(e) => setLaunchArguments(e.target.value)}
+                          className="w-full px-3 py-2 bg-white/[0.04] hover:bg-white/[0.06] border border-white/10 rounded-xl text-white font-mono text-[11px] focus:outline-none focus:border-white/30 focus:bg-white/[0.08] transition-all"
+                          placeholder="-windowed -novid +exec autoexec.cfg"
+                        />
+                        <span className="text-[10px] text-zinc-500 mt-1 block">
+                          Arguments passed directly to the binary or launcher command at startup.
+                        </span>
+                      </div>
+                    </>
+                  )}
 
                   {/* Size on Disk (Read-Only Hardware Display) */}
                   <div className="pt-2">
@@ -971,7 +1081,7 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
                 <div className="border-b border-white/10 pb-2 flex items-center justify-between">
                   <div>
                     <h3 className="text-sm font-semibold text-white flex items-center space-x-2">
-                      <Layers className="w-4 h-4 text-purple-400" />
+                      <Layers className="w-4 h-4 theme-accent-text" />
                       <span>Play Actions & Dual Launch</span>
                     </h3>
                     <p className="text-[11px] text-zinc-400 mt-0.5">
@@ -981,7 +1091,7 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
                   <button
                     type="button"
                     onClick={handleAddPlayAction}
-                    className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-semibold flex items-center space-x-1.5 transition-colors cursor-pointer shadow-md shadow-purple-950/40"
+                    className="px-3 py-1.5 theme-accent-btn rounded-xl text-xs font-semibold flex items-center space-x-1.5 transition-colors cursor-pointer shadow-md"
                   >
                     <Plus className="w-3.5 h-3.5" />
                     <span>Add Play Action</span>
@@ -1017,14 +1127,14 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
                       >
                         <div className="flex items-center justify-between">
                           <div className="flex items-center space-x-2">
-                            <span className="w-5 h-5 rounded-full bg-purple-500/20 text-purple-300 flex items-center justify-center font-mono text-[10px] font-bold">
+                            <span className="w-5 h-5 rounded-full theme-accent-pill flex items-center justify-center font-mono text-[10px] font-bold">
                               {idx + 1}
                             </span>
                             <span className="font-bold text-xs text-white">
                               {act.name || "Untitled Action"}
                             </span>
                             {act.is_primary && (
-                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 font-mono font-semibold">
+                              <span className="text-[9px] px-1.5 py-0.5 rounded theme-accent-pill font-mono font-semibold">
                                 Primary Action
                               </span>
                             )}
@@ -1040,7 +1150,7 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
                                     is_primary: e.target.checked,
                                   })
                                 }
-                                className="w-3.5 h-3.5 rounded bg-zinc-800 border-zinc-700 text-purple-600 cursor-pointer"
+                                className="w-3.5 h-3.5 rounded bg-zinc-800 border-zinc-700 cursor-pointer accent-[var(--app-accent-color)]"
                               />
                               <span>Set as Primary</span>
                             </label>
@@ -1851,9 +1961,9 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
                 setFetchError(null);
                 setIsProviderPickerOpen((p) => !p);
               }}
-              className="px-3.5 py-2 rounded-xl bg-purple-500/15 hover:bg-purple-500/25 border border-purple-500/30 text-purple-200 hover:text-white text-xs font-semibold flex items-center space-x-1.5 transition-all cursor-pointer shadow-sm active:scale-95"
+              className="px-3.5 py-2 rounded-xl theme-accent-subtle-bg theme-accent-text border theme-accent-subtle-border hover:brightness-110 text-xs font-semibold flex items-center space-x-1.5 transition-all cursor-pointer shadow-sm active:scale-95"
             >
-              <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+              <Sparkles className="w-3.5 h-3.5 theme-accent-text" />
               <span>Download Metadata</span>
             </button>
 
@@ -1861,7 +1971,7 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
               <div className="absolute left-0 bottom-full mb-2 w-80 theme-panel-surface border border-white/10 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.85)] p-3.5 z-50 space-y-3 backdrop-blur-2xl animate-in fade-in zoom-in-95 duration-150">
                 <div className="flex items-center justify-between border-b border-white/5 pb-2">
                   <span className="text-xs font-bold text-white flex items-center space-x-1.5">
-                    <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+                    <Sparkles className="w-3.5 h-3.5 theme-accent-text" />
                     <span>Choose Metadata Source</span>
                   </span>
                   <button
@@ -1879,7 +1989,7 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
                     onClick={() => setSelectedProvider("steam")}
                     className={`py-1.5 text-xs font-medium rounded-lg transition-all cursor-pointer ${
                       selectedProvider === "steam"
-                        ? "bg-purple-600 text-white shadow font-bold"
+                        ? "theme-accent-btn font-bold"
                         : "text-zinc-400 hover:text-white hover:bg-white/5"
                     }`}
                   >
@@ -1890,7 +2000,7 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
                     onClick={() => setSelectedProvider("epic")}
                     className={`py-1.5 text-xs font-medium rounded-lg transition-all cursor-pointer ${
                       selectedProvider === "epic"
-                        ? "bg-purple-600 text-white shadow font-bold"
+                        ? "theme-accent-btn font-bold"
                         : "text-zinc-400 hover:text-white hover:bg-white/5"
                     }`}
                   >
@@ -1901,7 +2011,7 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
                     onClick={() => setSelectedProvider("igdb")}
                     className={`py-1.5 text-xs font-medium rounded-lg transition-all cursor-pointer ${
                       selectedProvider === "igdb"
-                        ? "bg-purple-600 text-white shadow font-bold"
+                        ? "theme-accent-btn font-bold"
                         : "text-zinc-400 hover:text-white hover:bg-white/5"
                     }`}
                   >
@@ -1916,7 +2026,7 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
                     value={searchTitle}
                     onChange={(e) => setSearchTitle(e.target.value)}
                     placeholder="Game title to search..."
-                    className="w-full px-3 py-1.5 bg-black/40 border border-white/10 rounded-xl text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-purple-500"
+                    className="w-full px-3 py-1.5 bg-black/40 border border-white/10 rounded-xl text-xs text-white placeholder-zinc-500 focus:outline-none theme-accent-focus"
                   />
                 </div>
 
@@ -1930,7 +2040,7 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
                   type="button"
                   disabled={isFetchingProviderMeta || !searchTitle.trim()}
                   onClick={handleFetchMetadataFromProvider}
-                  className="w-full py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded-xl text-xs font-bold transition-all disabled:opacity-50 flex items-center justify-center space-x-1.5 cursor-pointer shadow-md active:scale-98"
+                  className="w-full py-2 theme-accent-btn rounded-xl text-xs font-bold transition-all disabled:opacity-50 flex items-center justify-center space-x-1.5 cursor-pointer shadow-md active:scale-98"
                 >
                   {isFetchingProviderMeta ? (
                     <>

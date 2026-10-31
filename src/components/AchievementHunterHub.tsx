@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Game } from "../types/game";
 import { Achievement, HunterProfile } from "../types/achievement";
+import { formatUnlockDate } from "../utils/date";
 import { AchievementsTab } from "./AchievementsTab";
 import { AchievementDetailModal } from "./AchievementDetailModal";
 import {
@@ -17,6 +18,7 @@ import {
   Loader2,
   RefreshCw,
   X,
+  Clock,
 } from "lucide-react";
 import { resolveImageSrc, isVideoSrc } from "../utils/image";
 
@@ -58,10 +60,14 @@ export const AchievementHunterHub: React.FC<AchievementHunterHubProps> = ({
       let data = await invoke<HunterProfile>("get_hunter_profile");
       setProfile(data);
 
-      // If library has Steam, Epic, or RetroAchievements games but no achievements cached yet, trigger background sync
+      // If library has Steam, Epic, GOG, Xbox, EA, or RetroAchievements games but no achievements cached yet, trigger background sync
       if (
         data.total_achievements_count === 0 &&
-        games.some((g) => ["steam", "epic", "retroachievements"].includes(g.source.toLowerCase()))
+        games.some((g) =>
+          ["steam", "epic", "gog", "xbox", "ea app", "ea", "retroachievements"].includes(
+            g.source.toLowerCase()
+          )
+        )
       ) {
         setIsSyncingAll(true);
         const synced = await invoke<HunterProfile>("sync_all_achievements");
@@ -271,7 +277,7 @@ export const AchievementHunterHub: React.FC<AchievementHunterHubProps> = ({
 
               <div className="bg-black/30 border border-white/5 rounded-xl p-3.5 space-y-1">
                 <div className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider flex items-center space-x-1.5">
-                  <Target className="w-3.5 h-3.5 text-cyan-400" />
+                  <Target className="w-3.5 h-3.5 theme-accent-text" />
                   <span>Avg Completion</span>
                 </div>
                 <div className="text-lg font-bold text-white">
@@ -294,15 +300,21 @@ export const AchievementHunterHub: React.FC<AchievementHunterHubProps> = ({
           </div>
         </div>
 
-        {/* 2. Top 5 Rarest Trophy Showcase */}
-        {rarest_achievements.length > 0 && (
-          <div className="space-y-3">
-            <div className="flex items-center space-x-2">
-              <Sparkles className="w-4 h-4 text-amber-400" />
-              <h2 className="text-xs font-bold text-white uppercase tracking-wider">
-                Rarest Unlocked Trophies
-              </h2>
-            </div>
+        {/* 2. Top 5 Rarest / Recent Trophy Showcase */}
+        {rarest_achievements.length > 0 && (() => {
+          const hasMeasuredRarity = rarest_achievements.some((a) => a.rarity_percentage > 0);
+          return (
+            <div className="space-y-3">
+              <div className="flex items-center space-x-2">
+                {hasMeasuredRarity ? (
+                  <Sparkles className="w-4 h-4 text-amber-400" />
+                ) : (
+                  <Clock className="w-4 h-4 text-amber-400" />
+                )}
+                <h2 className="text-xs font-bold text-white uppercase tracking-wider">
+                  {hasMeasuredRarity ? "Rarest Unlocked Trophies" : "Recently Unlocked Trophies"}
+                </h2>
+              </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
               {rarest_achievements.map((ach) => (
@@ -345,11 +357,11 @@ export const AchievementHunterHub: React.FC<AchievementHunterHubProps> = ({
                         ach.rarity_percentage
                       )}`}
                     >
-                      {ach.rarity_percentage}% Rarity
+                      {ach.rarity_percentage > 0 ? `${ach.rarity_percentage}% Rarity` : "Common"}
                     </span>
                     {ach.unlock_time && (
                       <span className="text-[9px] text-zinc-400 font-mono">
-                        {ach.unlock_time.split(" ")[0]}
+                        {formatUnlockDate(ach.unlock_time, true)}
                       </span>
                     )}
                   </div>
@@ -357,7 +369,8 @@ export const AchievementHunterHub: React.FC<AchievementHunterHubProps> = ({
               ))}
             </div>
           </div>
-        )}
+          );
+        })()}
 
         {/* 3. 'Almost There' Carousel (Close to 100%) */}
         {almost_there_games.length > 0 && (

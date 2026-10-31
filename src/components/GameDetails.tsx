@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Game } from "../types/game";
-import { resolveImageSrc, resolveGridCoverSrc, formatPlaytime, formatFileSize } from "../utils/image";
+import { resolveImageSrc, resolveGridCoverSrc, getStaticFallbackCover, formatPlaytime, formatFileSize } from "../utils/image";
 import { SteamDescription } from "./SteamDescription";
 import { HowLongToBeatWidget } from "./HowLongToBeatWidget";
 import { SteamGridDBModal } from "./SteamGridDBModal";
@@ -56,7 +56,7 @@ const SteamIcon: React.FC<{ className?: string }> = ({ className = "w-4 h-4" }) 
 
 const EpicIcon: React.FC<{ className?: string }> = ({ className = "w-4 h-4" }) => (
   <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
-    <path d="M4.686 0C3.766 0 3 0.771 3 1.696v17.478c0 0.925 0.766 1.696 1.686 1.696h1.722v3.13l3.666-3.13h9.24c0.92 0 1.686-0.771 1.686-1.696V1.696C21 0.771 20.234 0 19.314 0H4.686zm3.504 5.347h7.62v2.247h-5.244v2.544h4.722v2.247h-4.722v2.793h5.364v2.247h-7.74V5.347z" />
+    <path d="M12 0C7.2 0 4 3.4 4 3.4v13.5l8 7.1 8-7.1V3.4S16.8 0 12 0zm0 3.3c3.8 0 5.8 2.2 5.8 2.2v9.8L12 19.3l-5.8-4V5.5s2-2.2 5.8-2.2zm-2.4 3.5v7.4h4.8v-1.7h-2.9V11h2.5V9.4h-2.5V8.5h2.9V6.8H9.6z" />
   </svg>
 );
 
@@ -74,7 +74,7 @@ const BattleNetIcon: React.FC<{ className?: string }> = ({ className = "w-4 h-4"
 
 const XboxIcon: React.FC<{ className?: string }> = ({ className = "w-4 h-4" }) => (
   <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
-    <path d="M4.198 19.53a12.016 12.016 0 0 1-2.457-4.148 11.96 11.96 0 0 1-.741-4.092c0-2.316.657-4.48 1.79-6.313a11.91 11.91 0 0 1 3.527-3.69c.143-.092.235-.074.387.037 1.854 1.353 3.655 2.825 5.296 4.417.074.074.129.074.203 0 1.64-1.592 3.442-3.064 5.296-4.417.152-.11.244-.129.387-.037a11.91 11.91 0 0 1 3.527 3.69 11.96 11.96 0 0 1 1.79 6.313c0 1.41-.258 2.784-.741 4.092a12.016 12.016 0 0 1-2.457 4.148c-.13.13-.23.13-.36 0-2.094-2.122-4.46-3.921-7.07-5.324-.093-.055-.185-.055-.278 0-2.61 1.403-4.976 3.202-7.07 5.324-.13.13-.23.13-.36 0z" />
+    <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm-4.3 4.2c1.3 1.1 2.9 2.5 4.3 3.9 1.4-1.4 3-2.8 4.3-3.9 2.2 1.5 3.9 3.7 4.8 6.3-1.6-1.6-3.8-2.7-5.9-2.7-1.3 0-2.4.4-3.2 1.1-.8-.7-1.9-1.1-3.2-1.1-2.1 0-4.3 1.1-5.9 2.7.9-2.6 2.6-4.8 4.8-6.3zm-4.3 9.7c1.8-1.5 3.9-2.3 5.9-2.3 1.1 0 2 .3 2.7.9-1.9 1.8-3.9 3.7-5.6 5.8-1.6-1.3-2.7-2.9-3-4.4zm17.2 4.4c-1.7-2.1-3.7-4-5.6-5.8.7-.6 1.6-.9 2.7-.9 2 0 4.1.8 5.9 2.3-.3 1.5-1.4 3.1-3 4.4z" />
   </svg>
 );
 
@@ -84,12 +84,198 @@ const PlayStationIcon: React.FC<{ className?: string }> = ({ className = "w-4 h-
   </svg>
 );
 
+const EaIcon: React.FC<{ className?: string }> = ({ className = "w-4 h-4" }) => (
+  <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
+    <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm-1.8 17.5l-1.3-2.6H6.1L4.8 17.5H2.4l4.9-9.8h2.6l4.9 9.8h-2.6zm-1.9-4.3l-1.4-2.8-1.4 2.8h2.8zm11.5 4.3h-7.3V7.7h7.1v2H14v2h4.5v2H14v2.1h5.8v1.7z" />
+  </svg>
+);
+
+const UbisoftIcon: React.FC<{ className?: string }> = ({ className = "w-4 h-4" }) => (
+  <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
+    <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm.08 3.52c4.71 0 8.52 3.81 8.52 8.52 0 4.71-3.81 8.52-8.52 8.52-4.71 0-8.52-3.81-8.52-8.52 0-2.35 1.01-4.47 2.62-5.96l1.38 1.48c-1.23 1.15-2 2.76-2 4.48 0 3.6 2.92 6.52 6.52 6.52s6.52-2.92 6.52-6.52-2.92-6.52-6.52-6.52c-1.3 0-2.52.38-3.54 1.04l-1.12-1.68c1.39-.9 3.01-1.36 4.66-1.36z" />
+  </svg>
+);
+
+const RiotIcon: React.FC<{ className?: string }> = ({ className = "w-4 h-4" }) => (
+  <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
+    <path d="M13.8 2.3L2.4 8.7l2.8 11.2L8 18.6l-.9-3.7 1.6-.9.9 3.7 2.5-.8-.9-3.7 1.6-.9.9 3.7 2.5-.8-.9-3.7 1.6-.9.9 3.7 2.3-.7L21.6 3.8l-7.8-1.5zM2.4 20.7l6.8-2.2 4.1 3.2-8.4-1z" />
+  </svg>
+);
+
+const AmazonIcon: React.FC<{ className?: string }> = ({ className = "w-4 h-4" }) => (
+  <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
+    <path d="M13.9 12.3c-.1-.7-.4-1.2-.8-1.6-.5-.4-1.1-.6-1.9-.6-.9 0-1.6.3-2.1.8-.5.5-.8 1.1-.9 1.9.7 0 1.5-.1 2.3-.2.8-.1 1.7-.2 2.5-.3h.9v-.01zm2.3 4.2c-.3-.3-.5-.7-.5-1.2v-4.1c0-1.5-.4-2.7-1.3-3.6-.9-.9-2.2-1.4-3.9-1.4-1.2 0-2.3.2-3.2.7-.9.5-1.5 1.1-1.8 1.8l1.7 1.1c.4-.8 1.3-1.4 2.6-1.4 1 0 1.8.3 2.3.8.5.5.7 1.2.7 2.1v.4c-.9.1-1.9.2-2.9.4-1.1.2-2 .5-2.7 1-.7.5-1.1 1.2-1.1 2.1 0 .9.3 1.6 1 2.2.7.6 1.6.9 2.6.9 1.1 0 2-.3 2.8-1 .7-.7 1.1-1.4 1.3-2.1l.1.5v.3c0 .3.1.6.3.8.2.2.5.3.8.3.4 0 .8-.1 1.2-.3l-.4-1.5c-.2.1-.4.1-.5.1zm5.2 2.3C18.2 21 13.9 22 8.7 22c-4.4 0-8.2-1.5-11.5-4.4-.3-.2-.3-.6 0-.8.3-.3.8-.2 1.1 0 3 2.6 6.5 4 10.4 4 4.8 0 8.7-.9 11.8-2.8.4-.2.9-.1 1.1.3.2.4.1.9-.3 1.1v-.1zm-1.3-1.6c-.3-.4-1.7-.2-2.5-.1-.3 0-.3-.3 0-.5 1.7-1.1 3.6-.8 3.8-.5.3.3-.1 2.2-1.7 3.5-.2.2-.4.1-.4-.1.1-.9.7-1.9.8-2.3z" />
+  </svg>
+);
+
 export interface GamePlatformBadge {
   id: string;
+  gameId: string;
   title: string;
   label: string;
   icon: React.ReactNode;
   isInstalled: boolean;
+  gameInstance: Game;
+}
+
+function createBadgeForGame(g: Game): GamePlatformBadge {
+  const src = (g.source || "").toLowerCase().trim();
+  if (src === "steam") {
+    return {
+      id: "steam",
+      gameId: g.id,
+      title: "Steam",
+      label: "STEAM",
+      icon: <SteamIcon className="w-4 h-4 mx-auto text-slate-200" />,
+      isInstalled: !!g.is_installed,
+      gameInstance: g,
+    };
+  } else if (src === "epic" || src.includes("epic")) {
+    return {
+      id: "epic",
+      gameId: g.id,
+      title: "Epic Games",
+      label: "EPIC",
+      icon: <EpicIcon className="w-4 h-4 mx-auto text-slate-200" />,
+      isInstalled: !!g.is_installed,
+      gameInstance: g,
+    };
+  } else if (src === "gog") {
+    return {
+      id: "gog",
+      gameId: g.id,
+      title: "GOG Galaxy",
+      label: "GOG",
+      icon: <GogIcon className="w-4 h-4 mx-auto text-slate-200" />,
+      isInstalled: !!g.is_installed,
+      gameInstance: g,
+    };
+  } else if (src === "battle.net" || src.includes("battle")) {
+    return {
+      id: "battlenet",
+      gameId: g.id,
+      title: "Battle.net",
+      label: "BATTLE.NET",
+      icon: <BattleNetIcon className="w-4 h-4 mx-auto text-slate-200" />,
+      isInstalled: !!g.is_installed,
+      gameInstance: g,
+    };
+  } else if (src.includes("ea") || src.includes("origin")) {
+    return {
+      id: "ea",
+      gameId: g.id,
+      title: "EA App",
+      label: "EA APP",
+      icon: <EaIcon className="w-4 h-4 mx-auto text-slate-200" />,
+      isInstalled: !!g.is_installed,
+      gameInstance: g,
+    };
+  } else if (src.includes("ubisoft") || src.includes("uplay")) {
+    return {
+      id: "ubisoft",
+      gameId: g.id,
+      title: "Ubisoft Connect",
+      label: "UBISOFT",
+      icon: <UbisoftIcon className="w-4 h-4 mx-auto text-slate-200" />,
+      isInstalled: !!g.is_installed,
+      gameInstance: g,
+    };
+  } else if (src.includes("riot")) {
+    return {
+      id: "riot",
+      gameId: g.id,
+      title: "Riot Games",
+      label: "RIOT",
+      icon: <RiotIcon className="w-4 h-4 mx-auto text-slate-200" />,
+      isInstalled: !!g.is_installed,
+      gameInstance: g,
+    };
+  } else if (src.includes("amazon")) {
+    return {
+      id: "amazon",
+      gameId: g.id,
+      title: "Amazon Games",
+      label: "AMAZON",
+      icon: <AmazonIcon className="w-4 h-4 mx-auto text-slate-200" />,
+      isInstalled: !!g.is_installed,
+      gameInstance: g,
+    };
+  } else if (src.includes("xbox")) {
+    return {
+      id: "xbox",
+      gameId: g.id,
+      title: "Xbox",
+      label: "XBOX",
+      icon: <XboxIcon className="w-4 h-4 mx-auto text-slate-200" />,
+      isInstalled: !!g.is_installed,
+      gameInstance: g,
+    };
+  } else if (src.includes("playstation") || src.includes("psn")) {
+    return {
+      id: "psn",
+      gameId: g.id,
+      title: "PlayStation",
+      label: "PSN",
+      icon: <PlayStationIcon className="w-4 h-4 mx-auto text-slate-200" />,
+      isInstalled: !!g.is_installed,
+      gameInstance: g,
+    };
+  } else if (src.includes("retro") || src === "emulation") {
+    return {
+      id: "retro",
+      gameId: g.id,
+      title: "Retro / Emulated",
+      label: "RETRO",
+      icon: <Gamepad2 className="w-4 h-4 mx-auto text-amber-300" />,
+      isInstalled: !!g.is_installed,
+      gameInstance: g,
+    };
+  } else {
+    // Check if local game is actually a console / retro ROM
+    const platforms = (g.platforms || []).map((p) => p.toLowerCase().trim());
+    const isRetroConsole =
+      g.source.toLowerCase() === "emulation" ||
+      g.id.startsWith("ra_") ||
+      platforms.some((p) =>
+        [
+          "retro",
+          "nintendo 64",
+          "n64",
+          "nintendo ds",
+          "game boy",
+          "gba",
+          "snes",
+          "playstation 2",
+          "ps2",
+          "nes",
+          "genesis",
+          "sega",
+          "megadrive",
+        ].some((c) => p.includes(c))
+      );
+
+    if (isRetroConsole) {
+      return {
+        id: "retro",
+        gameId: g.id,
+        title: "Retro / Console",
+        label: "RETRO",
+        icon: <Gamepad2 className="w-4 h-4 mx-auto text-amber-300" />,
+        isInstalled: !!g.is_installed,
+        gameInstance: g,
+      };
+    }
+
+    return {
+      id: "local",
+      gameId: g.id,
+      title: "PC (Local)",
+      label: "LOCAL PC",
+      icon: <Monitor className="w-4 h-4 mx-auto text-slate-200" />,
+      isInstalled: !!g.is_installed,
+      gameInstance: g,
+    };
+  }
 }
 
 export function getGamePlatformBadges(
@@ -97,135 +283,52 @@ export function getGamePlatformBadges(
   achSummary?: { total_achievements?: number; unlocked_achievements?: number } | null
 ): GamePlatformBadge[] {
   const badges: GamePlatformBadge[] = [];
-  const src = (game.source || "").toLowerCase().trim();
-  const platforms = (game.platforms || []).map((p) => p.toLowerCase().trim());
+  const allInstances = [game, ...(game.sibling_games || [])];
 
-  // 1. Primary Source
-  if (src === "steam") {
-    badges.push({
-      id: "steam",
-      title: "Steam",
-      label: "STEAM",
-      icon: <SteamIcon className="w-4 h-4 mx-auto text-slate-200" />,
-      isInstalled: !!game.is_installed,
-    });
-  } else if (src === "epic" || src.includes("epic")) {
-    badges.push({
-      id: "epic",
-      title: "Epic Games",
-      label: "EPIC",
-      icon: <EpicIcon className="w-4 h-4 mx-auto text-slate-200" />,
-      isInstalled: !!game.is_installed,
-    });
-  } else if (src === "gog") {
-    badges.push({
-      id: "gog",
-      title: "GOG Galaxy",
-      label: "GOG",
-      icon: <GogIcon className="w-4 h-4 mx-auto text-slate-200" />,
-      isInstalled: !!game.is_installed,
-    });
-  } else if (src === "battle.net" || src.includes("battle")) {
-    badges.push({
-      id: "battlenet",
-      title: "Battle.net",
-      label: "BATTLE.NET",
-      icon: <BattleNetIcon className="w-4 h-4 mx-auto text-slate-200" />,
-      isInstalled: !!game.is_installed,
-    });
-  } else if (src.includes("xbox")) {
-    badges.push({
-      id: "xbox",
-      title: "Xbox",
-      label: "XBOX",
-      icon: <XboxIcon className="w-4 h-4 mx-auto text-slate-200" />,
-      isInstalled: !!game.is_installed,
-    });
-  } else if (src.includes("playstation") || src.includes("psn")) {
-    badges.push({
-      id: "psn",
-      title: "PlayStation",
-      label: "PSN",
-      icon: <PlayStationIcon className="w-4 h-4 mx-auto text-slate-200" />,
-      isInstalled: !!game.is_installed,
-    });
-  } else if (src.includes("retro")) {
-    badges.push({
-      id: "retro",
-      title: "RetroAchievements",
-      label: "RETRO",
-      icon: <Gamepad2 className="w-4 h-4 mx-auto text-amber-300" />,
-      isInstalled: !!game.is_installed,
-    });
-  } else if (src === "local" || src === "manual" || src === "") {
-    badges.push({
-      id: "local",
-      title: "PC (Local)",
-      label: "LOCAL PC",
-      icon: <Monitor className="w-4 h-4 mx-auto text-slate-200" />,
-      isInstalled: !!game.is_installed,
-    });
-  } else {
-    badges.push({
-      id: src,
-      title: game.source,
-      label: game.source.toUpperCase(),
-      icon: <Monitor className="w-4 h-4 mx-auto text-slate-200" />,
-      isInstalled: !!game.is_installed,
-    });
+  for (const inst of allInstances) {
+    const badge = createBadgeForGame(inst);
+    const existingIndex = badges.findIndex((b) => b.id === badge.id);
+    if (existingIndex >= 0) {
+      // If a badge for this platform already exists, keep the installed instance
+      if (!badges[existingIndex].isInstalled && badge.isInstalled) {
+        badges[existingIndex] = badge;
+      }
+    } else {
+      badges.push(badge);
+    }
   }
 
-  // 2. Check for merged RetroAchievements / Retro platform
-  const hasRetroPlatform = platforms.some((p) => p === "retro" || p.includes("retro"));
-  const hasRetroConsole = platforms.some((p) =>
-    [
-      "nintendo 64",
-      "n64",
-      "nintendo ds",
-      "game boy",
-      "gba",
-      "snes",
-      "playstation 2",
-      "ps2",
-      "nes",
-      "genesis",
-      "sega",
-      "megadrive",
-    ].some((c) => p.includes(c))
-  );
+  // If this game has active RetroAchievements unlocked/total tracked, ensure a Retro indicator exists
   const hasRetroAchievements =
     achSummary &&
     (achSummary.total_achievements ?? 0) > 0 &&
-    (src === "local" || src === "manual");
+    (game.source || "").toLowerCase().trim() === "local";
 
-  if (
-    !badges.some((b) => b.id === "retro") &&
-    (hasRetroPlatform || hasRetroConsole || hasRetroAchievements || game.id.startsWith("ra_"))
-  ) {
+  if (hasRetroAchievements && !badges.some((b) => b.id === "retro")) {
     badges.push({
       id: "retro",
+      gameId: game.id,
       title: "RetroAchievements",
       label: "RETRO",
       icon: <Gamepad2 className="w-4 h-4 mx-auto text-amber-300" />,
       isInstalled: false, // Cloud linked platform
-    });
-  }
-
-  // 3. Check if game also has Local PC if primary is RetroAchievements and executable/install path exists
-  if (
-    !badges.some((b) => b.id === "local") &&
-    (src.includes("retro") && (game.executable_path || game.install_directory || game.is_installed))
-  ) {
-    badges.push({
-      id: "local",
-      title: "PC (Local)",
-      label: "LOCAL PC",
-      icon: <Monitor className="w-4 h-4 mx-auto text-slate-200" />,
-      isInstalled: !!game.is_installed,
+      gameInstance: game,
     });
   }
 
   return badges;
+}
+
+function renderScoreStars(score?: number) {
+  if (score === undefined || score === null) return "★★★★★";
+  const numStars = score <= 5 ? Math.round(score) : Math.round((score / 100) * 5);
+  const clamped = Math.max(0, Math.min(5, numStars));
+  return (
+    <>
+      <span className="text-white">{"★".repeat(clamped)}</span>
+      {clamped < 5 && <span className="text-white/30">{"★".repeat(5 - clamped)}</span>}
+    </>
+  );
 }
 
 interface GameDetailsProps {
@@ -404,14 +507,13 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
       completionist: game.hltb_completionist,
     });
 
-    // 1. Fetch live player count if Steam game
-    if (steamAppId) {
-      invoke<number>("get_steam_current_players", { appid: steamAppId })
-        .then((count) => setPlayerCount(count))
-        .catch(() => setPlayerCount(null));
-    } else {
-      setPlayerCount(null);
-    }
+    // 1. Fetch live player count (for all games via title resolution or native steamAppId)
+    invoke<number>("get_game_current_players", {
+      title: activeGame.title,
+      appid: steamAppId,
+    })
+      .then((count) => setPlayerCount(count))
+      .catch(() => setPlayerCount(null));
 
     // 2. Fetch HLTB if missing
     if (game.hltb_main === undefined || game.hltb_main === null) {
@@ -455,6 +557,44 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
   }, [game.hltb_main, game.hltb_extra, game.hltb_completionist]);
 
   // Achievement summary for completion status evaluation
+  const platformBadges = useMemo(
+    () => getGamePlatformBadges(game),
+    [game]
+  );
+
+  // Active platform selector state (for merged multi-source games)
+  const [selectedBadgeKey, setSelectedBadgeKey] = useState<string>("");
+
+  useEffect(() => {
+    // When game changes, pick installed badge first, or primary/first badge
+    const installedBadge = platformBadges.find((b) => b.isInstalled);
+    const primaryBadge = platformBadges[0];
+    const initial = installedBadge
+      ? installedBadge.id + "_" + installedBadge.gameId
+      : primaryBadge
+      ? primaryBadge.id + "_" + primaryBadge.gameId
+      : "";
+    setSelectedBadgeKey(initial);
+  }, [game.id, platformBadges]);
+
+  const activeBadge = useMemo(() => {
+    if (!platformBadges || platformBadges.length === 0) return null;
+    return (
+      platformBadges.find((b) => b.id + "_" + b.gameId === selectedBadgeKey) ||
+      platformBadges.find((b) => b.isInstalled) ||
+      platformBadges[0]
+    );
+  }, [platformBadges, selectedBadgeKey]);
+
+  const activeGame: Game = useMemo(() => {
+    if (!activeBadge) return game;
+    if (activeBadge.gameInstance) return activeBadge.gameInstance;
+    if (activeBadge.gameId === game.id) return game;
+    const found = game.sibling_games?.find((s) => s.id === activeBadge.gameId);
+    return found || game;
+  }, [game, activeBadge]);
+
+  // Achievement summary for completion status evaluation (tracks currently active platform copy)
   const [achSummary, setAchSummary] = useState<{
     total_achievements: number;
     unlocked_achievements: number;
@@ -463,7 +603,8 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
 
   useEffect(() => {
     let active = true;
-    invoke<any>("get_game_achievement_summary", { gameId: game.id })
+    setAchSummary(null);
+    invoke<any>("get_game_achievement_summary", { gameId: activeGame.id })
       .then((res) => {
         if (active && res) {
           setAchSummary({
@@ -479,13 +620,9 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
     return () => {
       active = false;
     };
-  }, [game.id]);
+  }, [activeGame.id]);
 
-  const effectiveStatus = getEffectiveCompletionStatus(game, achSummary);
-  const platformBadges = useMemo(
-    () => getGamePlatformBadges(game, achSummary),
-    [game, achSummary]
-  );
+  const effectiveStatus = getEffectiveCompletionStatus(activeGame, achSummary);
 
   // Story Beaten Prompt Modal state
   const [isBeatenModalOpen, setIsBeatenModalOpen] = useState(false);
@@ -779,18 +916,42 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
 
               {/* Ratings, Year, Platform Row - Clean Playnite aesthetic */}
               <div className="flex flex-wrap items-center gap-2 text-xs text-slate-200 font-semibold drop-shadow">
+                {/* User Score / Personal Rating */}
+                {game.user_rating ? (
+                  <div
+                    onClick={() => onOpenEdit(game)}
+                    className="flex items-center space-x-1 text-white cursor-pointer hover:opacity-80 transition-opacity"
+                    title={`User Score: ${game.user_rating} (Click to edit)`}
+                  >
+                    <span className="tracking-tighter text-xs">
+                      {renderScoreStars(game.user_rating)}
+                    </span>
+                    <span className="font-bold text-white text-xs">{game.user_rating}</span>
+                  </div>
+                ) : null}
+
                 {/* Community Score / Star Rating */}
                 {game.community_score ? (
-                  <div className="flex items-center space-x-1 text-white">
-                    <span className="text-white tracking-tighter text-xs">★★★★★</span>
+                  <div
+                    className="flex items-center space-x-1 text-white"
+                    title={`Community Score: ${game.community_score}%`}
+                  >
+                    <span className="tracking-tighter text-xs">
+                      {renderScoreStars(game.community_score)}
+                    </span>
                     <span className="font-bold text-white text-xs">{game.community_score}</span>
                   </div>
                 ) : null}
 
                 {/* Critic Score / Metacritic */}
                 {game.critic_score ? (
-                  <div className="flex items-center space-x-1 text-white">
-                    <span className="text-white tracking-tighter text-xs">★★★★★</span>
+                  <div
+                    className="flex items-center space-x-1 text-white"
+                    title={`Critic Score: ${game.critic_score}`}
+                  >
+                    <span className="tracking-tighter text-xs">
+                      {renderScoreStars(game.critic_score)}
+                    </span>
                     <span className="font-bold text-white text-xs">{game.critic_score}</span>
                   </div>
                 ) : null}
@@ -805,14 +966,16 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                 {/* Platform */}
                 <span className="text-slate-400">·</span>
                 <span className="text-slate-300 font-semibold text-[11px] uppercase tracking-wide">
-                  PC (WINDOWS)
+                  {game.platforms && game.platforms.length > 0
+                    ? game.platforms.join(", ")
+                    : "PC (WINDOWS)"}
                 </span>
 
                 {/* Not Installed Cloud Badge */}
-                {!game.is_installed && (
+                {!activeGame.is_installed && (
                   <span className="px-2 py-0.5 rounded bg-black/60 border border-slate-700 text-slate-300 text-[10px] font-bold flex items-center space-x-1 shadow-sm">
                     <Cloud className="w-3 h-3 text-slate-400" />
-                    <span>NOT INSTALLED</span>
+                    <span>NOT INSTALLED ({activeGame.source.toUpperCase()})</span>
                   </span>
                 )}
               </div>
@@ -847,7 +1010,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                 {/* Live In-Game Player Count Box */}
                 {playerCount !== null && (
                   <div
-                    title="Live current players on Steam"
+                    title="Live active concurrent players"
                     className="w-14 h-12 bg-black/35 border border-white/15 hover:border-white/25 rounded-xl flex flex-col items-center justify-center p-1 shadow-lg text-center transition-colors"
                   >
                     <div className="text-[11px] font-bold text-white font-mono leading-none">
@@ -859,31 +1022,45 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                   </div>
                 )}
 
-                {/* Platform / Source Badges (Supports Merged Multi-Platform games like Local PC + Retro) */}
-                {platformBadges.map((plat) => (
-                  <div
-                    key={plat.id}
-                    title={
-                      plat.isInstalled
-                        ? `${plat.title} (Installed on PC)`
-                        : `${plat.title} (Cloud / Linked)`
-                    }
-                    className={`w-14 h-12 rounded-xl flex flex-col items-center justify-center p-1 text-center transition-all cursor-default ${
-                      plat.isInstalled
-                        ? "bg-white/[0.08] border border-white/50 shadow-[0_0_10px_rgba(255,255,255,0.12)] text-white"
-                        : "bg-black/35 border border-white/10 hover:border-white/20 text-slate-400 opacity-75 hover:opacity-100 shadow-lg"
-                    }`}
-                  >
-                    {plat.icon}
-                    <div
-                      className={`text-[7px] font-bold tracking-wider uppercase mt-1 truncate max-w-full px-0.5 ${
-                        plat.isInstalled ? "text-slate-100" : "text-slate-400"
+                {/* Platform / Source Badges (Supports Merged Multi-Platform games) */}
+                {platformBadges.map((plat) => {
+                  const badgeKey = plat.id + "_" + plat.gameId;
+                  const isActive = activeBadge
+                    ? activeBadge.id + "_" + activeBadge.gameId === badgeKey
+                    : false;
+                  return (
+                    <button
+                      key={badgeKey}
+                      type="button"
+                      onClick={() => setSelectedBadgeKey(badgeKey)}
+                      title={
+                        plat.isInstalled
+                          ? `${plat.title} (Installed on PC) — Click to select`
+                          : `${plat.title} (Cloud / Not Installed) — Click to select`
+                      }
+                      className={`w-14 h-12 rounded-xl flex flex-col items-center justify-center p-1 text-center transition-all cursor-pointer ${
+                        isActive
+                          ? "bg-white/20 border-2 border-white shadow-[0_0_15px_rgba(255,255,255,0.35)] text-white scale-105"
+                          : plat.isInstalled
+                          ? "bg-white/[0.08] border border-white/50 text-white/90 hover:opacity-100 opacity-80 hover:bg-white/[0.12]"
+                          : "bg-black/35 border border-white/10 hover:border-white/20 text-slate-400 opacity-60 hover:opacity-90"
                       }`}
                     >
-                      {plat.label}
-                    </div>
-                  </div>
-                ))}
+                      {plat.icon}
+                      <div
+                        className={`text-[7px] font-bold tracking-wider uppercase mt-1 truncate max-w-full px-0.5 ${
+                          isActive
+                            ? "text-white font-black"
+                            : plat.isInstalled
+                            ? "text-slate-100"
+                            : "text-slate-400"
+                        }`}
+                      >
+                        {plat.label}
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
 
               {/* Anchored Vertical Cover Poster - 200px wide, no line border */}
@@ -916,6 +1093,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                   coverSrc.endsWith(".webm") || coverSrc.endsWith(".mp4") ? (
                     <video
                       src={coverSrc}
+                      poster={getStaticFallbackCover(coverSrc)}
                       autoPlay
                       loop
                       muted
@@ -1011,7 +1189,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                       title="Manage Trailers"
                       className="px-2.5 py-1 rounded-lg bg-black/85 hover:bg-black text-white text-[10px] font-bold border border-white/20 shadow-md flex items-center space-x-1 cursor-pointer"
                     >
-                      <Film className="w-3 h-3 text-cyan-400" />
+                      <Film className="w-3 h-3 theme-accent-text" />
                       <span>Manage Trailers</span>
                     </button>
                   </div>
@@ -1118,7 +1296,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
 
               {/* Tab 2: Achievements (Full Showcase) */}
               {activeTab === "achievements" && (
-                <AchievementsTab game={game} />
+                <AchievementsTab key={activeGame.id} game={activeGame} />
               )}
 
               {/* Tab 3: News & Activity Feed (Terraria Style) */}
@@ -1126,7 +1304,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                 <div className="space-y-5">
                   {isLoadingNews ? (
                     <div className="flex flex-col items-center justify-center py-16 space-y-3 text-zinc-400 text-xs">
-                      <Loader2 className="w-6 h-6 animate-spin text-purple-400" />
+                      <Loader2 className="w-6 h-6 animate-spin theme-accent-text" />
                       <span>Fetching latest news and patch notes...</span>
                     </div>
                   ) : newsItems.length === 0 ? (
@@ -1281,7 +1459,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                                         })}
                                       </span>
                                     </div>
-                                    <h5 className="text-xs font-bold text-white group-hover:text-purple-200 transition-colors line-clamp-2">
+                                    <h5 className="text-xs font-bold text-white group-hover:theme-accent-text transition-colors line-clamp-2">
                                       {item.title}
                                     </h5>
                                     <p className="text-[11px] text-zinc-400 leading-relaxed line-clamp-2">
@@ -1404,7 +1582,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                     <span>Recent Activity</span>
                   </span>
                   <span className="text-slate-300 font-mono text-right truncate">
-                    {game.last_played || (game.playtime_seconds > 0 ? "Played (Date unknown)" : "Never")}
+                    {activeGame.last_played || (activeGame.playtime_seconds > 0 ? "Played (Date unknown)" : "Never")}
                   </span>
                 </div>
 
@@ -1429,15 +1607,15 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                   </span>
                   <button
                     type="button"
-                    onClick={() => onToggleSource?.(game.source)}
-                    title={`Filter by ${game.source}`}
+                    onClick={() => onToggleSource?.(activeGame.source)}
+                    title={`Filter by ${activeGame.source}`}
                     className={`px-2 py-0.5 rounded border text-[11px] font-semibold text-right transition-all cursor-pointer ${
-                      selectedSources?.includes(game.source)
+                      selectedSources?.includes(activeGame.source)
                         ? "bg-white text-zinc-950 font-bold border-white"
                         : "bg-white/5 border-white/10 text-slate-200 hover:bg-white/15 hover:text-white"
                     }`}
                   >
-                    {game.source}
+                    {activeGame.source}
                   </button>
                 </div>
 
@@ -1470,6 +1648,19 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                     </div>
                   </div>
                 )}
+
+                {/* User Score */}
+                {game.user_rating ? (
+                  <div className="flex items-center justify-between gap-2 min-w-0">
+                    <span className="text-slate-400 flex items-center space-x-1.5 shrink-0">
+                      <Star className="w-3 h-3 text-slate-400" />
+                      <span>User Score</span>
+                    </span>
+                    <span className="text-slate-200 font-bold font-mono text-right">
+                      {game.user_rating}
+                    </span>
+                  </div>
+                ) : null}
 
                 {/* Community Score */}
                 <div className="flex items-center justify-between gap-2 min-w-0">
@@ -1532,7 +1723,8 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
 
             {/* 3. Quick Achievements Showcase Widget */}
             <AchievementsQuickWidget
-              game={game}
+              key={activeGame.id}
+              game={activeGame}
               onOpenFullAchievements={() => setActiveTab("achievements")}
             />
           </div>
@@ -1544,7 +1736,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
       <div className="absolute bottom-0 inset-x-0 h-20 px-6 lg:px-8 pb-4 flex items-end justify-between select-none z-30 pointer-events-none bg-transparent">
         {/* Left Side: Stats (Completion Status, Last Played, Time Played - Clean and Scaled to Match Bottom Bar Enlargement) */}
         <div
-          key={`stats_${game.id}`}
+          key={`stats_${activeGame.id}`}
           className="flex items-center space-x-10 text-slate-300 pointer-events-auto animate-game-switch"
         >
           {/* Completion Status */}
@@ -1576,7 +1768,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
             <div>
               <div className="text-xs text-slate-400 uppercase font-bold tracking-wider">Last Played</div>
               <div className="font-extrabold text-slate-100 font-mono text-base">
-                {game.last_played || (game.playtime_seconds > 0 ? "Played (Date unknown)" : "Never")}
+                {activeGame.last_played || (activeGame.playtime_seconds > 0 ? "Played (Date unknown)" : "Never")}
               </div>
             </div>
           </div>
@@ -1587,7 +1779,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
             <div>
               <div className="text-xs text-slate-400 uppercase font-bold tracking-wider">Time Played</div>
               <div className="font-extrabold text-slate-100 font-mono text-base">
-                {formatPlaytime(game.playtime_seconds)}
+                {formatPlaytime(activeGame.playtime_seconds)}
               </div>
             </div>
           </div>
@@ -1644,7 +1836,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                   }}
                   className="w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl text-left text-slate-200 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
                 >
-                  <Film className="w-4 h-4 text-cyan-400 shrink-0" />
+                  <Film className="w-4 h-4 theme-accent-text shrink-0" />
                   <span>{trailers.length > 0 ? "Manage Trailers" : "Add Trailer"}</span>
                 </button>
 
@@ -1770,24 +1962,30 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
               <span className="group-hover/run:hidden">Running</span>
               <span className="hidden group-hover/run:inline">Exit Game</span>
             </button>
-          ) : !game.is_installed ? (
+          ) : !activeGame.is_installed ? (
             <button
-              onClick={() => onLaunch(game)}
+              onClick={async () => {
+                try {
+                  await invoke("install_game", { gameId: activeGame.id });
+                } catch (e) {
+                  onLaunch(activeGame);
+                }
+              }}
               disabled={isLaunching}
               className="w-[200px] h-12 rounded-full flex items-center justify-center space-x-2.5 text-sm font-black tracking-wider uppercase transition-all shadow-xl cursor-pointer bg-white text-slate-950 play-btn-glow"
             >
               <Download className="w-4.5 h-4.5" />
               <span>Install</span>
             </button>
-          ) : game.play_actions && game.play_actions.length > 0 ? (
+          ) : activeGame.play_actions && activeGame.play_actions.length > 0 ? (
             /* 80/20 Split Play Button for Games with Multiple Play Actions */
             <div className="relative" ref={playActionsDropdownRef}>
               <div className="w-[220px] h-12 rounded-full flex overflow-hidden shadow-xl play-btn-glow bg-white text-slate-950 font-black">
                 {/* 80% Play Primary Action */}
                 <button
                   onClick={() => {
-                    const primary = game.play_actions?.find((a) => a.is_primary);
-                    onLaunch(game, primary?.id);
+                    const primary = activeGame.play_actions?.find((a) => a.is_primary);
+                    onLaunch(activeGame, primary?.id);
                   }}
                   disabled={isLaunching}
                   className="flex-1 h-full flex items-center justify-center space-x-2 px-3 text-sm tracking-wider uppercase transition-colors hover:bg-zinc-200 cursor-pointer disabled:opacity-50"
@@ -1833,7 +2031,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                   <button
                     onClick={() => {
                       setIsPlayActionsDropdownOpen(false);
-                      onLaunch(game);
+                      onLaunch(activeGame);
                     }}
                     className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-left text-zinc-200 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
                   >
@@ -1844,21 +2042,21 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                   </button>
 
                   {/* Configured Actions */}
-                  {game.play_actions.map((act) => (
+                  {activeGame.play_actions.map((act) => (
                     <button
                       key={act.id}
                       onClick={() => {
                         setIsPlayActionsDropdownOpen(false);
-                        onLaunch(game, act.id);
+                        onLaunch(activeGame, act.id);
                       }}
                       className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-left text-zinc-200 hover:text-white hover:bg-white/10 transition-colors cursor-pointer group"
                     >
                       <div className="flex items-center space-x-2 truncate pr-2">
-                        <Play className="w-3.5 h-3.5 text-purple-400 shrink-0 group-hover:fill-purple-400" />
+                        <Play className="w-3.5 h-3.5 theme-accent-text shrink-0 group-hover:fill-[var(--app-accent-color)]" />
                         <span className="truncate font-semibold">{act.name}</span>
                       </div>
                       {act.is_primary && (
-                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 font-mono shrink-0">
+                        <span className="text-[9px] px-1.5 py-0.5 rounded theme-accent-pill font-mono shrink-0">
                           Primary
                         </span>
                       )}
@@ -1883,7 +2081,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
           ) : (
             /* Single Large Play Button when no custom play_actions are configured */
             <button
-              onClick={() => onLaunch(game)}
+              onClick={() => onLaunch(activeGame)}
               disabled={isLaunching}
               className={`w-[200px] h-12 rounded-full flex items-center justify-center space-x-2.5 text-sm font-black tracking-wider uppercase transition-all shadow-xl cursor-pointer ${
                 isLaunching

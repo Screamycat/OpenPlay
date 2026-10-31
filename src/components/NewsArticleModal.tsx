@@ -51,7 +51,7 @@ function renderFormattedBBCode(text: string) {
   // Links
   formatted = formatted.replace(
     /\[url=([^\]]+)\](.*?)\[\/url\]/gi,
-    '<a href="$1" target="_blank" rel="noopener noreferrer" class="text-cyan-400 hover:text-cyan-300 underline font-medium">$2</a>'
+    '<a href="$1" target="_blank" rel="noopener noreferrer" class="theme-accent-text underline font-medium hover:opacity-80">$2</a>'
   );
 
   // Lists
@@ -106,10 +106,10 @@ export const NewsArticleModal: React.FC<NewsArticleModalProps> = ({
             <span
               className={`px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wider uppercase border ${
                 category === "MAJOR UPDATE"
-                  ? "bg-purple-500/20 text-purple-300 border-purple-500/30"
+                  ? "theme-accent-pill"
                   : category === "PATCH NOTES"
                   ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/30"
-                  : "bg-cyan-500/20 text-cyan-300 border-cyan-500/30"
+                  : "bg-white/10 text-zinc-300 border-white/15"
               }`}
             >
               {category}

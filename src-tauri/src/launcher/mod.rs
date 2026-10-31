@@ -125,6 +125,33 @@ fn find_active_pids_for_game(
 
 pub struct GameLauncher;
 
+fn split_cli_arguments(args: &str) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut in_quotes = false;
+    let mut quote_char = '"';
+
+    for c in args.chars() {
+        if (c == '"' || c == '\'') && !in_quotes {
+            in_quotes = true;
+            quote_char = c;
+        } else if in_quotes && c == quote_char {
+            in_quotes = false;
+        } else if c.is_whitespace() && !in_quotes {
+            if !current.is_empty() {
+                parts.push(current);
+                current = String::new();
+            }
+        } else {
+            current.push(c);
+        }
+    }
+    if !current.is_empty() {
+        parts.push(current);
+    }
+    parts
+}
+
 impl GameLauncher {
     pub fn launch_game(
         app_handle: AppHandle,
@@ -135,6 +162,7 @@ impl GameLauncher {
         executable_path: Option<String>,
         install_directory: Option<String>,
         launch_arguments: Option<String>,
+        emulator_id: Option<String>,
     ) -> Result<String, String> {
         let now_str = chrono::Local::now().format("%Y-%m-%d %H:%M").to_string();
 
@@ -400,11 +428,323 @@ impl GameLauncher {
             }
         }
 
-        // Custom / Manual game
-        if let Some(exe_path) = executable_path {
+        // Emulated Game
+        if source.to_lowercase() == "emulation" {
+            let rom_path = executable_path.ok_or_else(|| "Missing ROM file path for emulated game".to_string())?;
+
+            let configured_consoles = db.get_configured_consoles().unwrap_or_default();
+            let configured = if let Some(ref emu_id) = emulator_id {
+                configured_consoles.iter().find(|c| &c.id == emu_id).cloned()
+            } else {
+                None
+            };
+
+            let (exe_path, args_template, emu_name) = if let Some(conf) = configured {
+                let mut args = conf.arguments_template.clone();
+                args = args.replace("{rom_path}", &rom_path);
+                if let Some(ref core) = conf.core_name {
+                    args = args.replace("{core}", core);
+                }
+                if let Some(ref custom_args) = launch_arguments {
+                    if !custom_args.trim().is_empty() {
+                        args = format!("{} {}", args, custom_args.trim());
+                    }
+                }
+                (conf.executable_path, args, conf.name)
+            } else {
+                let emulator_profiles = db.get_emulator_profiles().unwrap_or_default();
+                let profile = if let Some(ref emu_id) = emulator_id {
+                    emulator_profiles.iter().find(|e| &e.id == emu_id).cloned()
+                } else {
+                    None
+                }
+                .or_else(|| emulator_profiles.iter().find(|e| e.is_installed).cloned())
+                .or_else(|| emulator_profiles.first().cloned())
+                .ok_or_else(|| "No emulator or console configured. Please set up a console in Library Manager > Emulation.".to_string())?;
+
+                if profile.executable_path.trim().is_empty() {
+                    return Err(format!("Emulator '{}' has no executable path configured", profile.name));
+                }
+
+                let mut args = profile.arguments_template.clone();
+                args = args.replace("{rom_path}", &rom_path);
+                if let Some(ref core) = profile.selected_core {
+                    args = args.replace("{core}", core);
+                }
+                if let Some(ref custom_args) = launch_arguments {
+                    if !custom_args.trim().is_empty() {
+                        args = format!("{} {}", args, custom_args.trim());
+                    }
+                }
+                (profile.executable_path, args, profile.name)
+            };
+
+            if exe_path.trim().is_empty() {
+                return Err(format!("Console/Emulator '{}' has no executable path configured", emu_name));
+            }
+
+            let mut cmd = Command::new(&exe_path);
+            let emu_path_buf = std::path::PathBuf::from(&exe_path);
+            let parent_dir = emu_path_buf.parent().map(|p| p.to_string_lossy().to_string());
+            let emu_filename = emu_path_buf
+                .file_name()
+                .map(|f| f.to_string_lossy().to_lowercase())
+                .unwrap_or_default();
+
+            if let Some(parent) = emu_path_buf.parent() {
+                cmd.current_dir(parent);
+            }
+
+            let parts = split_cli_arguments(&args_template);
+            cmd.args(parts);
+
+            let start_time = Instant::now();
+            let child = cmd
+                .spawn()
+                .map_err(|e| format!("Failed to execute emulator '{}' ({}): {}", emu_name, exe_path, e))?;
+
+            let child_pid = child.id();
+            let candidate_exes = if !emu_filename.is_empty() {
+                vec![emu_filename]
+            } else {
+                Vec::new()
+            };
+
+            let _ = db.update_playtime(&game_id, 0, &now_str);
+            let _ = app_handle.emit(
+                "game-launched",
+                serde_json::json!({
+                    "id": &game_id,
+                    "last_played": &now_str,
+                }),
+            );
+
+            {
+                let mut map = running_games_map().lock().unwrap();
+                map.insert(
+                    game_id.clone(),
+                    RunningGameInfo {
+                        game_id: game_id.clone(),
+                        pids: vec![child_pid],
+                        candidate_exes: candidate_exes.clone(),
+                        install_directory: parent_dir.clone(),
+                        start_time,
+                    },
+                );
+            }
+            let _ = app_handle.emit("game-running", serde_json::json!({ "id": &game_id }));
+
+            let app_handle_clone = app_handle.clone();
+            let db_clone = db.clone();
+            let gid = game_id.clone();
+            let inst_dir = parent_dir;
+            let candidate_exes_clone = candidate_exes.clone();
+
+            std::thread::spawn(move || {
+                let mut sys = sysinfo::System::new();
+                let mut has_started = false;
+                let mut consecutive_missing = 0;
+
+                for tick in 0..1000000 {
+                    std::thread::sleep(std::time::Duration::from_millis(1500));
+
+                    {
+                        let map = running_games_map().lock().unwrap();
+                        if !map.contains_key(&gid) {
+                            return;
+                        }
+                    }
+
+                    sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+                    let active_pids = find_active_pids_for_game(
+                        &sys,
+                        &candidate_exes_clone,
+                        inst_dir.as_deref(),
+                    );
+
+                    if !active_pids.is_empty() {
+                        has_started = true;
+                        consecutive_missing = 0;
+                        let mut map = running_games_map().lock().unwrap();
+                        if let Some(info) = map.get_mut(&gid) {
+                            info.pids = active_pids;
+                        }
+                    } else if has_started {
+                        consecutive_missing += 1;
+                        if consecutive_missing >= 2 {
+                            break;
+                        }
+                    } else if tick >= 30 {
+                        break;
+                    }
+                }
+
+                {
+                    let mut map = running_games_map().lock().unwrap();
+                    map.remove(&gid);
+                }
+                let elapsed = start_time.elapsed().as_secs();
+                let end_str = chrono::Local::now().format("%Y-%m-%d %H:%M").to_string();
+                let _ = db_clone.update_playtime(&gid, elapsed, &end_str);
+                let _ = app_handle_clone.emit(
+                    "game-stopped",
+                    serde_json::json!({
+                        "id": gid,
+                        "elapsed_seconds": elapsed,
+                        "last_played": end_str
+                    }),
+                );
+            });
+
+            return Ok(now_str);
+        }
+
+        // Resolve fallback URI for GOG if no direct executable_path is set
+        let resolved_executable = if executable_path.is_none() && source.eq_ignore_ascii_case("gog") {
+            source_id.as_ref().map(|sid| format!("goggalaxy://openGameView/{}", sid))
+        } else if source.eq_ignore_ascii_case("roblox") {
+            // Dynamically resolve latest Roblox binary if the old version hash folder was updated
+            match executable_path {
+                Some(ref p) if Path::new(p).exists() => Some(p.clone()),
+                _ => crate::scanner::providers::RobloxScanner::find_latest_roblox_player()
+                    .map(|(exe, _)| exe.to_string_lossy().to_string())
+                    .or(executable_path),
+            }
+        } else {
+            executable_path
+        };
+
+        // Custom / Manual / Storefront URI / Shortcut game
+        if let Some(exe_path) = resolved_executable {
+            let trimmed_exe = exe_path.trim();
+            let is_protocol_uri = trimmed_exe.contains("://") || trimmed_exe.starts_with("roblox-player:");
+            let is_shell_app = trimmed_exe.to_lowercase().starts_with("shell:appsfolder\\");
+            let is_shortcut = trimmed_exe.to_lowercase().ends_with(".lnk")
+                || trimmed_exe.to_lowercase().ends_with(".url");
+
+            if is_protocol_uri || is_shell_app || is_shortcut {
+                #[cfg(target_os = "windows")]
+                {
+                    if is_shell_app {
+                        Command::new("explorer")
+                            .arg(trimmed_exe)
+                            .spawn()
+                            .map_err(|e| format!("Failed to launch Xbox/Store app '{}': {}", trimmed_exe, e))?;
+                    } else {
+                        Command::new("cmd")
+                            .args(["/C", "start", "", trimmed_exe])
+                            .spawn()
+                            .map_err(|e| format!("Failed to launch '{}' via system handler: {}", trimmed_exe, e))?;
+                    }
+                }
+
+                #[cfg(not(target_os = "windows"))]
+                {
+                    Command::new("xdg-open")
+                        .arg(trimmed_exe)
+                        .spawn()
+                        .map_err(|e| format!("Failed to launch '{}': {}", trimmed_exe, e))?;
+                }
+
+                let _ = db.update_playtime(&game_id, 0, &now_str);
+                let _ = app_handle.emit(
+                    "game-launched",
+                    serde_json::json!({
+                        "id": &game_id,
+                        "last_played": &now_str,
+                    }),
+                );
+
+                // Monitor install_directory executables if available
+                if let Some(ref dir) = install_directory {
+                    let candidate_exes = get_candidate_executables(dir);
+                    if !candidate_exes.is_empty() {
+                        let start_time = Instant::now();
+                        {
+                            let mut map = running_games_map().lock().unwrap();
+                            map.insert(
+                                game_id.clone(),
+                                RunningGameInfo {
+                                    game_id: game_id.clone(),
+                                    pids: Vec::new(),
+                                    candidate_exes: candidate_exes.clone(),
+                                    install_directory: install_directory.clone(),
+                                    start_time,
+                                },
+                            );
+                        }
+                        let _ = app_handle.emit("game-running", serde_json::json!({ "id": &game_id }));
+
+                        let app_handle_clone = app_handle.clone();
+                        let db_clone = db.clone();
+                        let gid = game_id.clone();
+                        let inst_dir = install_directory.clone();
+
+                        std::thread::spawn(move || {
+                            let mut sys = sysinfo::System::new();
+                            let mut has_started = false;
+                            let mut consecutive_missing = 0;
+
+                            for tick in 0..1000000 {
+                                std::thread::sleep(std::time::Duration::from_millis(1500));
+                                {
+                                    let map = running_games_map().lock().unwrap();
+                                    if !map.contains_key(&gid) {
+                                        return;
+                                    }
+                                }
+
+                                sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+                                let active_pids = find_active_pids_for_game(
+                                    &sys,
+                                    &candidate_exes,
+                                    inst_dir.as_deref(),
+                                );
+
+                                if !active_pids.is_empty() {
+                                    has_started = true;
+                                    consecutive_missing = 0;
+                                    let mut map = running_games_map().lock().unwrap();
+                                    if let Some(info) = map.get_mut(&gid) {
+                                        info.pids = active_pids;
+                                    }
+                                } else if has_started {
+                                    consecutive_missing += 1;
+                                    if consecutive_missing >= 2 {
+                                        break;
+                                    }
+                                } else if tick >= 40 {
+                                    break;
+                                }
+                            }
+
+                            {
+                                let mut map = running_games_map().lock().unwrap();
+                                map.remove(&gid);
+                            }
+                            let elapsed = start_time.elapsed().as_secs();
+                            let end_str = chrono::Local::now().format("%Y-%m-%d %H:%M").to_string();
+                            let _ = db_clone.update_playtime(&gid, elapsed, &end_str);
+                            let _ = app_handle_clone.emit(
+                                "game-stopped",
+                                serde_json::json!({
+                                    "id": gid,
+                                    "elapsed_seconds": elapsed,
+                                    "last_played": end_str
+                                }),
+                            );
+                        });
+                    }
+                }
+
+                return Ok(now_str);
+            }
+
             let mut cmd = Command::new(&exe_path);
             let exe_path_buf = std::path::PathBuf::from(&exe_path);
-            let parent_dir = exe_path_buf.parent().map(|p| p.to_string_lossy().to_string());
+            let parent_dir = install_directory
+                .clone()
+                .or_else(|| exe_path_buf.parent().map(|p| p.to_string_lossy().to_string()));
             let exe_filename = exe_path_buf
                 .file_name()
                 .map(|f| f.to_string_lossy().to_lowercase())
@@ -415,7 +755,7 @@ impl GameLauncher {
             }
 
             if let Some(args_str) = launch_arguments {
-                let parts: Vec<&str> = args_str.split_whitespace().collect();
+                let parts = split_cli_arguments(&args_str);
                 cmd.args(parts);
             }
 

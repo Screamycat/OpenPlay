@@ -1,5 +1,5 @@
 use crate::models::{
-    Achievement, AppConfig, Game, GameAchievementSummary, GameLink, GameTrailer, HunterProfile,
+    Achievement, AppConfig, ConfiguredConsole, EmulatorProfile, Game, GameAchievementSummary, GameLink, GameTrailer, HunterProfile,
     LibraryIntegration,
 };
 use rusqlite::{params, Connection, Result};
@@ -94,11 +94,34 @@ impl Database {
         let _ = conn.execute("ALTER TABLE games ADD COLUMN play_actions TEXT", []);
         let _ = conn.execute("ALTER TABLE games ADD COLUMN auto_beaten INTEGER NOT NULL DEFAULT 0", []);
         let _ = conn.execute("ALTER TABLE games ADD COLUMN beaten_prompt_playtime INTEGER", []);
+        let _ = conn.execute("ALTER TABLE games ADD COLUMN emulator_id TEXT", []);
 
         // Normalize date_added formats to clean YYYY-MM-DD and strip broken replacement chars in titles
         let _ = conn.execute("UPDATE games SET date_added = SUBSTR(date_added, 1, 10) WHERE date_added LIKE '%T%'", []);
         let _ = conn.execute("UPDATE games SET title = REPLACE(title, char(65533), '') WHERE title LIKE '%' || char(65533) || '%'", []);
         let _ = conn.execute("UPDATE games SET completion_status = 'Auto' WHERE completion_status IN ('Not Played', 'Playing', 'Played') OR completion_status IS NULL", []);
+
+        // Bug 008 Cleanup: Deduplicate legacy playnite_% records that duplicate native store games
+        let _ = conn.execute(
+            "DELETE FROM games WHERE id LIKE 'playnite_%' AND EXISTS (
+                SELECT 1 FROM games g2
+                WHERE g2.id NOT LIKE 'playnite_%'
+                  AND g2.source = games.source
+                  AND g2.source_id IS NOT NULL
+                  AND g2.source_id != ''
+                  AND g2.source_id = games.source_id
+            )",
+            [],
+        );
+        let _ = conn.execute(
+            "DELETE FROM games WHERE id LIKE 'playnite_%' AND EXISTS (
+                SELECT 1 FROM games g2
+                WHERE g2.id NOT LIKE 'playnite_%'
+                  AND LOWER(TRIM(g2.title)) = LOWER(TRIM(games.title))
+                  AND LOWER(TRIM(g2.source)) = LOWER(TRIM(games.source))
+            )",
+            [],
+        );
 
         conn.execute(
             "CREATE TABLE IF NOT EXISTS integrations (
@@ -150,6 +173,38 @@ impl Database {
             [],
         );
 
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS emulators (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                emulator_type TEXT NOT NULL,
+                executable_path TEXT NOT NULL,
+                arguments_template TEXT NOT NULL,
+                selected_core TEXT,
+                supported_platforms TEXT NOT NULL,
+                is_installed INTEGER NOT NULL DEFAULT 1
+            )",
+            [],
+        )?;
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS configured_consoles (
+                id TEXT PRIMARY KEY,
+                console_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                manufacturer TEXT NOT NULL,
+                emulator_name TEXT NOT NULL,
+                emulator_type TEXT NOT NULL,
+                executable_path TEXT NOT NULL,
+                core_name TEXT,
+                rom_directory TEXT NOT NULL,
+                arguments_template TEXT NOT NULL,
+                extensions TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )",
+            [],
+        )?;
+
         Ok(())
     }
 
@@ -164,7 +219,7 @@ impl Database {
                 date_added, completion_status, description, notes, links, screenshots, size_on_disk,
                 trailers, age_rating, critic_score, series, hltb_main, hltb_extra, hltb_completionist,
                 tags, categories, region, play_count, is_hidden, play_actions,
-                auto_beaten, beaten_prompt_playtime
+                auto_beaten, beaten_prompt_playtime, emulator_id
             FROM games ORDER BY title ASC")
             .map_err(|e| e.to_string())?;
 
@@ -243,6 +298,7 @@ impl Database {
                     play_actions,
                     auto_beaten: auto_beaten_int != 0,
                     beaten_prompt_playtime,
+                    emulator_id: row.get(46)?,
                 })
             })
             .map_err(|e| e.to_string())?;
@@ -277,11 +333,11 @@ impl Database {
                 date_added, completion_status, description, notes, links, screenshots, size_on_disk,
                 trailers, age_rating, critic_score, series, hltb_main, hltb_extra, hltb_completionist,
                 tags, categories, region, play_count, is_hidden, play_actions,
-                auto_beaten, beaten_prompt_playtime
+                auto_beaten, beaten_prompt_playtime, emulator_id
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
                 ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31,
-                ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44, ?45, ?46
+                ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44, ?45, ?46, ?47
             ) ON CONFLICT(id) DO UPDATE SET
                 title = excluded.title,
                 sorting_title = COALESCE(excluded.sorting_title, games.sorting_title),
@@ -318,9 +374,15 @@ impl Database {
                 features = CASE WHEN excluded.features != '[]' THEN excluded.features ELSE games.features END,
                 platforms = CASE WHEN excluded.platforms != '[]' THEN excluded.platforms ELSE games.platforms END,
                 community_score = COALESCE(excluded.community_score, games.community_score),
-                playtime_seconds = CASE WHEN excluded.playtime_seconds > 0 THEN excluded.playtime_seconds ELSE games.playtime_seconds END,
+                playtime_seconds = CASE WHEN excluded.playtime_seconds > games.playtime_seconds THEN excluded.playtime_seconds ELSE games.playtime_seconds END,
                 last_played = COALESCE(excluded.last_played, games.last_played),
                 date_added = COALESCE(games.date_added, excluded.date_added),
+                completion_status = CASE
+                    WHEN (games.completion_status IS NULL OR games.completion_status = 'Auto' OR games.completion_status = 'Not Played')
+                         AND (excluded.playtime_seconds > 0 OR games.playtime_seconds > 0)
+                    THEN 'Played'
+                    ELSE COALESCE(games.completion_status, excluded.completion_status)
+                END,
                 description = CASE WHEN games.description IS NOT NULL AND trim(games.description) != '' THEN games.description ELSE excluded.description END,
                 links = CASE WHEN excluded.links != '[]' THEN excluded.links ELSE games.links END,
                 screenshots = CASE WHEN excluded.screenshots != '[]' THEN excluded.screenshots ELSE games.screenshots END,
@@ -339,7 +401,8 @@ impl Database {
                 is_hidden = COALESCE(excluded.is_hidden, games.is_hidden),
                 play_actions = CASE WHEN excluded.play_actions != '[]' THEN excluded.play_actions ELSE games.play_actions END,
                 auto_beaten = games.auto_beaten,
-                beaten_prompt_playtime = games.beaten_prompt_playtime",
+                beaten_prompt_playtime = games.beaten_prompt_playtime,
+                emulator_id = COALESCE(excluded.emulator_id, games.emulator_id)",
             params![
                 game.id,
                 game.title,
@@ -387,6 +450,7 @@ impl Database {
                 play_actions_json,
                 if game.auto_beaten { 1 } else { 0 },
                 game.beaten_prompt_playtime.map(|v| v as i64),
+                game.emulator_id,
             ],
         ).map_err(|e| e.to_string())?;
 
@@ -451,8 +515,9 @@ impl Database {
                 is_hidden = ?42,
                 play_actions = ?43,
                 auto_beaten = ?44,
-                beaten_prompt_playtime = ?45
-            WHERE id = ?46",
+                beaten_prompt_playtime = ?45,
+                emulator_id = ?46
+            WHERE id = ?47",
             params![
                 game.title,
                 game.sorting_title,
@@ -499,6 +564,7 @@ impl Database {
                 play_actions_json,
                 if game.auto_beaten { 1 } else { 0 },
                 game.beaten_prompt_playtime.map(|v| v as i64),
+                game.emulator_id,
                 game.id,
             ],
         ).map_err(|e| e.to_string())?;
@@ -529,6 +595,18 @@ impl Database {
         .map_err(|e| e.to_string())?;
 
         Ok(new_state == 1)
+    }
+
+    pub fn set_favorite(&self, id: &str, is_favorite: bool) -> Result<bool, String> {
+        let conn = self.conn.lock().unwrap();
+        let state_val = if is_favorite { 1 } else { 0 };
+        conn.execute(
+            "UPDATE games SET is_favorite = ?1 WHERE id = ?2",
+            params![state_val, id],
+        )
+        .map_err(|e| e.to_string())?;
+
+        Ok(is_favorite)
     }
 
     pub fn update_playtime(&self, id: &str, add_seconds: u64, last_played_iso: &str) -> Result<(), String> {
@@ -674,6 +752,18 @@ impl Database {
         }
         if cfg.trailer_muted.is_none() {
             cfg.trailer_muted = Some(true);
+        }
+        if cfg.merge_duplicates.is_none() {
+            cfg.merge_duplicates = Some(true);
+        }
+        if cfg.unmerged_game_ids.is_none() {
+            cfg.unmerged_game_ids = Some(Vec::new());
+        }
+        if cfg.sync_on_startup.is_none() {
+            cfg.sync_on_startup = Some(true);
+        }
+        if cfg.periodic_playtime_sync_hours.is_none() {
+            cfg.periodic_playtime_sync_hours = Some(0);
         }
 
         Ok(cfg)
@@ -825,14 +915,14 @@ impl Database {
                 let achs = self.get_game_achievements(&game.id)?;
                 for ach in achs {
                     if ach.is_unlocked {
-                        let pts = if ach.rarity_percentage < 10.0 {
-                            100 // Ultra Rare
-                        } else if ach.rarity_percentage < 20.0 {
-                            50  // Rare
-                        } else if ach.rarity_percentage < 50.0 {
-                            25  // Uncommon
+                        let pts = if ach.rarity_percentage > 0.0 && ach.rarity_percentage < 10.0 {
+                            100 // Ultra Rare (< 10%)
+                        } else if ach.rarity_percentage >= 10.0 && ach.rarity_percentage < 20.0 {
+                            50  // Rare (10% - 20%)
+                        } else if ach.rarity_percentage >= 20.0 && ach.rarity_percentage < 50.0 {
+                            25  // Uncommon (20% - 50%)
                         } else {
-                            10  // Common
+                            10  // Common (>= 50% or unrated)
                         };
                         total_score += pts;
                         all_unlocked_achievements.push(ach);
@@ -843,13 +933,33 @@ impl Database {
             }
         }
 
-        // Sort all unlocked by global rarity percentage ascending (rarest first)
-        all_unlocked_achievements.sort_by(|a, b| {
+        // Sort unlocked achievements by global rarity percentage (rarest first).
+        // Only consider achievements with genuine measured rarity (> 0.0).
+        // Achievements with 0.0% have missing or unrated telemetry, and must never be prioritized as the rarest.
+        let mut measured_unlocked: Vec<Achievement> = all_unlocked_achievements
+            .iter()
+            .filter(|a| a.rarity_percentage > 0.0)
+            .cloned()
+            .collect();
+        measured_unlocked.sort_by(|a, b| {
             a.rarity_percentage
                 .partial_cmp(&b.rarity_percentage)
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
-        let rarest_achievements = all_unlocked_achievements.into_iter().take(5).collect();
+
+        let rarest_achievements: Vec<Achievement> = if !measured_unlocked.is_empty() {
+            measured_unlocked.into_iter().take(5).collect()
+        } else {
+            // Fallback: If no achievements have percentage data yet, show recently unlocked trophies
+            let mut recent = all_unlocked_achievements;
+            recent.sort_by(|a, b| {
+                b.unlock_time
+                    .as_deref()
+                    .unwrap_or("")
+                    .cmp(a.unlock_time.as_deref().unwrap_or(""))
+            });
+            recent.into_iter().take(5).collect()
+        };
 
         // Almost there games: completion percentage between 70.0% and 99.9%
         let mut almost_there_games: Vec<GameAchievementSummary> = games_summaries
@@ -905,4 +1015,228 @@ impl Database {
             games_summaries,
         })
     }
+
+    pub fn get_emulator_profiles(&self) -> Result<Vec<EmulatorProfile>, String> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare("SELECT id, name, emulator_type, executable_path, arguments_template, selected_core, supported_platforms, is_installed FROM emulators ORDER BY name ASC")
+            .map_err(|e| e.to_string())?;
+
+        let rows = stmt
+            .query_map([], |row| {
+                let platforms_json: String = row.get(6).unwrap_or_else(|_| "[]".to_string());
+                let supported_platforms: Vec<String> = serde_json::from_str(&platforms_json).unwrap_or_default();
+                let is_installed_int: i32 = row.get(7).unwrap_or(1);
+
+                Ok(EmulatorProfile {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    emulator_type: row.get(2)?,
+                    executable_path: row.get(3)?,
+                    arguments_template: row.get(4)?,
+                    selected_core: row.get(5)?,
+                    supported_platforms,
+                    is_installed: is_installed_int != 0,
+                })
+            })
+            .map_err(|e| e.to_string())?;
+
+        let mut list = Vec::new();
+        for r in rows {
+            if let Ok(p) = r {
+                list.push(p);
+            }
+        }
+        Ok(list)
+    }
+
+    pub fn get_emulator_profile(&self, id: &str) -> Result<Option<EmulatorProfile>, String> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare("SELECT id, name, emulator_type, executable_path, arguments_template, selected_core, supported_platforms, is_installed FROM emulators WHERE id = ?1")
+            .map_err(|e| e.to_string())?;
+
+        let mut rows = stmt
+            .query_map(params![id], |row| {
+                let platforms_json: String = row.get(6).unwrap_or_else(|_| "[]".to_string());
+                let supported_platforms: Vec<String> = serde_json::from_str(&platforms_json).unwrap_or_default();
+                let is_installed_int: i32 = row.get(7).unwrap_or(1);
+
+                Ok(EmulatorProfile {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    emulator_type: row.get(2)?,
+                    executable_path: row.get(3)?,
+                    arguments_template: row.get(4)?,
+                    selected_core: row.get(5)?,
+                    supported_platforms,
+                    is_installed: is_installed_int != 0,
+                })
+            })
+            .map_err(|e| e.to_string())?;
+
+        if let Some(Ok(profile)) = rows.next() {
+            Ok(Some(profile))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn save_emulator_profile(&self, profile: &EmulatorProfile) -> Result<(), String> {
+        let conn = self.conn.lock().unwrap();
+        let platforms_json = serde_json::to_string(&profile.supported_platforms).unwrap_or_else(|_| "[]".to_string());
+
+        conn.execute(
+            "INSERT INTO emulators (
+                id, name, emulator_type, executable_path, arguments_template, selected_core, supported_platforms, is_installed
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+            ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name,
+                emulator_type = excluded.emulator_type,
+                executable_path = excluded.executable_path,
+                arguments_template = excluded.arguments_template,
+                selected_core = excluded.selected_core,
+                supported_platforms = excluded.supported_platforms,
+                is_installed = excluded.is_installed",
+            params![
+                profile.id,
+                profile.name,
+                profile.emulator_type,
+                profile.executable_path,
+                profile.arguments_template,
+                profile.selected_core,
+                platforms_json,
+                if profile.is_installed { 1 } else { 0 },
+            ],
+        ).map_err(|e| e.to_string())?;
+
+        Ok(())
+    }
+
+    pub fn delete_emulator_profile(&self, id: &str) -> Result<(), String> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM emulators WHERE id = ?1", params![id])
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub fn get_configured_consoles(&self) -> Result<Vec<ConfiguredConsole>, String> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare("SELECT id, console_id, name, manufacturer, emulator_name, emulator_type, executable_path, core_name, rom_directory, arguments_template, extensions, created_at FROM configured_consoles ORDER BY name ASC")
+            .map_err(|e| e.to_string())?;
+
+        let rows = stmt
+            .query_map([], |row| {
+                let extensions_json: String = row.get(10).unwrap_or_else(|_| "[]".to_string());
+                let extensions: Vec<String> = serde_json::from_str(&extensions_json).unwrap_or_default();
+
+                Ok(ConfiguredConsole {
+                    id: row.get(0)?,
+                    console_id: row.get(1)?,
+                    name: row.get(2)?,
+                    manufacturer: row.get(3)?,
+                    emulator_name: row.get(4)?,
+                    emulator_type: row.get(5)?,
+                    executable_path: row.get(6)?,
+                    core_name: row.get(7)?,
+                    rom_directory: row.get(8)?,
+                    arguments_template: row.get(9)?,
+                    extensions,
+                    created_at: row.get(11)?,
+                })
+            })
+            .map_err(|e| e.to_string())?;
+
+        let mut consoles = Vec::new();
+        for r in rows {
+            if let Ok(c) = r {
+                consoles.push(c);
+            }
+        }
+        Ok(consoles)
+    }
+
+    pub fn get_configured_console(&self, id: &str) -> Result<Option<ConfiguredConsole>, String> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare("SELECT id, console_id, name, manufacturer, emulator_name, emulator_type, executable_path, core_name, rom_directory, arguments_template, extensions, created_at FROM configured_consoles WHERE id = ?1 LIMIT 1")
+            .map_err(|e| e.to_string())?;
+
+        let mut rows = stmt
+            .query_map(params![id], |row| {
+                let extensions_json: String = row.get(10).unwrap_or_else(|_| "[]".to_string());
+                let extensions: Vec<String> = serde_json::from_str(&extensions_json).unwrap_or_default();
+
+                Ok(ConfiguredConsole {
+                    id: row.get(0)?,
+                    console_id: row.get(1)?,
+                    name: row.get(2)?,
+                    manufacturer: row.get(3)?,
+                    emulator_name: row.get(4)?,
+                    emulator_type: row.get(5)?,
+                    executable_path: row.get(6)?,
+                    core_name: row.get(7)?,
+                    rom_directory: row.get(8)?,
+                    arguments_template: row.get(9)?,
+                    extensions,
+                    created_at: row.get(11)?,
+                })
+            })
+            .map_err(|e| e.to_string())?;
+
+        if let Some(Ok(c)) = rows.next() {
+            Ok(Some(c))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn save_configured_console(&self, console: &ConfiguredConsole) -> Result<(), String> {
+        let conn = self.conn.lock().unwrap();
+        let extensions_json = serde_json::to_string(&console.extensions).unwrap_or_else(|_| "[]".to_string());
+
+        conn.execute(
+            "INSERT INTO configured_consoles (
+                id, console_id, name, manufacturer, emulator_name, emulator_type, executable_path, core_name, rom_directory, arguments_template, extensions, created_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+            ON CONFLICT(id) DO UPDATE SET
+                console_id = excluded.console_id,
+                name = excluded.name,
+                manufacturer = excluded.manufacturer,
+                emulator_name = excluded.emulator_name,
+                emulator_type = excluded.emulator_type,
+                executable_path = excluded.executable_path,
+                core_name = excluded.core_name,
+                rom_directory = excluded.rom_directory,
+                arguments_template = excluded.arguments_template,
+                extensions = excluded.extensions,
+                created_at = excluded.created_at",
+            params![
+                console.id,
+                console.console_id,
+                console.name,
+                console.manufacturer,
+                console.emulator_name,
+                console.emulator_type,
+                console.executable_path,
+                console.core_name,
+                console.rom_directory,
+                console.arguments_template,
+                extensions_json,
+                console.created_at,
+            ],
+        ).map_err(|e| e.to_string())?;
+
+        Ok(())
+    }
+
+    pub fn delete_configured_console(&self, id: &str) -> Result<(), String> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM configured_consoles WHERE id = ?1", params![id])
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
 }
+
+

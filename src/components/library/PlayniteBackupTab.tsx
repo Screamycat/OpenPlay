@@ -370,8 +370,8 @@ export const PlayniteBackupTab: React.FC<PlayniteBackupTabProps> = ({ onImportCo
             </div>
 
             <div className="p-2 bg-black/30 rounded-lg border border-white/5">
-              <span className="text-[10px] uppercase font-bold text-purple-400/80 block">Artwork Files</span>
-              <span className="text-sm font-bold text-purple-300 font-mono">{summary.total_artwork_files.toLocaleString()}</span>
+              <span className="text-[10px] uppercase font-bold theme-accent-text opacity-80 block">Artwork Files</span>
+              <span className="text-sm font-bold theme-accent-text font-mono">{summary.total_artwork_files.toLocaleString()}</span>
             </div>
           </div>
 
@@ -385,7 +385,7 @@ export const PlayniteBackupTab: React.FC<PlayniteBackupTabProps> = ({ onImportCo
               {/* Artwork */}
               <label className="flex items-center justify-between p-2 rounded-lg bg-black/25 border border-white/5 cursor-pointer hover:bg-black/40 transition-colors">
                 <div className="flex items-center space-x-2">
-                  <ImageIcon className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+                  <ImageIcon className="w-3.5 h-3.5 theme-accent-text shrink-0" />
                   <span className="text-zinc-200 font-medium">Extract Covers & Artwork</span>
                 </div>
                 <input
@@ -413,7 +413,7 @@ export const PlayniteBackupTab: React.FC<PlayniteBackupTabProps> = ({ onImportCo
               {/* Last Played */}
               <label className="flex items-center justify-between p-2 rounded-lg bg-black/25 border border-white/5 cursor-pointer hover:bg-black/40 transition-colors">
                 <div className="flex items-center space-x-2">
-                  <Clock className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                  <Clock className="w-3.5 h-3.5 text-sky-400 shrink-0" />
                   <span className="text-zinc-200 font-medium">Last Played Dates</span>
                 </div>
                 <input
@@ -444,7 +444,7 @@ export const PlayniteBackupTab: React.FC<PlayniteBackupTabProps> = ({ onImportCo
               {/* Tags & Categories */}
               <label className="flex items-center justify-between p-2 rounded-lg bg-black/25 border border-white/5 cursor-pointer hover:bg-black/40 transition-colors">
                 <div className="flex items-center space-x-2">
-                  <Tag className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                  <Tag className="w-3.5 h-3.5 theme-accent-text shrink-0" />
                   <span className="text-zinc-200 font-medium">Tags, Genres & Features</span>
                 </div>
                 <input

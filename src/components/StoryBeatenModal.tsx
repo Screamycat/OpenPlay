@@ -39,7 +39,10 @@ export const StoryBeatenModal: React.FC<StoryBeatenModalProps> = ({
       >
         {/* Subtle Background Glow Accent */}
         <div className="absolute -top-24 -right-24 w-48 h-48 bg-emerald-500/15 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute -bottom-24 -left-24 w-48 h-48 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none" />
+        <div
+          className="absolute -bottom-24 -left-24 w-48 h-48 rounded-full blur-3xl pointer-events-none opacity-20"
+          style={{ backgroundColor: "var(--app-accent-color, #a855f7)" }}
+        />
 
         {/* Close Button */}
         <button
@@ -88,8 +91,8 @@ export const StoryBeatenModal: React.FC<StoryBeatenModalProps> = ({
           </div>
 
           {/* Auto Mode Explainer Banner */}
-          <div className="flex items-start space-x-2.5 p-3 rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-200 text-xs leading-normal">
-            <Sparkles className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
+          <div className="flex items-start space-x-2.5 p-3 rounded-xl theme-accent-subtle-bg border border-[var(--app-accent-color)]/20 text-zinc-200 text-xs leading-normal">
+            <Sparkles className="w-4 h-4 theme-accent-text shrink-0 mt-0.5" />
             <span>
               <strong>Auto mode stays on:</strong> Marking as beaten keeps automatic tracking active. When you unlock 100% of achievements, your status will automatically advance to <strong>Mastered</strong>!
             </span>

@@ -35,6 +35,50 @@
     border-color: var(--app-accent-color, #a855f7) !important;
   }
 
+  .theme-accent-subtle-bg {
+    background-color: color-mix(in srgb, var(--app-accent-color, #a855f7) 16%, transparent) !important;
+  }
+
+  .theme-accent-subtle-border {
+    border-color: color-mix(in srgb, var(--app-accent-color, #a855f7) 30%, transparent) !important;
+  }
+
+  .theme-accent-pill {
+    background-color: color-mix(in srgb, var(--app-accent-color, #a855f7) 18%, transparent) !important;
+    border-color: color-mix(in srgb, var(--app-accent-color, #a855f7) 35%, transparent) !important;
+    color: var(--app-accent-color, #a855f7) !important;
+  }
+
+  .theme-accent-btn {
+    background-color: var(--app-accent-color, #a855f7) !important;
+    color: #ffffff !important;
+    box-shadow: 0 4px 14px 0 color-mix(in srgb, var(--app-accent-color, #a855f7) 30%, transparent);
+    transition: all 0.15s ease;
+  }
+  .theme-accent-btn:hover {
+    filter: brightness(1.12);
+    box-shadow: 0 6px 20px 0 color-mix(in srgb, var(--app-accent-color, #a855f7) 45%, transparent);
+  }
+  .theme-accent-btn:active {
+    filter: brightness(0.95);
+    transform: scale(0.98);
+  }
+
+  .theme-accent-focus:focus,
+  .theme-accent-focus:focus-visible {
+    outline: none !important;
+    border-color: var(--app-accent-color, #a855f7) !important;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--app-accent-color, #a855f7) 35%, transparent) !important;
+  }
+
+  .theme-accent-ring {
+    --tw-ring-color: color-mix(in srgb, var(--app-accent-color, #a855f7) 50%, transparent) !important;
+  }
+
+  .theme-accent-glow {
+    box-shadow: 0 0 16px color-mix(in srgb, var(--app-accent-color, #a855f7) 35%, transparent) !important;
+  }
+
   body {
     background-color: var(--bg-primary);
     color: var(--text-primary);

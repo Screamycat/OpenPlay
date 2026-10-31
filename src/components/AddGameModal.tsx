@@ -136,7 +136,7 @@ export const AddGameModal: React.FC<AddGameModalProps> = ({
         {/* Header */}
         <div className="px-6 py-4 border-b border-white/10 flex items-center justify-between bg-white/[0.02]">
           <div className="flex items-center space-x-2.5">
-            <div className="p-2 bg-cyan-500/20 text-cyan-300 rounded-xl border border-cyan-500/30">
+            <div className="p-2 theme-accent-subtle-bg theme-accent-text rounded-xl border theme-accent-subtle-border">
               <Plus className="w-4 h-4" />
             </div>
             <div>
@@ -170,19 +170,19 @@ export const AddGameModal: React.FC<AddGameModalProps> = ({
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder="e.g. Hollow Knight, Dead Cells..."
-                className="flex-1 px-3 py-2 bg-black/40 border border-white/10 rounded-xl text-white font-medium focus:outline-none focus:border-cyan-500"
+                className="flex-1 px-3 py-2 bg-black/40 border border-white/10 rounded-xl text-white font-medium focus:outline-none theme-accent-focus"
               />
               <button
                 type="button"
                 disabled={!title.trim() || isFetchingMeta}
                 onClick={handleAutoFetchMeta}
                 title="Auto-fetch cover artwork and details from Steam"
-                className="px-3 py-2 bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 border border-purple-500/30 rounded-xl font-semibold flex items-center space-x-1.5 transition-colors cursor-pointer disabled:opacity-40 shrink-0"
+                className="px-3 py-2 theme-accent-subtle-bg hover:brightness-110 theme-accent-text border theme-accent-subtle-border rounded-xl font-semibold flex items-center space-x-1.5 transition-colors cursor-pointer disabled:opacity-40 shrink-0"
               >
                 {isFetchingMeta ? (
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />
                 ) : (
-                  <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+                  <Sparkles className="w-3.5 h-3.5 theme-accent-text" />
                 )}
                 <span>Auto-Fetch Art</span>
               </button>
@@ -200,7 +200,7 @@ export const AddGameModal: React.FC<AddGameModalProps> = ({
                 value={executablePath}
                 onChange={(e) => setExecutablePath(e.target.value)}
                 placeholder="C:\Games\GameFolder\game.exe"
-                className="flex-1 px-3 py-2 bg-black/40 border border-white/10 rounded-xl text-zinc-200 font-mono text-[11px] truncate focus:outline-none focus:border-cyan-500"
+                className="flex-1 px-3 py-2 bg-black/40 border border-white/10 rounded-xl text-zinc-200 font-mono text-[11px] truncate focus:outline-none theme-accent-focus"
               />
               <button
                 type="button"
@@ -211,7 +211,7 @@ export const AddGameModal: React.FC<AddGameModalProps> = ({
                 {isScanningExe ? (
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />
                 ) : (
-                  <FileCode className="w-3.5 h-3.5 text-cyan-400" />
+                  <FileCode className="w-3.5 h-3.5 theme-accent-text" />
                 )}
                 <span>Browse .exe</span>
               </button>
@@ -229,7 +229,7 @@ export const AddGameModal: React.FC<AddGameModalProps> = ({
                 value={installDirectory}
                 onChange={(e) => setInstallDirectory(e.target.value)}
                 placeholder="C:\Games\GameFolder"
-                className="flex-1 px-3 py-2 bg-black/40 border border-white/10 rounded-xl text-zinc-200 font-mono text-[11px] truncate focus:outline-none focus:border-cyan-500"
+                className="flex-1 px-3 py-2 bg-black/40 border border-white/10 rounded-xl text-zinc-200 font-mono text-[11px] truncate focus:outline-none theme-accent-focus"
               />
               <button
                 type="button"
@@ -252,7 +252,7 @@ export const AddGameModal: React.FC<AddGameModalProps> = ({
               value={launchArguments}
               onChange={(e) => setLaunchArguments(e.target.value)}
               placeholder="-fullscreen -skipintro"
-              className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-xl text-zinc-200 focus:outline-none focus:border-cyan-500 font-mono text-[11px]"
+              className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-xl text-zinc-200 focus:outline-none theme-accent-focus font-mono text-[11px]"
             />
           </div>
 
@@ -267,7 +267,7 @@ export const AddGameModal: React.FC<AddGameModalProps> = ({
                 value={coverImage}
                 onChange={(e) => setCoverImage(e.target.value)}
                 placeholder="https://... or C:\Images\cover.jpg"
-                className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-xl text-zinc-200 focus:outline-none focus:border-cyan-500 font-mono text-[11px] truncate"
+                className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-xl text-zinc-200 focus:outline-none theme-accent-focus font-mono text-[11px] truncate"
               />
             </div>
 
@@ -280,7 +280,7 @@ export const AddGameModal: React.FC<AddGameModalProps> = ({
                 value={backgroundImage}
                 onChange={(e) => setBackgroundImage(e.target.value)}
                 placeholder="https://... or C:\Images\hero.jpg"
-                className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-xl text-zinc-200 focus:outline-none focus:border-cyan-500 font-mono text-[11px] truncate"
+                className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-xl text-zinc-200 focus:outline-none theme-accent-focus font-mono text-[11px] truncate"
               />
             </div>
           </div>
@@ -296,7 +296,7 @@ export const AddGameModal: React.FC<AddGameModalProps> = ({
                 value={developer}
                 onChange={(e) => setDeveloper(e.target.value)}
                 placeholder="e.g. Team Cherry"
-                className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-xl text-zinc-200 focus:outline-none focus:border-cyan-500"
+                className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-xl text-zinc-200 focus:outline-none theme-accent-focus"
               />
             </div>
 
@@ -309,7 +309,7 @@ export const AddGameModal: React.FC<AddGameModalProps> = ({
                 value={genres}
                 onChange={(e) => setGenres(e.target.value)}
                 placeholder="Metroidvania, Action"
-                className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-xl text-zinc-200 focus:outline-none focus:border-cyan-500"
+                className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-xl text-zinc-200 focus:outline-none theme-accent-focus"
               />
             </div>
           </div>
@@ -325,7 +325,7 @@ export const AddGameModal: React.FC<AddGameModalProps> = ({
             </button>
             <button
               type="submit"
-              className="px-5 py-2 bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-bold rounded-xl transition-all shadow-md active:scale-98 cursor-pointer"
+              className="px-5 py-2 theme-accent-btn font-bold rounded-xl transition-all shadow-md active:scale-98 cursor-pointer"
             >
               Add to Library
             </button>

@@ -27,6 +27,7 @@ import { TrailerModal } from "./components/TrailerModal";
 import { DynamicBackground } from "./components/DynamicBackground";
 import { AchievementHunterHub } from "./components/AchievementHunterHub";
 import { HunterProfile } from "./types/achievement";
+import { mergeDuplicateGames, findMergeCandidate } from "./utils/merger";
 import { Gamepad2, Loader2, Sparkles, RefreshCw } from "lucide-react";
 import { resolveImageSrc } from "./utils/image";
 import { UpdateCheckResult } from "./types/update";
@@ -127,6 +128,7 @@ export function App() {
     const tint = appConfig.panel_tint || "#0e0e11";
     document.documentElement.style.setProperty("--app-accent-color", accent);
     document.documentElement.style.setProperty("--app-panel-tint", tint);
+    document.documentElement.style.setProperty("--accent", accent);
   }, [appConfig.accent_color, appConfig.panel_tint]);
 
   // Default cardWidth to 108 for 7 columns, persist in localStorage
@@ -321,10 +323,7 @@ export function App() {
         }
       } catch (e) {}
 
-      // 4. Auto-scan on startup if enabled in settings
-      if (loadedCfg.auto_scan_on_startup) {
-        handleScanLibrary().catch(() => {});
-      }
+      // 4. Background library sync is handled by backend background worker (sync_on_startup)
 
       // 5. Load Hunter Stats for TopNav trophy pill
       loadHunterStats().catch(() => {});
@@ -458,9 +457,24 @@ export function App() {
 
     const unlistenUpdated = listen<Game>("game-updated", (event) => {
       const updated = event.payload;
-      setGames((prev) =>
-        prev.map((g) => (g.id === updated.id ? { ...g, ...updated } : g))
-      );
+      setGames((prev) => {
+        const idx = prev.findIndex((g) => g.id === updated.id);
+        if (idx !== -1) {
+          const next = [...prev];
+          next[idx] = { ...prev[idx], ...updated };
+          return next;
+        }
+        return [...prev, updated];
+      });
+    });
+
+    const unlistenSyncComplete = listen("library-sync-complete", async () => {
+      try {
+        const list = await invoke<Game[]>("get_games");
+        setGames(list);
+      } catch (err) {
+        console.error("Error refreshing library on sync complete:", err);
+      }
     });
 
     // Listen for Steam login webview success
@@ -498,6 +512,7 @@ export function App() {
       unlistenSteamLogin.then((f) => f());
       unlistenEpicLogin.then((f) => f());
       unlistenProgress.then((f) => f());
+      unlistenSyncComplete.then((f) => f());
     };
   }, []);
 
@@ -818,6 +833,34 @@ export function App() {
     }
   };
 
+  // Duplicate Merger Actions
+  const handleUnmergeGame = (game: Game) => {
+    const allIds = [game.id, ...(game.sibling_games || []).map((s) => s.id)];
+    const existing = appConfig.unmerged_game_ids || [];
+    const nextUnmerged = Array.from(new Set([...existing, ...allIds]));
+    const nextCfg: AppConfig = { ...appConfig, unmerged_game_ids: nextUnmerged };
+    setAppConfig(nextCfg);
+    invoke("save_app_config", { config: nextCfg }).catch(console.error);
+  };
+
+  const handleMergeGame = (game: Game, targetCandidate: Game) => {
+    const removeIds = new Set([
+      game.id,
+      ...(game.sibling_games || []).map((s) => s.id),
+      targetCandidate.id,
+      ...(targetCandidate.sibling_games || []).map((s) => s.id),
+    ]);
+    const existing = appConfig.unmerged_game_ids || [];
+    const nextUnmerged = existing.filter((id) => !removeIds.has(id));
+    const nextCfg: AppConfig = {
+      ...appConfig,
+      merge_duplicates: true,
+      unmerged_game_ids: nextUnmerged,
+    };
+    setAppConfig(nextCfg);
+    invoke("save_app_config", { config: nextCfg }).catch(console.error);
+  };
+
   // Stop / Exit Running Game
   const handleStopGame = async (game: Game) => {
     try {
@@ -861,11 +904,21 @@ export function App() {
 
   // Refresh All Libraries
   const handleRefreshAllLibraries = async () => {
-    await Promise.allSettled([
-      handleScanLibrary(),
-      handleScanEpicLibrary(),
-      handleSyncRetroAchievements(),
-    ]);
+    try {
+      setIsScanning(true);
+      await invoke("sync_all_libraries", { playtimeOnly: false });
+      const list = await invoke<Game[]>("get_games");
+      setGames(list);
+    } catch (err) {
+      console.error("Failed to refresh all libraries:", err);
+      await Promise.allSettled([
+        handleScanLibrary(),
+        handleScanEpicLibrary(),
+        handleSyncRetroAchievements(),
+      ]);
+    } finally {
+      setIsScanning(false);
+    }
   };
 
   // Refresh All Metadata (Replaces only empty fields from native stores)
@@ -911,9 +964,24 @@ export function App() {
   // Toggle Favorite
   const handleToggleFavorite = async (gameId: string) => {
     try {
+      const mergedGroup = filteredGames.find(
+        (g) => g.id === gameId || g.sibling_games?.some((s) => s.id === gameId)
+      );
+      const allIds = mergedGroup
+        ? [mergedGroup.id, ...(mergedGroup.sibling_games || []).map((s) => s.id)]
+        : [gameId];
+
       const newState = await invoke<boolean>("toggle_favorite", { gameId });
+
+      // Keep all sibling copies in SQLite synchronized
+      for (const id of allIds) {
+        if (id !== gameId) {
+          invoke("set_game_favorite", { gameId: id, isFavorite: newState }).catch(() => {});
+        }
+      }
+
       setGames((prev) =>
-        prev.map((g) => (g.id === gameId ? { ...g, is_favorite: newState } : g))
+        prev.map((g) => (allIds.includes(g.id) ? { ...g, is_favorite: newState } : g))
       );
     } catch (err) {
       console.error("Failed to toggle favorite:", err);
@@ -1191,7 +1259,7 @@ export function App() {
       return true;
     });
 
-    return list.sort((a, b) => {
+    const sorted = list.sort((a, b) => {
       let cmp = 0;
       switch (sortBy) {
         case "title":
@@ -1225,6 +1293,12 @@ export function App() {
       }
       return sortDirection === "asc" ? cmp : -cmp;
     });
+
+    return mergeDuplicateGames(
+      sorted,
+      appConfig.merge_duplicates ?? true,
+      appConfig.unmerged_game_ids ?? []
+    );
   }, [
     games,
     statusFilter,
@@ -1237,6 +1311,8 @@ export function App() {
     searchQuery,
     sortBy,
     sortDirection,
+    appConfig.merge_duplicates,
+    appConfig.unmerged_game_ids,
   ]);
 
   // Keep selectedGame valid when filtered games change
@@ -1244,7 +1320,10 @@ export function App() {
     if (!isConfigLoadedRef.current || isLoading) return;
     if (filteredGames.length > 0) {
       const currentSelected = selectedGameIdRef.current || selectedGameId;
-      if (!currentSelected || !filteredGames.some((g) => g.id === currentSelected)) {
+      const isValid = filteredGames.some(
+        (g) => g.id === currentSelected || g.sibling_games?.some((s) => s.id === currentSelected)
+      );
+      if (!currentSelected || !isValid) {
         const nextId = filteredGames[0].id;
         handleSelectGame(nextId);
       }
@@ -1252,8 +1331,12 @@ export function App() {
   }, [filteredGames, selectedGameId, isLoading]);
 
   const selectedGame = useMemo(() => {
+    const merged = filteredGames.find(
+      (g) => g.id === selectedGameId || g.sibling_games?.some((s) => s.id === selectedGameId)
+    );
+    if (merged) return merged;
     return games.find((g) => g.id === selectedGameId) || null;
-  }, [games, selectedGameId]);
+  }, [filteredGames, games, selectedGameId]);
 
   const selectedHeroUrl = resolveImageSrc(selectedGame?.background_image);
 
@@ -1391,7 +1474,7 @@ export function App() {
           <main className="flex-1 flex overflow-hidden relative">
           {isLoading ? (
             <div className="flex-1 flex flex-col items-center justify-center space-y-3">
-              <Loader2 className="w-8 h-8 text-cyan-400 animate-spin" />
+              <Loader2 className="w-8 h-8 theme-accent-text animate-spin" />
               <p className="text-sm text-slate-400">Loading your game library...</p>
             </div>
           ) : filteredGames.length === 0 ? (
@@ -1413,7 +1496,7 @@ export function App() {
                 <div className="flex space-x-3">
                   <button
                     onClick={() => setIsLibraryManagerOpen(true)}
-                    className="flex items-center space-x-2 px-5 py-2.5 bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-bold rounded-xl text-xs transition-all shadow-md cursor-pointer"
+                    className="flex items-center space-x-2 px-5 py-2.5 theme-accent-btn text-white font-bold rounded-xl text-xs transition-all shadow-md cursor-pointer"
                   >
                     <Sparkles className="w-4 h-4" />
                     <span>Open Library Manager</span>
@@ -1548,7 +1631,7 @@ export function App() {
                     <td className="py-2.5 px-3 text-slate-400">
                       {g.developer || "—"}
                     </td>
-                    <td className="py-2.5 px-3 text-cyan-300 font-mono">
+                    <td className="py-2.5 px-3 theme-accent-text font-mono">
                       {Math.round(g.playtime_seconds / 60)} min
                     </td>
                     <td className="py-2.5 px-3">
@@ -1562,7 +1645,7 @@ export function App() {
                           e.stopPropagation();
                           handleLaunchGame(g);
                         }}
-                        className="px-3 py-1 bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 border border-cyan-500/40 rounded text-xs font-semibold cursor-pointer"
+                        className="px-3 py-1 theme-accent-subtle-bg hover:opacity-90 theme-accent-text border border-[var(--app-accent-color)]/40 rounded text-xs font-semibold cursor-pointer"
                       >
                         Play
                       </button>
@@ -1693,6 +1776,9 @@ export function App() {
           onOpenEdit={(g) => setEditingGame(g)}
           onRemoveGame={handleRemoveGame}
           onToggleHide={handleToggleHideGame}
+          onUnmerge={handleUnmergeGame}
+          onMerge={handleMergeGame}
+          mergeCandidate={findMergeCandidate(contextMenu.game, games, appConfig.unmerged_game_ids ?? [])}
         />
       )}
 
@@ -1718,11 +1804,11 @@ export function App() {
 
       {/* Floating Full Library Refresh Progress Widget */}
       {fullRefreshProgress && (
-        <div className="fixed bottom-6 right-6 z-50 bg-[#12141c]/95 border border-purple-500/30 rounded-2xl p-4 shadow-2xl backdrop-blur-2xl max-w-sm w-full animate-in fade-in slide-in-from-bottom-4 duration-300">
+        <div className="fixed bottom-6 right-6 z-50 bg-[#12141c]/95 border theme-accent-subtle-border rounded-2xl p-4 shadow-2xl backdrop-blur-2xl max-w-sm w-full animate-in fade-in slide-in-from-bottom-4 duration-300">
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center space-x-2.5">
               <RefreshCw
-                className={`w-4 h-4 text-purple-400 ${
+                className={`w-4 h-4 theme-accent-text ${
                   fullRefreshProgress.phase === "completed" ? "" : "animate-spin"
                 }`}
               />
@@ -1730,7 +1816,7 @@ export function App() {
                 {fullRefreshProgress.phase === "completed" ? "Refresh Complete" : "Full Refresh"}
               </span>
             </div>
-            <span className="text-xs font-mono text-purple-300">
+            <span className="text-xs font-mono theme-accent-text">
               {fullRefreshProgress.current} / {fullRefreshProgress.total}
             </span>
           </div>
@@ -1739,7 +1825,7 @@ export function App() {
           </div>
           <div className="w-full bg-white/10 rounded-full h-1.5 overflow-hidden">
             <div
-              className="bg-gradient-to-r from-purple-500 via-indigo-500 to-cyan-400 h-1.5 rounded-full transition-all duration-300"
+              className="theme-accent-bg h-1.5 rounded-full transition-all duration-300 shadow-[0_0_8px_var(--app-accent-color)]"
               style={{
                 width: `${Math.min(
                   100,

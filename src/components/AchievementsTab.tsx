@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Game } from "../types/game";
 import { Achievement } from "../types/achievement";
+import { formatUnlockDate } from "../utils/date";
 import { AchievementDetailModal } from "./AchievementDetailModal";
 import {
   Trophy,
@@ -42,8 +43,22 @@ export const AchievementsTab: React.FC<AchievementsTabProps> = ({
   const supportsAchievements =
     (srcLower === "steam" && !!game.source_id) ||
     (srcLower === "epic" && (!!game.source_id || !!game.notes?.includes("namespace:"))) ||
+    (srcLower === "gog" && !!game.source_id) ||
+    (srcLower === "xbox" && !!game.source_id) ||
+    ((srcLower === "ea app" || srcLower === "ea") && !!game.source_id) ||
     srcLower.includes("retro");
-  const storeLabel = srcLower === "epic" ? "Epic Games" : srcLower.includes("retro") ? "RetroAchievements" : "Steam";
+  const storeLabel =
+    srcLower === "epic"
+      ? "Epic Games"
+      : srcLower === "gog"
+      ? "GOG Galaxy"
+      : srcLower === "xbox"
+      ? "Xbox Live"
+      : srcLower === "ea app" || srcLower === "ea"
+      ? "EA App"
+      : srcLower.includes("retro")
+      ? "RetroAchievements"
+      : "Steam";
 
   // 1. Initial Load from Local SQLite Cache
   const loadCachedAchievements = async (autoSyncIfEmpty = true) => {
@@ -491,7 +506,7 @@ export const AchievementsTab: React.FC<AchievementsTabProps> = ({
                     >
                       {ach.rarity_percentage > 0
                         ? `${ach.rarity_percentage}%`
-                        : "Rare"}
+                        : rarity.label}
                     </div>
                   </div>
 
@@ -509,7 +524,7 @@ export const AchievementsTab: React.FC<AchievementsTabProps> = ({
                         <CheckCircle2 className="w-3 h-3 text-white" />
                         <span>
                           {ach.unlock_time
-                            ? `Unlocked ${ach.unlock_time}`
+                            ? `Unlocked ${formatUnlockDate(ach.unlock_time)}`
                             : "Unlocked"}
                         </span>
                       </div>

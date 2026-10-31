@@ -17,17 +17,20 @@
 
 <br />
 
-## 🌟 The Vision: What Others Aren't
+## 🌟 The Landscape: Where OpenPlay Fits
 
-For years, PC gamers who wanted to unify their fragmented game libraries turned to managers like **Playnite**. And we honor Playnite for pioneering open-source library management on PC. 
+PC gaming has been shaped by outstanding open-source projects, and we hold deep respect for what each has pioneered:
+- **Playnite** set the benchmark on Windows for library aggregation, detailed database customization, and extensible community plugins.
+- **Lutris** has long been the Linux champion for deep Wine prefix tuning, custom runner management, and community installation scripts.
+- **Heroic Games Launcher** established an indispensable cross-platform client for downloading and updating Epic Games and GOG titles without official store launchers.
 
-However, gaming has evolved:
-- **Playnite is locked to Windows**: Because Playnite was built on Microsoft WPF/.NET Framework, it cannot run natively on Linux, SteamOS, or the Steam Deck without cumbersome wrappers.
-- **Fragmented by Extensions**: To get a basic modern experience in Playnite, users are forced to install, configure, and maintain 10+ separate plugins just for artwork, HowLongToBeat stats, video trailers, and player counts.
-- **Aging Aesthetics**: Modern operating systems and displays demand high-performance, responsive canvas scaling, and fluid animations.
+However, as gaming setups evolve across Windows desktops and Linux handhelds (like the Steam Deck), players often find themselves caught between trade-offs:
+- **Playnite is locked to Windows**: Built on Microsoft WPF/.NET, it cannot run natively on Linux, SteamOS, or the Steam Deck without cumbersome, brittle compatibility layers. It also suffers from heavy **extension setup fatigue**—requiring users to install, configure, and maintain 10+ separate plugins just for artwork, achievements, completion stats, and trailers.
+- **Lutris is Linux-centric**: While unrivaled for low-level Wine configuration, it is not available on Windows and offers a utilitarian desktop interface without modern visual polish, animated covers, or unified achievement tracking.
+- **Heroic is a store client, not a unified library aggregator**: Heroic is designed primarily for downloading and playing Epic, GOG, and Amazon titles. It does not aggregate full Steam libraries, emulated retro legacy, or unified multi-store collections.
 
-**OpenPlay is engineered from the ground up to be the game library of the next decade:**
-A blazing-fast, cross-platform sanctuary for your entire game collection that does *more than enough* straight out of the box.
+**OpenPlay is engineered to bridge these worlds:**
+A blazing-fast, cross-platform sanctuary for your entire game collection built on **Tauri v2** and **Rust**. It eliminates setup fatigue by delivering the features players care about most—animated video covers, an integrated achievement hub, live Steam player counts, HowLongToBeat completion metrics, YouTube trailers, duplicate collapsing, and full retro support—**built directly into its core with zero plugins required.**
 
 ---
 
@@ -36,22 +39,28 @@ A blazing-fast, cross-platform sanctuary for your entire game collection that do
 <div align="center">
 
 ### 🖥️ Desktop Split View
-*Adaptive poster grid on the left with rich live game showcase, transparent clear logos, and animated video trailers on the right.*
+*A sleek split layout designed for responsive library exploration. Navigate an adaptive grid of animated cover art on the left, paired with an immersive glassmorphic hero backdrop on the right featuring transparent clear logos, live Steam player counts, HowLongToBeat completion metrics, user and critic review scores, community patch notes, and instant video trailers.*
 
-```
-+-------------------------------------------------------------------------------------------------------------+
-|  🔍 Filter & Search        [ All | Installed | Uninstalled | Filters ▼ ]     (★)  (...)  (⚙)  [  ▶ PLAY  ]  |
-|-------------------------------------------------------+-----------------------------------------------------|
-|  [Cover]  [Cover]  [Cover]  [Cover]  [Cover]  [Cover] |  HERO BACKDROP (Faded Glass S-Curve Mask)           |
-|  [Cover]  [Cover]  [Cover]  [Cover]  [Cover]  [Cover] |  CLEAR LOGO                                         |
-|  [Cover]  [Cover]  [Cover]  [Cover]  [Cover]  [Cover] |  [IN-GAME: 45k] [STEAM]         [COVER POSTER (2:3)]|
-|  [Cover]  [Cover]  [Cover]  [Cover]  [Cover]  [Cover] |-----------------------------------------------------|
-|  [Cover]  [Cover]  [Cover]  [Cover]  [Cover]  [Cover] |  [Video Trailer Player]   |  HLTB Widget            |
-|  [Cover]  [Cover]  [Cover]  [Cover]  [Cover]  [Cover] |  Overview / Achievements  |  Metadata Details Table |
-|  [Cover]  [Cover]  [Cover]  [Cover]  [Cover]  [Cover] |  Steam Community News     |  Installation Folder    |
-+-------------------------------------------------------+-----------------------------------------------------+
-```
-*(Screenshot placeholder: `./docs/screenshots/desktop-split-view.png`)*
+<img src="https://imgur.com/3xwQqDW.gif">
+
+---
+
+### 🎨 Live SteamGridDB Asset Explorer
+*Search, preview, and apply community-curated vertical covers, heroes, transparent clear logos, and animated WebM posters directly inside OpenPlay. Includes style categorization, and instant 1-click downloads with zero manual asset management.*
+
+<img src="https://i.imgur.com/bVsgGNL.jpeg">
+
+---
+
+### 🏆 Achievements Hub
+*Track your gaming legacy across modern storefronts and retro emulators in a single unified hall of fame. View global unlock rates, trophy rarity tiers, total gamerscore, and milestone completion percentages across Steam and RetroAchievements in real time.*
+
+<img src="https://i.imgur.com/6NA0erk.png">
+
+---
+
+### 🕹️ Native Emulation & Smart ROM Scanner
+*Seamlessly manage your retro collection alongside modern PC titles. OpenPlay automatically detects installed standalone emulators (Dolphin, PCSX2, DuckStation, RPCS3, mGBA, PPSSPP, Cemu, Ryujinx) and RetroArch Libretro cores. Point to any ROM directory: OpenPlay strips dump release tags, deduplicates multi-track `.bin` files, matches console platforms, and extracts local boxart or scrapes from SteamGridDB.*
 
 ---
 
@@ -60,44 +69,52 @@ A blazing-fast, cross-platform sanctuary for your entire game collection that do
 
 *(Screenshot placeholder: `./docs/screenshots/fullscreen-couch-mode.png`)*
 
----
-
-### 🎨 Live SteamGridDB Asset Explorer
-*Browse, preview, and apply vertical grids, heroes, transparent clear logos, and icons in real-time without leaving the app.*
-
-*(Screenshot placeholder: `./docs/screenshots/steamgriddb-modal.png`)*
-
----
-
-### ⚙️ Comprehensive Game Properties
-*All metadata—from custom launch arguments to playtime split and native file browsers—organized so you never get overwhelmed.*
-
-*(Screenshot placeholder: `./docs/screenshots/game-settings-dialog.png`)*
-
 </div>
 
 ---
 
-## ⚡ Built-in Superpowers (Out of the Box)
+## ⚔️ Head-to-Head Comparison: OpenPlay vs. Playnite vs. Lutris vs. Heroic
 
-No hunting through forums for third-party scripts. OpenPlay ships with essential features built directly into its core:
+Every launcher has its own design philosophy and purpose. Here is how they compare across the capabilities that matter most to players looking for a dedicated library manager:
 
-| Feature | OpenPlay (Native) | Traditional Launchers |
-|:---|:---:|:---:|
-| **Native Linux & SteamOS Support** | ✅ **Native** | ❌ Windows Only |
-| **Animated & Moving Covers** (WebM, MP4, APNG, GIF) | ✅ **Built-in** | ⚠️Rarely supported |
-| **Steam & Epic Games Account Integration** | ✅ **Built-in** | 🔌 Requires Plugin |
-| **Achievement Hub & Store Trophy Scoring** |
-| **RetroAchievements Integration** (Retro Console Trophies & Rarity) | ✅ **Built-in** | 🔌 Requires Plugin |
-| **Achievement Hub & In-Game Trophies** | ✅ **Built-in** | 🔌 Requires Plugin |
-| **SteamGridDB Artwork Integration** | ✅ **Built-in** | 🔌 Requires Plugin |
-| **HowLongToBeat Completion Metrics** | ✅ **Built-in** | 🔌 Requires Plugin |
-| **Live Steam Player Counts** | ✅ **Built-in** | 🔌 Requires Plugin |
-| **In-App Patch Notes & News Reader** | ✅ **Built-in** | 🔌 Requires Plugin |
-| **Dual Launch & Modded Play Actions** | ✅ **Built-in** | ⚠️ Basic Shortcuts |
-| **Game Trailers or videos** | ✅ **Built-in** | 🔌 Requires Plugin |
-| **True Window Lifetime Tracking**| ✅ **Built-in** | ⚠️ Inconsistent Exit Detection |
-| **Playnite Backup (.zip) Importer & Media Extractor** | ✅ **Built-in** | ❌ N/A |
+| Capability / Feature | **OpenPlay** | **Playnite** | **Lutris** | **Heroic Games Launcher** |
+| :--- | :---: | :---: | :---: | :---: |
+| *Platform & Architecture* | | | | |
+| **Windows Support** | ✅ **Native** | ✅ **Native** | ❌ *No* | ✅ **Native** |
+| **Linux & SteamOS / Steam Deck** | ✅ **Native** | ❌ *Windows Only* | ✅ **Native** | ✅ **Native** |
+| **Technology Stack** | **Tauri v2 + Rust + React 19** | C# / WPF (.NET) | Python + GTK | Electron (Chromium + Node.js) |
+| **Memory Footprint (Idle)** | 🟢 **Ultra-Low (<100MB)** | 🟡 Moderate (~180–300MB) | 🟢 Low (~120–200MB) | 🔴 Higher (~350–600MB) |
+| **100% Offline-First (Local SQLite)** | ✅ **Yes (Zero Telemetry)** | ✅ **Yes** | ✅ **Yes** | ✅ **Yes** |
+| **Setup Experience** | ⚡ **All-in-One Out of Box** | 🔌 Requires 10+ Plugins | ⚙️ Runner / Script Setup | ⚡ Store Login Out of Box |
+| *Library Unification & Management* | | | | |
+| **Universal Multi-Store Aggregator** | ✅ **All Stores + Local + Retro** | 🔌 Requires Store Plugins | ⚠️ Runner / Script Scraper | ❌ Epic, GOG & Amazon only |
+| **Native Emulation & ROM Scanner** | ✅ **Built-in (RetroArch & Standalones)** | 🔌 Built-in / Plugins | 👑 Runner Engine | ❌ *No* |
+| **Duplicate Merger across Stores** | ✅ **Built-in (Interactive Platform Tabs)** | 🔌 Requires Plugin | ❌ Separate entries | ❌ N/A |
+| **Playnite Backup Importer (.zip)** | ✅ **Built-in (1-Click Migration)** | ✅ Native Export | ❌ N/A | ❌ N/A |
+| **Direct Store Downloading & Cloud Saves** | ⚠️ Directs to Store / Native Launch | ⚠️ Directs to Store Client | 🔌 Custom Scripts | 👑 **Built-in (Legendary/Nile)** |
+| **Wine / Proton Prefix Tuning** | ⚠️ Direct Execution / Steam Proton | ❌ N/A | 👑 **Advanced Deep Runner Tuning** | ✅ Integrated Wine/Proton Tools |
+| **Visuals, Media & Metadata** | | | | |
+| **Animated & Moving Video Covers** | ✅ **Built-in (WebM, MP4, APNG, GIF)** | ❌ Static Only  | ❌ Static Only | ❌ Static Only |
+| **In-App SteamGridDB Asset Explorer** | ✅ **Built-in (Animation support)** | 🔌 Requires Plugin  | ⚠️ Basic Scraper | ⚠️ Basic Image Selection |
+| **In-App Video Trailers** | ✅ **Built-in (Store / YouTube / Video files)** | 🔌 Requires Plugin | ❌ *No* | ❌ *No* |
+| **HowLongToBeat Completion Metrics** | ✅ **Built-in** | 🔌 Requires Plugin | ❌ *No* | ✅ Built-in (HLTB API) |
+| **Live Concurrent Player Counts** | ✅ **Built-in (All platforms via title matching)** | 🔌 Requires Plugin | ❌ *No* | ❌ *No* |
+| **Dynamic Unified Accent Theming** | ✅ **Built-in (Theme-ready token architecture)** | 🔌 Requires Custom Themes | ❌ GTK Theme only | ⚠️ Fixed Palettes |
+| **Critic & User Review Scores** | ✅ **Built-in (OpenCritic & Steam)** | 🔌 Requires Plugin | ❌ *No* | ❌ *No* |
+| *Trophies & Achievements* | | | | |
+| **Unified Achievement Hub** | ✅ **Built-in (Global Hall of Fame)** | 🔌 Requires Plugin | ❌ *No* | ❌ *No* |
+| **RetroAchievements Integration** | ✅ **Built-in (Console Trophies & Rarity)** | ❌ *No* | ❌ *No* | ❌ *No* |
+| **Cross-Store Achievement Switching** | ✅ **Built-in (Per-Platform Tabs)** | ❌ *No* | ❌ *No* | ❌ *No* |
+| *Power Features* | | | | |
+| **Dual Launch / Multi-Action Play** | ✅ **Built-in (Action Menu)** | ✅ Built-in (Play Actions) | ✅ Runner Arguments | ⚠️ Basic Alternate Exe |
+| **In-App Patch Notes & News Feed** | ✅ **Built-in** | 🔌 Requires Plugin | ❌ *No* | ❌ *No* |
+| **Non-Intrusive Background Library Sync** | ✅ **Built-in (Startup & multi-device periodic sync with gameplay pause)** | 🔌 Requires Plugins / Scripts | ❌ Manual Refresh | ⚠️ Manual Store Refresh |
+
+### 🧭 Which One Is Right For You?
+- **Choose Playnite** if you game exclusively on Windows, love deep custom theme scripting (XAML), and enjoy curating a tailored library with dozens of community extensions.
+- **Choose Lutris** if you game on Linux and your highest priority is low-level Wine prefix customization, manual DLL overrides, running retro installer scripts, and complex compatibility tuning.
+- **Choose Heroic Games Launcher** if you specifically want a dedicated open-source client to download, update, and manage your Epic Games, GOG, and Amazon Prime libraries on Linux or macOS without the official store launchers.
+- **Choose OpenPlay** if you want a **blazing-fast, unified gaming sanctuary across both Windows and Linux** that delivers a complete, visually stunning experience (animated covers, trailers, unified achievements, HowLongToBeat, and cross-platform store merging) **instantly out of the box without being bloated.**
 
 ---
 
@@ -105,7 +122,7 @@ No hunting through forums for third-party scripts. OpenPlay ships with essential
 
 OpenPlay is built on top of **Tauri v2** and **Rust**, eschewing heavy Electron runtimes and Windows-only WPF frameworks:
 
-- **Ultra-Low Memory Footprint**: Idles at a fraction of Chromium-based launchers.
+- **Ultra-Low Memory Footprint**: Idles at a fraction of Chromium-based launchers (<100MB RAM).
 - **Native Wayland & X11 Compatibility**: Runs cleanly across Arch, Ubuntu, Fedora, Nobara, and SteamOS.
 - **Seamless Steam Deck Experience**: Built to look stunning on both high-DPI desktop monitors and portable handheld screens.
 - **Respects User Privacy**: 100% offline-first. Your library database (`SQLite`) lives strictly on your machine. Zero telemetry, zero tracking, zero mandatory accounts.
@@ -117,11 +134,11 @@ OpenPlay is built on top of **Tauri v2** and **Rust**, eschewing heavy Electron 
 Switching library managers shouldn't mean losing years of playtime stats, custom tags, and curated artwork. 
 
 We have developed a **1-click Playnite Backup Importer**:
-1. Export or point to your existing Playnite database directory.
+1. Import Playnite's most recent backup file.
 2. OpenPlay parses your categories, completion states, playtime records, and artwork links.
 3. Your entire library is instantly ready on Windows or native Linux with zero setup friction.
 
-> More migration to come?
+> With more migration to come?
 ---
 
 ## 🏗️ Architecture & Tech Stack
@@ -132,7 +149,7 @@ graph TD
     TAURI[Tauri v2 IPC Bridge]
     CORE[Backend: Rust Core Engine]
     DB[(SQLite: Local Storage)]
-    EXT[External APIs: Steam / Epic / RetroAchievements / IGDB / SteamGridDB / HLTB]
+    EXT[External APIs & Scanners: Steam / Epic / GOG / Xbox / Battle.net / EA / Ubisoft / Riot / Amazon / Google Play / Roblox / RetroAchievements / IGDB / SteamGridDB / HLTB]
     PROC[OS Process Lifecycle Monitor]
 
     UI <-->|JSON IPC| TAURI
