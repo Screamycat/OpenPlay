@@ -83,4 +83,8 @@ pub struct Game {
     pub beaten_prompt_playtime: Option<u64>,
     #[serde(default)]
     pub emulator_id: Option<String>,
+    #[serde(default)]
+    pub updated_at: Option<String>,
+    #[serde(default)]
+    pub playtime_by_device: Option<String>,
 }

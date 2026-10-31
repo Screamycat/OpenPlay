@@ -1,4 +1,5 @@
 pub mod autostart;
+pub mod cloud_sync;
 pub mod db;
 pub mod emulator;
 pub mod launcher;
@@ -17,8 +18,9 @@ use metadata::epic::EpicMetadataFetcher;
 use metadata::retroachievements::RetroAchievementsClient;
 use metadata::scores::ScoreEnrichmentEngine;
 use models::{
-    Achievement, AppConfig, ConfiguredConsole, DiscoveredRom, EmulatorProfile, Game,
-    GameAchievementSummary, GameTrailer, HunterProfile, LibraryIntegration,
+    Achievement, AppConfig, BackupInfo, CloudSyncStatus, ConfiguredConsole, ConnectedLibraryItem, DiscoveredRom,
+    EmulatorProfile, Game, GameAchievementSummary, GameTrailer, HunterProfile, ImportBackupSummary,
+    LibraryIntegration, PeerDeviceInfo, SyncSummary,
 };
 use scanner::steam::SteamScanner;
 use scanner::epic::EpicScanner;
@@ -4828,6 +4830,392 @@ async fn enrich_missing_scores(
     Ok(updated_count)
 }
 
+// ==========================================
+// CONNECTED LIBRARIES & BACKUPS (PHASE 1 & 2)
+// ==========================================
+
+#[tauri::command]
+fn get_connected_libraries(state: State<'_, AppState>) -> Result<Vec<ConnectedLibraryItem>, String> {
+    let mut items = Vec::new();
+
+    let providers = [
+        ("steam", "Steam", "STEAM"),
+        ("epic", "Epic Games", "EPIC"),
+        ("gog", "GOG Galaxy", "GOG"),
+        ("xbox", "Xbox / Game Pass", "XBOX"),
+        ("battlenet", "Battle.net", "BNET"),
+        ("ea", "EA App", "EA"),
+        ("ubisoft", "Ubisoft Connect", "UPLAY"),
+        ("riot", "Riot Games", "RIOT"),
+        ("amazon", "Amazon Games", "AMZN"),
+    ];
+
+    let all_games = state.db.get_all_games().unwrap_or_default();
+    let sources_in_db: std::collections::HashSet<String> = all_games
+        .iter()
+        .map(|g| g.source.trim().to_lowercase())
+        .collect();
+
+    for (p_id, p_name, p_badge) in providers {
+        let integ = state.db.get_integration(p_id).unwrap_or_default();
+        let has_games = sources_in_db.iter().any(|s| s.contains(p_id));
+
+        let is_connected = if p_id == "steam" {
+            integ.is_authenticated || has_games || scanner::steam::SteamScanner::find_steam_install_dir().is_some()
+        } else if p_id == "epic" {
+            integ.is_authenticated || has_games || scanner::epic::EpicScanner::find_epic_data_dir().is_some()
+        } else {
+            integ.is_authenticated || (integ.import_installed && has_games)
+        };
+
+        if is_connected {
+            items.push(ConnectedLibraryItem {
+                id: p_id.to_string(),
+                name: p_name.to_string(),
+                category: "store".to_string(),
+                badge: p_badge.to_string(),
+                is_authenticated: integ.is_authenticated,
+                last_sync: integ.last_sync,
+            });
+        }
+    }
+
+    if items.is_empty() {
+        items.push(ConnectedLibraryItem {
+            id: "steam".to_string(),
+            name: "Steam".to_string(),
+            category: "store".to_string(),
+            badge: "STEAM".to_string(),
+            is_authenticated: false,
+            last_sync: None,
+        });
+        items.push(ConnectedLibraryItem {
+            id: "epic".to_string(),
+            name: "Epic Games".to_string(),
+            category: "store".to_string(),
+            badge: "EPIC".to_string(),
+            is_authenticated: false,
+            last_sync: None,
+        });
+    }
+
+    let cfg = state.db.get_app_config().unwrap_or_default();
+    if let Some(ref ra_user) = cfg.retroachievements_username {
+        if !ra_user.trim().is_empty() {
+            items.push(ConnectedLibraryItem {
+                id: "retroachievements".to_string(),
+                name: "RetroAchievements".to_string(),
+                category: "emulation".to_string(),
+                badge: "RA".to_string(),
+                is_authenticated: true,
+                last_sync: None,
+            });
+        }
+    }
+
+    if let Ok(consoles) = state.db.get_configured_consoles() {
+        for c in consoles {
+            items.push(ConnectedLibraryItem {
+                id: format!("console:{}", c.id),
+                name: c.name,
+                category: "emulation".to_string(),
+                badge: c.manufacturer,
+                is_authenticated: true,
+                last_sync: None,
+            });
+        }
+    }
+
+    Ok(items)
+}
+
+#[tauri::command]
+async fn create_database_backup(
+    backup_name: Option<String>,
+    is_automatic: Option<bool>,
+    state: State<'_, AppState>,
+) -> Result<BackupInfo, String> {
+    state.db.create_backup(backup_name, is_automatic.unwrap_or(false))
+}
+
+#[tauri::command]
+fn list_database_backups(state: State<'_, AppState>) -> Result<Vec<BackupInfo>, String> {
+    state.db.list_backups()
+}
+
+#[tauri::command]
+fn restore_database_backup(
+    filename: String,
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    state.db.restore_backup(&filename)?;
+    let _ = app_handle.emit("database-restored", serde_json::json!({ "filename": filename }));
+    Ok(())
+}
+
+#[tauri::command]
+fn delete_database_backup(filename: String, state: State<'_, AppState>) -> Result<(), String> {
+    state.db.delete_backup(&filename)
+}
+
+#[tauri::command]
+async fn export_portable_backup(
+    target_path: String,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let all_games = state.db.get_all_games()?;
+    let configured_consoles = state.db.get_configured_consoles().unwrap_or_default();
+    let app_config = state.db.get_app_config().unwrap_or_default();
+    let achievements = state.db.get_all_achievements().unwrap_or_default();
+
+    let file = std::fs::File::create(&target_path)
+        .map_err(|e| format!("Failed to create portable backup file: {}", e))?;
+    let mut zip = zip::ZipWriter::new(file);
+    let options = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+
+    let manifest = serde_json::json!({
+        "app": "OpenPlay",
+        "version": "0.1.2",
+        "export_date": chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+        "game_count": all_games.len(),
+        "console_count": configured_consoles.len(),
+    });
+    zip.start_file("manifest.json", options)
+        .map_err(|e| e.to_string())?;
+    std::io::Write::write_all(&mut zip, serde_json::to_string_pretty(&manifest).unwrap().as_bytes())
+        .map_err(|e| e.to_string())?;
+
+    zip.start_file("games.json", options)
+        .map_err(|e| e.to_string())?;
+    std::io::Write::write_all(&mut zip, serde_json::to_string_pretty(&all_games).unwrap().as_bytes())
+        .map_err(|e| e.to_string())?;
+
+    zip.start_file("consoles.json", options)
+        .map_err(|e| e.to_string())?;
+    std::io::Write::write_all(&mut zip, serde_json::to_string_pretty(&configured_consoles).unwrap().as_bytes())
+        .map_err(|e| e.to_string())?;
+
+    zip.start_file("config.json", options)
+        .map_err(|e| e.to_string())?;
+    std::io::Write::write_all(&mut zip, serde_json::to_string_pretty(&app_config).unwrap().as_bytes())
+        .map_err(|e| e.to_string())?;
+
+    zip.start_file("achievements.json", options)
+        .map_err(|e| e.to_string())?;
+    std::io::Write::write_all(&mut zip, serde_json::to_string_pretty(&achievements).unwrap().as_bytes())
+        .map_err(|e| e.to_string())?;
+
+    let local_art_dir = dirs::data_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("OpenPlay")
+        .join("artwork");
+    if local_art_dir.exists() {
+        let mut count = 0;
+        if let Ok(entries) = std::fs::read_dir(&local_art_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file() && count < 250 {
+                    if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                        let zip_path = format!("artwork/{}", name);
+                        if let Ok(bytes) = std::fs::read(&path) {
+                            if zip.start_file(&zip_path, options).is_ok() {
+                                let _ = std::io::Write::write_all(&mut zip, &bytes);
+                                count += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    zip.finish().map_err(|e| format!("Failed to finalize backup archive: {}", e))?;
+    Ok(target_path)
+}
+
+#[tauri::command]
+async fn import_portable_backup(
+    file_path: String,
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<ImportBackupSummary, String> {
+    let file = std::fs::File::open(&file_path)
+        .map_err(|e| format!("Failed to open backup archive: {}", e))?;
+    let mut archive = zip::ZipArchive::new(file)
+        .map_err(|e| format!("Invalid zip archive: {}", e))?;
+
+    let _ = state.db.create_backup(Some("pre_portable_import".to_string()), false);
+
+    let games_entry = archive
+        .by_name("games.json")
+        .map_err(|_| "Backup archive is missing 'games.json'".to_string())?;
+    let imported_games: Vec<Game> = serde_json::from_reader(games_entry)
+        .map_err(|e| format!("Failed to parse games from backup: {}", e))?;
+
+    let artwork_dest = dirs::data_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("OpenPlay")
+        .join("artwork");
+    let _ = std::fs::create_dir_all(&artwork_dest);
+
+    for i in 0..archive.len() {
+        if let Ok(mut entry) = archive.by_index(i) {
+            let name = entry.name().to_string();
+            if name.starts_with("artwork/") && !name.ends_with('/') {
+                let file_name = std::path::Path::new(&name)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("");
+                if !file_name.is_empty() {
+                    let out_path = artwork_dest.join(file_name);
+                    if let Ok(mut out_file) = std::fs::File::create(out_path) {
+                        let _ = std::io::copy(&mut entry, &mut out_file);
+                    }
+                }
+            }
+        }
+    }
+
+    let mut existing_games = state.db.get_all_games().unwrap_or_default();
+    let total_games = imported_games.len();
+    let mut imported_count = 0;
+    let mut updated_count = 0;
+
+    for mut new_game in imported_games {
+        let existing_idx = existing_games.iter().position(|eg| {
+            eg.id == new_game.id
+                || (!eg.source.is_empty()
+                    && eg.source.eq_ignore_ascii_case(&new_game.source)
+                    && eg.source_id.is_some()
+                    && eg.source_id == new_game.source_id)
+                || (eg.title.trim().eq_ignore_ascii_case(new_game.title.trim())
+                    && eg.source.trim().eq_ignore_ascii_case(new_game.source.trim()))
+        });
+
+        if let Some(idx) = existing_idx {
+            let existing = &existing_games[idx];
+            updated_count += 1;
+
+            if existing.playtime_seconds > new_game.playtime_seconds {
+                new_game.playtime_seconds = existing.playtime_seconds;
+            }
+            if existing.is_installed {
+                new_game.is_installed = true;
+                if existing.install_directory.is_some() {
+                    new_game.install_directory = existing.install_directory.clone();
+                }
+                if existing.executable_path.is_some() {
+                    new_game.executable_path = existing.executable_path.clone();
+                }
+            } else if let Some(ref exe) = new_game.executable_path {
+                new_game.is_installed = std::path::Path::new(exe).exists();
+            }
+            if new_game.notes.is_none() || new_game.notes.as_deref().unwrap_or("").trim().is_empty() {
+                new_game.notes = existing.notes.clone();
+            }
+            if new_game.user_rating.is_none() {
+                new_game.user_rating = existing.user_rating;
+            }
+            if new_game.cover_image.is_none() {
+                new_game.cover_image = existing.cover_image.clone();
+            }
+            if new_game.background_image.is_none() {
+                new_game.background_image = existing.background_image.clone();
+            }
+            if new_game.icon_image.is_none() {
+                new_game.icon_image = existing.icon_image.clone();
+            }
+            if new_game.logo_image.is_none() {
+                new_game.logo_image = existing.logo_image.clone();
+            }
+
+            existing_games[idx] = new_game.clone();
+        } else {
+            if let Some(ref exe) = new_game.executable_path {
+                new_game.is_installed = std::path::Path::new(exe).exists();
+            }
+            imported_count += 1;
+            existing_games.push(new_game.clone());
+        }
+
+        let _ = state.db.upsert_game(&new_game);
+        let _ = app_handle.emit("game-updated", &new_game);
+    }
+
+    if let Ok(consoles_entry) = archive.by_name("consoles.json") {
+        if let Ok(consoles) = serde_json::from_reader::<_, Vec<ConfiguredConsole>>(consoles_entry) {
+            for c in consoles {
+                let _ = state.db.save_configured_console(&c);
+            }
+        }
+    }
+
+    Ok(ImportBackupSummary {
+        total_games,
+        imported_count,
+        updated_count,
+        created_at: chrono::Local::now().format("%Y-%m-%d %H:%M").to_string(),
+    })
+}
+
+#[tauri::command]
+fn get_cloud_sync_status(state: State<'_, AppState>) -> Result<CloudSyncStatus, String> {
+    cloud_sync::get_cloud_sync_status(&state.db)
+}
+
+#[tauri::command]
+fn configure_cloud_sync(
+    folder_path: Option<String>,
+    enabled: bool,
+    state: State<'_, AppState>,
+) -> Result<CloudSyncStatus, String> {
+    if let Some(ref path) = folder_path {
+        state.db.set_setting("cloud_sync_folder_path", path.trim())?;
+    }
+    state.db.set_setting("cloud_sync_enabled", if enabled { "1" } else { "0" })?;
+    cloud_sync::get_cloud_sync_status(&state.db)
+}
+
+#[tauri::command]
+fn set_sync_device_name(name: String, state: State<'_, AppState>) -> Result<(), String> {
+    state.db.set_device_name(name.trim())
+}
+
+#[tauri::command]
+fn get_sync_peer_devices(state: State<'_, AppState>) -> Result<Vec<PeerDeviceInfo>, String> {
+    let status = cloud_sync::get_cloud_sync_status(&state.db)?;
+    if let Some(ref path_str) = status.folder_path {
+        let p = std::path::Path::new(path_str);
+        if p.exists() {
+            return cloud_sync::get_peer_devices(&state.db, p);
+        }
+    }
+    Ok(Vec::new())
+}
+
+#[tauri::command]
+async fn trigger_cloud_sync(
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<SyncSummary, String> {
+    let status = cloud_sync::get_cloud_sync_status(&state.db)?;
+    let folder_path = status
+        .folder_path
+        .ok_or_else(|| "Cloud sync folder path is not configured".to_string())?;
+
+    let p = std::path::PathBuf::from(folder_path);
+    if !p.exists() || !p.is_dir() {
+        return Err("Configured cloud sync folder path does not exist".to_string());
+    }
+
+    let summary = cloud_sync::sync_cloud_directory(&state.db, &p)?;
+    let _ = app_handle.emit("cloud-sync-completed", &summary);
+    let _ = app_handle.emit("library-updated", ());
+    Ok(summary)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let database = Arc::new(Database::new().expect("Failed to initialize OpenPlay SQLite database"));
@@ -4881,10 +5269,73 @@ pub fn run() {
                     }
                 }
 
-                // 3. Periodic playtime & recency loop (polls every 10 minutes)
+                // 2b. Check if periodic auto-backup is due on startup
+                if let Ok(mut cfg) = db_bg.get_app_config() {
+                    let freq = cfg.backup_frequency.as_deref().unwrap_or("daily");
+                    if freq != "disabled" {
+                        let is_due = match cfg.last_backup_time.as_deref() {
+                            None => true,
+                            Some(t) => {
+                                if let Ok(last_dt) = chrono::NaiveDateTime::parse_from_str(t, "%Y-%m-%d %H:%M:%S") {
+                                    let now = chrono::Local::now().naive_local();
+                                    let diff = now.signed_duration_since(last_dt);
+                                    if freq == "weekly" {
+                                        diff.num_days() >= 7
+                                    } else {
+                                        diff.num_days() >= 1
+                                    }
+                                } else {
+                                    true
+                                }
+                            }
+                        };
+
+                        if is_due {
+                            eprintln!("[AutoBackup] Creating periodic automated database backup...");
+                            if let Ok(info) = db_bg.create_backup(None, true) {
+                                eprintln!("[AutoBackup] Snapshot saved: {} ({} bytes, {} games)", info.filename, info.size_bytes, info.game_count);
+                                cfg.last_backup_time = Some(chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string());
+                                let _ = db_bg.save_app_config(&cfg);
+
+                                let retention = cfg.backup_retention_count.unwrap_or(5) as usize;
+                                let _ = db_bg.prune_backups(retention);
+                            }
+                        }
+                    }
+                }
+
+                // 3. Startup Cloud Sync (5 second delay)
+                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                if let Ok(status) = cloud_sync::get_cloud_sync_status(&db_bg) {
+                    if status.enabled && status.is_folder_valid {
+                        if let Some(folder) = status.folder_path {
+                            eprintln!("[CloudSync] Executing startup cloud sync from {:?}", folder);
+                            let p = std::path::PathBuf::from(folder);
+                            if let Ok(summary) = cloud_sync::sync_cloud_directory(&db_bg, &p) {
+                                let _ = app_handle_bg.emit("cloud-sync-completed", &summary);
+                                let _ = app_handle_bg.emit("library-updated", ());
+                            }
+                        }
+                    }
+                }
+
+                // 4. Periodic loop (polls every 10 minutes)
                 let mut last_periodic_sync = std::time::Instant::now();
                 loop {
                     tokio::time::sleep(tokio::time::Duration::from_secs(600)).await;
+
+                    // Periodic cloud sync if enabled
+                    if let Ok(status) = cloud_sync::get_cloud_sync_status(&db_bg) {
+                        if status.enabled && status.is_folder_valid {
+                            if let Some(folder) = status.folder_path {
+                                let p = std::path::PathBuf::from(folder);
+                                if let Ok(summary) = cloud_sync::sync_cloud_directory(&db_bg, &p) {
+                                    let _ = app_handle_bg.emit("cloud-sync-completed", &summary);
+                                    let _ = app_handle_bg.emit("library-updated", ());
+                                }
+                            }
+                        }
+                    }
 
                     if let Ok(cfg) = db_bg.get_app_config() {
                         let interval_hours = cfg.periodic_playtime_sync_hours.unwrap_or(0);
@@ -5007,7 +5458,19 @@ pub fn run() {
             open_amazon_login_window,
             authenticate_amazon_code,
             scan_provider_library,
-            sync_all_libraries
+            sync_all_libraries,
+            get_connected_libraries,
+            create_database_backup,
+            list_database_backups,
+            restore_database_backup,
+            delete_database_backup,
+            export_portable_backup,
+            import_portable_backup,
+            get_cloud_sync_status,
+            configure_cloud_sync,
+            set_sync_device_name,
+            get_sync_peer_devices,
+            trigger_cloud_sync
         ])
         .run(tauri::generate_context!())
         .expect("error while running OpenPlay application");

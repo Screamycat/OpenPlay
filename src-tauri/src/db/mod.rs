@@ -1,10 +1,10 @@
 use crate::models::{
-    Achievement, AppConfig, ConfiguredConsole, EmulatorProfile, Game, GameAchievementSummary, GameLink, GameTrailer, HunterProfile,
-    LibraryIntegration,
+    Achievement, AppConfig, BackupInfo, ConfiguredConsole, EmulatorProfile, Game, GameAchievementSummary, GameLink, GameTrailer, HunterProfile,
+    LibraryIntegration, TombstoneRecord,
 };
 use rusqlite::{params, Connection, Result};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 pub struct Database {
@@ -123,6 +123,50 @@ impl Database {
             [],
         );
 
+        // --- Schema Versioning & Migrations via PRAGMA user_version ---
+        let user_version: i32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap_or(0);
+
+        if user_version < 3 {
+            let _ = conn.execute("ALTER TABLE games ADD COLUMN updated_at TEXT", []);
+            let _ = conn.execute("ALTER TABLE games ADD COLUMN playtime_by_device TEXT", []);
+            let _ = conn.execute(
+                "CREATE TABLE IF NOT EXISTS deleted_games (
+                    id TEXT PRIMARY KEY,
+                    title TEXT,
+                    source TEXT,
+                    deleted_at TEXT NOT NULL
+                )",
+                [],
+            );
+
+            // Populate updated_at for existing games if empty
+            let now_utc = chrono::Utc::now().to_rfc3339();
+            let _ = conn.execute(
+                "UPDATE games SET updated_at = ?1 WHERE updated_at IS NULL OR updated_at = ''",
+                params![&now_utc],
+            );
+
+            // Migrate legacy playtime into reserved "legacy" map key
+            if let Ok(mut stmt) = conn.prepare("SELECT id, playtime_seconds FROM games WHERE playtime_seconds > 0 AND (playtime_by_device IS NULL OR playtime_by_device = '')") {
+                let games_to_migrate: Vec<(String, u64)> = stmt
+                    .query_map([], |row| Ok((row.get(0)?, row.get::<_, i64>(1)? as u64)))
+                    .ok()
+                    .map(|rows| rows.filter_map(|r| r.ok()).collect())
+                    .unwrap_or_default();
+                drop(stmt);
+
+                for (gid, pt) in games_to_migrate {
+                    let map_json = format!("{{\"legacy\":{}}}", pt);
+                    let _ = conn.execute(
+                        "UPDATE games SET playtime_by_device = ?1 WHERE id = ?2",
+                        params![map_json, gid],
+                    );
+                }
+            }
+
+            let _ = conn.execute("PRAGMA user_version = 3", []);
+        }
+
         conn.execute(
             "CREATE TABLE IF NOT EXISTS integrations (
                 provider TEXT PRIMARY KEY,
@@ -219,7 +263,7 @@ impl Database {
                 date_added, completion_status, description, notes, links, screenshots, size_on_disk,
                 trailers, age_rating, critic_score, series, hltb_main, hltb_extra, hltb_completionist,
                 tags, categories, region, play_count, is_hidden, play_actions,
-                auto_beaten, beaten_prompt_playtime, emulator_id
+                auto_beaten, beaten_prompt_playtime, emulator_id, updated_at, playtime_by_device
             FROM games ORDER BY title ASC")
             .map_err(|e| e.to_string())?;
 
@@ -299,6 +343,8 @@ impl Database {
                     auto_beaten: auto_beaten_int != 0,
                     beaten_prompt_playtime,
                     emulator_id: row.get(46)?,
+                    updated_at: row.get(47)?,
+                    playtime_by_device: row.get(48)?,
                 })
             })
             .map_err(|e| e.to_string())?;
@@ -314,6 +360,7 @@ impl Database {
 
     pub fn upsert_game(&self, game: &Game) -> Result<(), String> {
         let conn = self.conn.lock().unwrap();
+        let now_utc = chrono::Utc::now().to_rfc3339();
         let genres_json = serde_json::to_string(&game.genres).unwrap_or_else(|_| "[]".to_string());
         let features_json = serde_json::to_string(&game.features).unwrap_or_else(|_| "[]".to_string());
         let platforms_json = serde_json::to_string(&game.platforms).unwrap_or_else(|_| "[]".to_string());
@@ -333,11 +380,12 @@ impl Database {
                 date_added, completion_status, description, notes, links, screenshots, size_on_disk,
                 trailers, age_rating, critic_score, series, hltb_main, hltb_extra, hltb_completionist,
                 tags, categories, region, play_count, is_hidden, play_actions,
-                auto_beaten, beaten_prompt_playtime, emulator_id
+                auto_beaten, beaten_prompt_playtime, emulator_id, updated_at, playtime_by_device
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
                 ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31,
-                ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44, ?45, ?46, ?47
+                ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44, ?45, ?46, ?47,
+                ?48, ?49
             ) ON CONFLICT(id) DO UPDATE SET
                 title = excluded.title,
                 sorting_title = COALESCE(excluded.sorting_title, games.sorting_title),
@@ -402,7 +450,9 @@ impl Database {
                 play_actions = CASE WHEN excluded.play_actions != '[]' THEN excluded.play_actions ELSE games.play_actions END,
                 auto_beaten = games.auto_beaten,
                 beaten_prompt_playtime = games.beaten_prompt_playtime,
-                emulator_id = COALESCE(excluded.emulator_id, games.emulator_id)",
+                emulator_id = COALESCE(excluded.emulator_id, games.emulator_id),
+                updated_at = COALESCE(games.updated_at, excluded.updated_at),
+                playtime_by_device = COALESCE(games.playtime_by_device, excluded.playtime_by_device)",
             params![
                 game.id,
                 game.title,
@@ -451,6 +501,8 @@ impl Database {
                 if game.auto_beaten { 1 } else { 0 },
                 game.beaten_prompt_playtime.map(|v| v as i64),
                 game.emulator_id,
+                game.updated_at.as_deref().unwrap_or(&now_utc),
+                game.playtime_by_device,
             ],
         ).map_err(|e| e.to_string())?;
 
@@ -468,6 +520,9 @@ impl Database {
         let tags_json = serde_json::to_string(&game.tags).unwrap_or_else(|_| "[]".to_string());
         let categories_json = serde_json::to_string(&game.categories).unwrap_or_else(|_| "[]".to_string());
         let play_actions_json = serde_json::to_string(&game.play_actions).unwrap_or_else(|_| "[]".to_string());
+
+        let now_utc = chrono::Utc::now().to_rfc3339();
+        let updated_at_val = game.updated_at.as_deref().unwrap_or(&now_utc);
 
         let rows_affected = conn.execute(
             "UPDATE games SET
@@ -516,8 +571,10 @@ impl Database {
                 play_actions = ?43,
                 auto_beaten = ?44,
                 beaten_prompt_playtime = ?45,
-                emulator_id = ?46
-            WHERE id = ?47",
+                emulator_id = ?46,
+                updated_at = ?47,
+                playtime_by_device = ?48
+            WHERE id = ?49",
             params![
                 game.title,
                 game.sorting_title,
@@ -565,9 +622,13 @@ impl Database {
                 if game.auto_beaten { 1 } else { 0 },
                 game.beaten_prompt_playtime.map(|v| v as i64),
                 game.emulator_id,
+                updated_at_val,
+                game.playtime_by_device,
                 game.id,
             ],
         ).map_err(|e| e.to_string())?;
+
+        let _ = conn.execute("DELETE FROM deleted_games WHERE id = ?1", params![&game.id]);
 
         if rows_affected == 0 {
             drop(conn);
@@ -588,9 +649,10 @@ impl Database {
             .map_err(|e| e.to_string())?;
 
         let new_state = if current == 0 { 1 } else { 0 };
+        let now_utc = chrono::Utc::now().to_rfc3339();
         conn.execute(
-            "UPDATE games SET is_favorite = ?1 WHERE id = ?2",
-            params![new_state, id],
+            "UPDATE games SET is_favorite = ?1, updated_at = ?2 WHERE id = ?3",
+            params![new_state, &now_utc, id],
         )
         .map_err(|e| e.to_string())?;
 
@@ -600,9 +662,10 @@ impl Database {
     pub fn set_favorite(&self, id: &str, is_favorite: bool) -> Result<bool, String> {
         let conn = self.conn.lock().unwrap();
         let state_val = if is_favorite { 1 } else { 0 };
+        let now_utc = chrono::Utc::now().to_rfc3339();
         conn.execute(
-            "UPDATE games SET is_favorite = ?1 WHERE id = ?2",
-            params![state_val, id],
+            "UPDATE games SET is_favorite = ?1, updated_at = ?2 WHERE id = ?3",
+            params![state_val, &now_utc, id],
         )
         .map_err(|e| e.to_string())?;
 
@@ -611,9 +674,31 @@ impl Database {
 
     pub fn update_playtime(&self, id: &str, add_seconds: u64, last_played_iso: &str) -> Result<(), String> {
         let conn = self.conn.lock().unwrap();
+        let device_id = Self::get_or_create_device_id_conn(&conn)?;
+
+        let (current_map_raw, current_playtime): (Option<String>, i64) = conn
+            .query_row(
+                "SELECT playtime_by_device, playtime_seconds FROM games WHERE id = ?1",
+                params![id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap_or((None, 0));
+
+        let mut pt_map: std::collections::HashMap<String, u64> = current_map_raw
+            .as_deref()
+            .and_then(|s| serde_json::from_str(s).ok())
+            .unwrap_or_default();
+
+        let entry = pt_map.entry(device_id).or_insert(0);
+        *entry += add_seconds;
+
+        let sum_map: u64 = pt_map.values().sum();
+        let new_total = std::cmp::max(sum_map, (current_playtime as u64).saturating_add(add_seconds));
+        let map_json = serde_json::to_string(&pt_map).unwrap_or_else(|_| "{}".to_string());
+
         conn.execute(
-            "UPDATE games SET playtime_seconds = playtime_seconds + ?1, last_played = ?2 WHERE id = ?3",
-            params![add_seconds as i64, last_played_iso, id],
+            "UPDATE games SET playtime_seconds = ?1, playtime_by_device = ?2, last_played = ?3 WHERE id = ?4",
+            params![new_total as i64, map_json, last_played_iso, id],
         )
         .map_err(|e| e.to_string())?;
         Ok(())
@@ -621,9 +706,135 @@ impl Database {
 
     pub fn delete_game(&self, id: &str) -> Result<(), String> {
         let conn = self.conn.lock().unwrap();
+        let game_info: Option<(String, String)> = conn
+            .query_row("SELECT title, source FROM games WHERE id = ?1", params![id], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .ok();
+
+        let now_utc = chrono::Utc::now().to_rfc3339();
+        let (title, source) = game_info.unwrap_or_default();
+        let _ = conn.execute(
+            "INSERT OR REPLACE INTO deleted_games (id, title, source, deleted_at) VALUES (?1, ?2, ?3, ?4)",
+            params![id, title, source, &now_utc],
+        );
+
         conn.execute("DELETE FROM games WHERE id = ?1", params![id])
             .map_err(|e| e.to_string())?;
         Ok(())
+    }
+
+    pub fn get_or_create_device_id(&self) -> Result<String, String> {
+        let conn = self.conn.lock().unwrap();
+        Self::get_or_create_device_id_conn(&conn)
+    }
+
+    pub fn get_or_create_device_id_conn(conn: &rusqlite::Connection) -> Result<String, String> {
+        let existing: Option<String> = conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = 'device_id'",
+                [],
+                |r| r.get(0),
+            )
+            .ok();
+
+        if let Some(id) = existing {
+            if !id.trim().is_empty() {
+                return Ok(id);
+            }
+        }
+
+        let new_id = uuid::Uuid::new_v4().to_string();
+        conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES ('device_id', ?1)",
+            params![&new_id],
+        )
+        .map_err(|e| e.to_string())?;
+
+        Ok(new_id)
+    }
+
+    pub fn get_device_name(&self) -> String {
+        let conn = self.conn.lock().unwrap();
+        let existing: Option<String> = conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = 'device_name'",
+                [],
+                |r| r.get(0),
+            )
+            .ok();
+
+        if let Some(name) = existing {
+            if !name.trim().is_empty() {
+                return name;
+            }
+        }
+
+        sysinfo::System::host_name().unwrap_or_else(|| "OpenPlay Device".to_string())
+    }
+
+    pub fn set_device_name(&self, name: &str) -> Result<(), String> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES ('device_name', ?1)",
+            params![name],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub fn record_game_deletion(&self, id: &str, title: &str, source: &str) -> Result<(), String> {
+        let conn = self.conn.lock().unwrap();
+        let now_utc = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT OR REPLACE INTO deleted_games (id, title, source, deleted_at) VALUES (?1, ?2, ?3, ?4)",
+            params![id, title, source, &now_utc],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub fn get_active_tombstones(&self) -> Result<Vec<TombstoneRecord>, String> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare("SELECT id, title, source, deleted_at FROM deleted_games")
+            .map_err(|e| e.to_string())?;
+
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(TombstoneRecord {
+                    id: r.get(0)?,
+                    title: r.get(1)?,
+                    source: r.get(2)?,
+                    deleted_at: r.get(3)?,
+                })
+            })
+            .map_err(|e| e.to_string())?;
+
+        let mut list = Vec::new();
+        for r in rows.flatten() {
+            list.push(r);
+        }
+        Ok(list)
+    }
+
+    pub fn clear_tombstone(&self, id: &str) -> Result<(), String> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM deleted_games WHERE id = ?1", params![id])
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub fn touch_game_metadata_updated(&self, id: &str) -> Result<String, String> {
+        let conn = self.conn.lock().unwrap();
+        let now_utc = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "UPDATE games SET updated_at = ?1 WHERE id = ?2",
+            params![&now_utc, id],
+        )
+        .map_err(|e| e.to_string())?;
+        let _ = conn.execute("DELETE FROM deleted_games WHERE id = ?1", params![id]);
+        Ok(now_utc)
     }
 
     pub fn clear_all_games(&self) -> Result<(), String> {
@@ -827,6 +1038,37 @@ impl Database {
         ).map_err(|e| e.to_string())?;
 
         let rows = stmt.query_map(params![game_id], |row| {
+            Ok(Achievement {
+                game_id: row.get(0)?,
+                api_name: row.get(1)?,
+                display_name: row.get(2)?,
+                description: row.get(3)?,
+                icon_url: row.get(4)?,
+                icon_gray_url: row.get(5)?,
+                is_unlocked: row.get::<_, i32>(6)? != 0,
+                unlock_time: row.get(7)?,
+                rarity_percentage: row.get(8)?,
+                is_secret: row.get::<_, i32>(9)? != 0,
+            })
+        }).map_err(|e| e.to_string())?;
+
+        let mut list = Vec::new();
+        for item in rows {
+            list.push(item.map_err(|e| e.to_string())?);
+        }
+        Ok(list)
+    }
+
+    pub fn get_all_achievements(&self) -> Result<Vec<Achievement>, String> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT game_id, api_name, display_name, description, icon_url, icon_gray_url,
+                    is_unlocked, unlock_time, rarity_percentage, is_secret
+             FROM achievements
+             ORDER BY game_id ASC, is_unlocked DESC, display_name ASC"
+        ).map_err(|e| e.to_string())?;
+
+        let rows = stmt.query_map([], |row| {
             Ok(Achievement {
                 game_id: row.get(0)?,
                 api_name: row.get(1)?,
@@ -1235,6 +1477,206 @@ impl Database {
         let conn = self.conn.lock().unwrap();
         conn.execute("DELETE FROM configured_consoles WHERE id = ?1", params![id])
             .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    // ==========================================
+    // BACKUPS & SNAPSHOTS ENGINE (PHASE 1)
+    // ==========================================
+
+    pub fn get_backups_dir() -> PathBuf {
+        let dir = dirs::data_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("OpenPlay")
+            .join("backups");
+        let _ = fs::create_dir_all(&dir);
+        dir
+    }
+
+    pub fn create_backup(&self, custom_name: Option<String>, is_automatic: bool) -> Result<BackupInfo, String> {
+        let backups_dir = Self::get_backups_dir();
+        let now = chrono::Local::now();
+        let timestamp_str = now.format("%Y-%m-%d_%H-%M-%S").to_string();
+        let display_created_at = now.format("%Y-%m-%d %H:%M").to_string();
+
+        let filename = match custom_name {
+            Some(name) if !name.trim().is_empty() => {
+                let safe_name = name.trim().replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_");
+                format!("{}_{}.db", safe_name, timestamp_str)
+            }
+            _ => {
+                if is_automatic {
+                    format!("auto_backup_{}.db", timestamp_str)
+                } else {
+                    format!("manual_backup_{}.db", timestamp_str)
+                }
+            }
+        };
+
+        let target_path = backups_dir.join(&filename);
+        let target_path_str = target_path.to_string_lossy().to_string();
+
+        if target_path.exists() {
+            let _ = fs::remove_file(&target_path);
+        }
+
+        let game_count = {
+            let conn = self.conn.lock().unwrap();
+            conn.execute("VACUUM INTO ?1", params![&target_path_str])
+                .map_err(|e| format!("VACUUM INTO failed: {}", e))?;
+
+            let count: u32 = conn
+                .query_row("SELECT count(*) FROM games", [], |r| r.get(0))
+                .unwrap_or(0);
+            count
+        };
+
+        let size_bytes = fs::metadata(&target_path)
+            .map(|m| m.len())
+            .unwrap_or(0);
+
+        Ok(BackupInfo {
+            filename,
+            file_path: target_path_str,
+            size_bytes,
+            created_at: display_created_at,
+            game_count,
+            is_automatic,
+        })
+    }
+
+    pub fn list_backups(&self) -> Result<Vec<BackupInfo>, String> {
+        let backups_dir = Self::get_backups_dir();
+        let mut backups = Vec::new();
+
+        if let Ok(entries) = fs::read_dir(backups_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file() {
+                    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                        if ext.eq_ignore_ascii_case("db") {
+                            let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+                            let is_automatic = filename.starts_with("auto_");
+
+                            let metadata = match fs::metadata(&path) {
+                                Ok(m) => m,
+                                Err(_) => continue,
+                            };
+                            let size_bytes = metadata.len();
+
+                            let created_at = if let Ok(created) = metadata.created() {
+                                let dt: chrono::DateTime<chrono::Local> = created.into();
+                                dt.format("%Y-%m-%d %H:%M").to_string()
+                            } else if let Ok(modified) = metadata.modified() {
+                                let dt: chrono::DateTime<chrono::Local> = modified.into();
+                                dt.format("%Y-%m-%d %H:%M").to_string()
+                            } else {
+                                "Unknown".to_string()
+                            };
+
+                            let game_count = if let Ok(test_conn) = Connection::open(&path) {
+                                test_conn
+                                    .query_row("SELECT count(*) FROM games", [], |r| r.get(0))
+                                    .unwrap_or(0)
+                            } else {
+                                0
+                            };
+
+                            backups.push(BackupInfo {
+                                filename,
+                                file_path: path.to_string_lossy().to_string(),
+                                size_bytes,
+                                created_at,
+                                game_count,
+                                is_automatic,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        backups.sort_by(|a, b| b.filename.cmp(&a.filename));
+        Ok(backups)
+    }
+
+    pub fn delete_backup(&self, filename: &str) -> Result<(), String> {
+        let backups_dir = Self::get_backups_dir();
+        let safe_name = Path::new(filename).file_name().and_then(|n| n.to_str()).unwrap_or("");
+        if safe_name.is_empty() {
+            return Err("Invalid backup filename".to_string());
+        }
+        let target = backups_dir.join(safe_name);
+        if target.exists() {
+            fs::remove_file(target).map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+
+    pub fn prune_backups(&self, keep_count: usize) -> Result<usize, String> {
+        if keep_count == 0 {
+            return Ok(0);
+        }
+        let all = self.list_backups()?;
+        let auto_backups: Vec<&BackupInfo> = all.iter().filter(|b| b.is_automatic).collect();
+        if auto_backups.len() <= keep_count {
+            return Ok(0);
+        }
+
+        let mut removed = 0;
+        for old_backup in auto_backups.into_iter().skip(keep_count) {
+            if self.delete_backup(&old_backup.filename).is_ok() {
+                removed += 1;
+            }
+        }
+        Ok(removed)
+    }
+
+    pub fn restore_backup(&self, filename_or_path: &str) -> Result<(), String> {
+        let backups_dir = Self::get_backups_dir();
+        let target_path = if Path::new(filename_or_path).is_absolute() {
+            PathBuf::from(filename_or_path)
+        } else {
+            let safe_name = Path::new(filename_or_path).file_name().and_then(|n| n.to_str()).unwrap_or("");
+            backups_dir.join(safe_name)
+        };
+
+        if !target_path.exists() {
+            return Err(format!("Backup file not found: {}", target_path.display()));
+        }
+
+        let src_conn = Connection::open(&target_path)
+            .map_err(|e| format!("Selected backup is not a valid SQLite database: {}", e))?;
+
+        let valid_table: bool = src_conn
+            .query_row(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='games'",
+                [],
+                |_| Ok(true),
+            )
+            .unwrap_or(false);
+
+        if !valid_table {
+            return Err("Backup file does not contain a valid 'games' table".to_string());
+        }
+
+        // Create safety pre-restore backup
+        let _ = self.create_backup(Some("pre_restore_safety".to_string()), false);
+
+        // Perform live online restore
+        {
+            let mut dst_conn = self.conn.lock().unwrap();
+            let backup = rusqlite::backup::Backup::new(&src_conn, &mut dst_conn)
+                .map_err(|e| format!("Failed to initiate restore backup: {}", e))?;
+
+            backup
+                .run_to_completion(10, std::time::Duration::from_millis(25), None)
+                .map_err(|e| format!("Restore operation failed: {}", e))?;
+        }
+
+        // Apply any migrations
+        self.init_tables().map_err(|e| format!("Post-restore migration check failed: {}", e))?;
+
         Ok(())
     }
 }

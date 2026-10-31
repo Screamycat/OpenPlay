@@ -91,6 +91,8 @@ Every launcher has its own design philosophy and purpose. Here is how they compa
 | **Native Emulation & ROM Scanner** | ✅ **Built-in (RetroArch & Standalones)** | 🔌 Built-in / Plugins | 👑 Runner Engine | ❌ *No* |
 | **Duplicate Merger across Stores** | ✅ **Built-in (Interactive Platform Tabs)** | 🔌 Requires Plugin | ❌ Separate entries | ❌ N/A |
 | **Playnite Backup Importer (.zip)** | ✅ **Built-in (1-Click Migration)** | ✅ Native Export | ❌ N/A | ❌ N/A |
+| **Zero-Downtime Snapshots & Backups** | ✅ **Built-in (Auto-rotation & portable .openplaybackup)** | 🔌 Extensions / Manual | ❌ Manual file copy | ❌ N/A |
+| **Cross-Device Cloud Sync (Folder Sync)** | ✅ **Built-in (Multi-Leader CRDT & PN-Counter)** | 🔌 Third-party scripts | ❌ Manual rsync | ❌ N/A |
 | **Direct Store Downloading & Cloud Saves** | ⚠️ Directs to Store / Native Launch | ⚠️ Directs to Store Client | 🔌 Custom Scripts | 👑 **Built-in (Legendary/Nile)** |
 | **Wine / Proton Prefix Tuning** | ⚠️ Direct Execution / Steam Proton | ❌ N/A | 👑 **Advanced Deep Runner Tuning** | ✅ Integrated Wine/Proton Tools |
 | **Visuals, Media & Metadata** | | | | |
@@ -139,6 +141,24 @@ We have developed a **1-click Playnite Backup Importer**:
 3. Your entire library is instantly ready on Windows or native Linux with zero setup friction.
 
 > With more migration to come?
+---
+
+## ☁️ Cross-Device Cloud Sync & Zero-Downtime Backups
+
+OpenPlay is designed from the ground up to respect user sovereignty and privacy:
+
+### 🔄 Multi-Leader Offline-First Cloud Sync
+- **Zero Proprietary Cloud Lock-In**: Sync seamlessly across your desktop PC, Steam Deck, or handheld using your own cloud folder (OneDrive, Syncthing, Dropbox, Google Drive, Nextcloud, or a local network NAS).
+- **No SQLite File Corruption**: Avoids raw database file syncing over cloud drives. Each device writes exclusively to its own state file (`devices/<device_id>.json`) via atomic temporary writes.
+- **PN-Counter Playtime CRDT**: Tracks session playtimes as monotonic per-device maps. Offline playtime on your Steam Deck and desktop never overwrite each other; playtimes accumulate conflict-free.
+- **Two-Pass Tombstones & Metadata LWW**: Deletions cleanly propagate across peer devices while user metadata edits take precedence over stale state.
+- **Content-Addressed Artwork Sync**: Local custom artwork is deduplicated and hashed using SHA-256 (`custom://<sha256>.<ext>`) so every device in the cluster shares artwork with zero duplicate bandwidth.
+- **Physical vs. Logical Isolation**: Syncs ratings, tags, notes, playtimes, and UI themes across devices while keeping physical install directories and executable paths strictly device-local.
+
+### 🛡️ Live Snapshots & Portable Bundles
+- **Live `VACUUM INTO` Snapshots**: Creates consistent, zero-downtime database snapshots with configurable rotation and retention limits.
+- **Portable `.openplaybackup` Bundles**: Export and import your entire collection—including custom configurations and achievement histories—in a single portable zip archive.
+
 ---
 
 ## 🏗️ Architecture & Tech Stack

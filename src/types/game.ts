@@ -66,5 +66,7 @@ export interface Game {
   auto_beaten?: boolean;
   beaten_prompt_playtime?: number;
   emulator_id?: string;
+  updated_at?: string;
+  playtime_by_device?: string;
   sibling_games?: Game[];
 }

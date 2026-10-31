@@ -1,4 +1,5 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import {
   X,
   Library,
@@ -9,7 +10,9 @@ import {
   Layers,
   Loader2,
   HardDrive,
+  Gamepad2,
 } from "lucide-react";
+import { ConnectedLibraryItem } from "../types/backup";
 
 const SteamIcon: React.FC<{ className?: string }> = ({ className = "w-4 h-4" }) => (
   <svg viewBox="0 0 496 512" fill="currentColor" className={className} aria-hidden="true">
@@ -49,7 +52,16 @@ export const LeftDrawer: React.FC<LeftDrawerProps> = ({
 }) => {
   const [isRefreshHovered, setIsRefreshHovered] = useState(false);
   const [isRefreshExpanded, setIsRefreshExpanded] = useState(false);
+  const [connectedLibs, setConnectedLibs] = useState<ConnectedLibraryItem[]>([]);
   const hoverTimeoutRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      invoke<ConnectedLibraryItem[]>("get_connected_libraries")
+        .then((items) => setConnectedLibs(items || []))
+        .catch((err) => console.warn("Failed to load connected libraries:", err));
+    }
+  }, [isOpen]);
 
   const handleMouseEnterRefresh = () => {
     if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
@@ -245,65 +257,81 @@ export const LeftDrawer: React.FC<LeftDrawerProps> = ({
 
                 <div className="h-px bg-white/10 my-1" />
 
-                {/* 3. Refresh individual library */}
+                {/* 3. Refresh individual connected library (Option A: Categorized) */}
                 <div className="px-2.5 pt-1 text-[10px] font-bold uppercase tracking-wider text-zinc-500 flex items-center justify-between">
-                  <span>Refresh Specific Library</span>
+                  <span>Connected Libraries</span>
                   <Layers className="w-3 h-3 text-zinc-500" />
                 </div>
 
-                <div className="space-y-0.5">
-                  <button
-                    onClick={() => {
-                      onClose();
-                      onRefreshLibrary("steam");
-                    }}
-                    className="w-full text-left px-2.5 py-2 rounded-xl hover:bg-white/10 transition-colors flex items-center justify-between text-xs text-zinc-300 hover:text-white cursor-pointer group border border-transparent hover:border-white/10"
-                  >
-                    <div className="flex items-center space-x-2.5">
-                      <SteamIcon className="w-4 h-4 text-zinc-400 group-hover:text-white transition-colors" />
-                      <span className="font-medium">Steam</span>
+                {/* Subcategory: Stores */}
+                {connectedLibs.some((l) => l.category === "store") && (
+                  <div className="space-y-0.5">
+                    <div className="px-2.5 pt-1 text-[9px] font-bold uppercase tracking-wider text-zinc-500">
+                      Stores
                     </div>
-                    <span className="text-[10px] text-zinc-500 group-hover:text-zinc-300 font-mono">
-                      Scan
-                    </span>
-                  </button>
+                    {connectedLibs
+                      .filter((l) => l.category === "store")
+                      .map((lib) => (
+                        <button
+                          key={lib.id}
+                          onClick={() => {
+                            onClose();
+                            onRefreshLibrary(lib.id);
+                          }}
+                          className="w-full text-left px-2.5 py-1.5 rounded-xl hover:bg-white/10 transition-colors flex items-center justify-between text-xs text-zinc-300 hover:text-white cursor-pointer group border border-transparent hover:border-white/10"
+                        >
+                          <div className="flex items-center space-x-2.5">
+                            {lib.id === "steam" ? (
+                              <SteamIcon className="w-4 h-4 text-zinc-400 group-hover:text-white transition-colors" />
+                            ) : (
+                              <span className="w-4 h-4 rounded theme-accent-subtle-bg theme-accent-text font-mono text-[9px] flex items-center justify-center font-bold border border-[var(--app-accent-color)]/30">
+                                {lib.badge.slice(0, 1)}
+                              </span>
+                            )}
+                            <span className="font-medium truncate max-w-[130px]">{lib.name}</span>
+                          </div>
+                          <span className="text-[10px] text-zinc-500 group-hover:text-zinc-300 font-mono">
+                            Scan
+                          </span>
+                        </button>
+                      ))}
+                  </div>
+                )}
 
-                  <button
-                    onClick={() => {
-                      onClose();
-                      onRefreshLibrary("epic");
-                    }}
-                    className="w-full text-left px-2.5 py-2 rounded-xl hover:bg-white/10 transition-colors flex items-center justify-between text-xs text-zinc-300 hover:text-white cursor-pointer group border border-transparent hover:border-white/10"
-                  >
-                    <div className="flex items-center space-x-2.5">
-                      <span className="w-4 h-4 rounded theme-accent-subtle-bg theme-accent-text font-mono text-[9px] flex items-center justify-center font-bold border border-[var(--app-accent-color)]/30">
-                        E
-                      </span>
-                      <span className="font-medium">Epic Games</span>
+                {/* Subcategory: Consoles & Retro */}
+                {connectedLibs.some((l) => l.category === "emulation") && (
+                  <div className="space-y-0.5 pt-1">
+                    <div className="px-2.5 pt-1 text-[9px] font-bold uppercase tracking-wider text-zinc-500">
+                      Consoles & Retro
                     </div>
-                    <span className="text-[10px] text-zinc-500 group-hover:text-zinc-300 font-mono">
-                      Scan
-                    </span>
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      onClose();
-                      onRefreshLibrary("retroachievements");
-                    }}
-                    className="w-full text-left px-2.5 py-2 rounded-xl hover:bg-white/10 transition-colors flex items-center justify-between text-xs text-zinc-300 hover:text-white cursor-pointer group border border-transparent hover:border-white/10"
-                  >
-                    <div className="flex items-center space-x-2.5">
-                      <span className="w-4 h-4 rounded bg-amber-500/20 text-amber-300 font-mono text-[9px] flex items-center justify-center font-bold border border-amber-500/30">
-                        R
-                      </span>
-                      <span className="font-medium">RetroAchievements</span>
-                    </div>
-                    <span className="text-[10px] text-zinc-500 group-hover:text-zinc-300 font-mono">
-                      Sync
-                    </span>
-                  </button>
-                </div>
+                    {connectedLibs
+                      .filter((l) => l.category === "emulation")
+                      .map((lib) => (
+                        <button
+                          key={lib.id}
+                          onClick={() => {
+                            onClose();
+                            onRefreshLibrary(lib.id);
+                          }}
+                          className="w-full text-left px-2.5 py-1.5 rounded-xl hover:bg-white/10 transition-colors flex items-center justify-between text-xs text-zinc-300 hover:text-white cursor-pointer group border border-transparent hover:border-white/10"
+                        >
+                          <div className="flex items-center space-x-2.5">
+                            {lib.id === "retroachievements" ? (
+                              <span className="w-4 h-4 rounded bg-amber-500/20 text-amber-300 font-mono text-[9px] flex items-center justify-center font-bold border border-amber-500/30">
+                                R
+                              </span>
+                            ) : (
+                              <Gamepad2 className="w-4 h-4 text-amber-400" />
+                            )}
+                            <span className="font-medium truncate max-w-[130px]">{lib.name}</span>
+                          </div>
+                          <span className="text-[10px] text-zinc-500 group-hover:text-zinc-300 font-mono">
+                            {lib.id === "retroachievements" ? "Sync" : "Rescan"}
+                          </span>
+                        </button>
+                      ))}
+                  </div>
+                )}
               </div>
             )}
           </div>

@@ -49,6 +49,19 @@ pub struct AppConfig {
     // Background Synchronization
     pub sync_on_startup: Option<bool>,
     pub periodic_playtime_sync_hours: Option<u32>,
+
+    // Backup & Data
+    pub backup_frequency: Option<String>,
+    pub backup_retention_count: Option<u32>,
+    pub last_backup_time: Option<String>,
+
+    // Cloud Sync & Online Saving (CRDT)
+    pub cloud_sync_enabled: Option<bool>,
+    pub cloud_sync_folder: Option<String>,
+    pub cloud_sync_interval_minutes: Option<u32>,
+    pub cloud_sync_on_startup: Option<bool>,
+    pub cloud_sync_on_game_exit: Option<bool>,
+    pub last_cloud_sync_time: Option<String>,
 }
 
 impl Default for AppConfig {
@@ -86,6 +99,15 @@ impl Default for AppConfig {
             unmerged_game_ids: Some(Vec::new()),
             sync_on_startup: Some(true),
             periodic_playtime_sync_hours: Some(0),
+            backup_frequency: Some("daily".to_string()),
+            backup_retention_count: Some(5),
+            last_backup_time: None,
+            cloud_sync_enabled: Some(false),
+            cloud_sync_folder: None,
+            cloud_sync_interval_minutes: Some(15),
+            cloud_sync_on_startup: Some(true),
+            cloud_sync_on_game_exit: Some(true),
+            last_cloud_sync_time: None,
         }
     }
 }

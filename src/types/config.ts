@@ -45,6 +45,19 @@ export interface AppConfig {
   // Background Library Sync
   sync_on_startup?: boolean;
   periodic_playtime_sync_hours?: number;
+
+  // Backup & Snapshots
+  backup_frequency?: "disabled" | "daily" | "weekly" | "on_exit";
+  backup_retention_count?: number;
+  last_backup_time?: string;
+
+  // Cloud Sync & Online Saving (CRDT)
+  cloud_sync_enabled?: boolean;
+  cloud_sync_folder?: string | null;
+  cloud_sync_interval_minutes?: number;
+  cloud_sync_on_startup?: boolean;
+  cloud_sync_on_game_exit?: boolean;
+  last_cloud_sync_time?: string | null;
 }
 
 export const DEFAULT_APP_CONFIG: AppConfig = {
@@ -62,6 +75,14 @@ export const DEFAULT_APP_CONFIG: AppConfig = {
   auto_scan_on_startup: true,
   sync_on_startup: true,
   periodic_playtime_sync_hours: 0,
+  backup_frequency: "daily",
+  backup_retention_count: 5,
+  cloud_sync_enabled: false,
+  cloud_sync_folder: null,
+  cloud_sync_interval_minutes: 15,
+  cloud_sync_on_startup: true,
+  cloud_sync_on_game_exit: true,
+  last_cloud_sync_time: null,
   launch_on_startup: false,
   minimize_on_game_launch: false,
   close_to_tray: false,

@@ -2610,16 +2610,18 @@ dependencies = [
 
 [[package]]
 name = "openplay"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "chrono",
  "dirs 5.0.1",
+ "hex",
  "regex",
  "reqwest 0.12.28",
  "rfd",
  "rusqlite",
  "serde",
  "serde_json",
+ "sha2",
  "sysinfo",
  "tauri",
  "tauri-build",

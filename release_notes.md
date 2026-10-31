@@ -1,41 +1,33 @@
-# 🎮 OpenPlay v0.1.2 — In-App Auto Updater, Multi-Platform Merging & Bug Squashing
+# 🎮 OpenPlay v0.1.3 — Offline-First Cloud Sync, CRDT Online Saving & Zero-Downtime Backups
 
 OpenPlay is an open-source, offline-first cross-platform game library manager and launcher engineered for modern PCs and handhelds. Built on **Tauri v2 + Rust + React 19**, OpenPlay provides a blazing-fast, lightweight sanctuary for your entire game collection without unnecessary bloat.
 
 ---
 
-### ✨ What's New in v0.1.2
+### ✨ What's New in v0.1.3
 
-#### 🔄 In-App Auto-Updater
-- **Zero-Manual-Installer Updating**: No more downloading setup files through the browser. OpenPlay can now download updates and silently apply them in-app (`/S`), restarting directly back into the updated version.
-- **Top Bar Notification Pill**: A subtle pill appears directly to the left of the Achievement Hub button when a new version is detected, taking you directly to the release page.
-- **Dynamic About Page**: Read full changelogs and release notes right inside Settings.
-- **Interactive Progress Transformation**: The update button transforms into a live download progress bar with percentage and downloaded MB / total MB metrics, transitioning cleanly into a **`Restart Now`** action upon 100% completion.
+#### ☁️ Offline-First Multi-Leader Cloud Sync & Online Saving
+- **Zero Proprietary Cloud Lock-In**: Sync seamlessly across your desktop PC, Steam Deck, or gaming handheld using your own storage provider (OneDrive, Syncthing, Dropbox, Google Drive, Nextcloud, or a local network NAS).
+- **Conflict-Free Per-Device Topology**: OpenPlay completely avoids raw database file syncing over cloud drives. Each device writes exclusively to its own atomic state file (`devices/<device_id>.json`), eliminating file collisions (`conflicted copy`) forever.
+- **PN-Counter Playtime CRDT**: Monotonic per-device playtime tracking (`playtime_by_device`). Play offline on your Steam Deck and desktop simultaneously—sessions accumulate conflict-free without overwriting or losing hours. Pre-sync hours are migrated into a reserved `"legacy"` key to prevent double-counting.
+- **Two-Pass Tombstone Deletion Engine**: Game deletions cleanly propagate across peer devices while user metadata edits take precedence over stale deletions.
+- **Content-Addressed Artwork & Public CDN Optimization**: Local custom box art is SHA-256 hashed and exported to `custom_artwork/<sha256>.<ext>`, while standard store assets (Steam, Epic, GOG) resolve directly to high-speed public CDN URLs (e.g. Steam Akamai CDN) with zero cloud storage wasted. Automated orphan pruning cleans up obsolete assets automatically.
+- **Physical vs. Logical Isolation**: Syncs ratings, tags, notes, playtimes, completion statuses, and UI themes across devices while keeping physical install directories and executable paths strictly device-local.
+- **Dedicated Cloud Sync Settings**: Configure your shared sync folder, customize device identities, view all connected peer devices with real-time last-active timestamps, and trigger manual or automated background syncs.
 
-#### 🔀 Multi-Platform Merging & Visual Status Differentiation
-- **Merged Game Providers**: Titles owned on multiple stores or emulated platforms (e.g., *Banjo-Kazooie* across Local PC and RetroAchievements) now display all platforms simultaneously (`LOCAL PC` + `RETRO`).
-- **Installed vs. Cloud Hierarchy**: Installed platforms are highlighted with a crisp, subtle white border and subtle ambient glow, while uninstalled or cloud platforms display translucent styling.
+#### 🛡️ Zero-Downtime Local Backups & Portable Bundles
+- **Live SQLite Snapshots**: Automated `VACUUM INTO` backup engine creates consistent database snapshots without interrupting active gaming sessions.
+- **Configurable Retention**: Automated backup frequency (daily, weekly, startup) with automated retention pruning.
+- **Portable `.openplaybackup` Bundles**: 1-click export and import of your entire collection (games, achievements, configured consoles, and configurations) in a single portable zip archive.
 
-#### 🏆 RetroAchievements & Library Integrations Polish
-- **Rate-Limiting & Full Sync**: Added automatic exponential backoff retry on HTTP 429 rate-limiting and paced requests, ensuring complete library and achievement imports without dropped titles.
-- **Library Integrations Reorganization**: Moved RetroAchievements out of the generic API settings into the dedicated Library Integrations & Managers hub alongside Steam and Epic Games.
-- **Epic Games Library**: Added dedicated "Sync Epic Games Library" flow and cleaned up redundant UI notices.
-
-#### 🎯 Completion Status Overhaul
-- **Claim Beaten**: Streamlined "Claim Beaten" flow housed directly in game properties under *Score & Playtime*.
-- **Hunting Override**: Active achievement hunting dynamically overrides Beaten status.
-- **Calm, Minimal UI**: Removed redundant status pills and "Privacy" labels for a cleaner, calmer design.
-
-#### 🐛 Bug Fixes
-- **Bug 001**: Resolved window disappearance bug on restart caused by mouse-down listeners colliding with Tauri v2 drag regions.
-- **Bug 002**: Resolved null incoming Steam artwork in the metadata comparison modal.
-- **Bug 003**: Resolved blank/black game cards caused by transient CDN errors; cards now gracefully render clean title + Gamepad icon fallbacks with error recovery.
-- **Bug 004**: Resolved broken image icons on animated artwork covers across Game Settings, Achievement Hunter Hub, Achievement Details, and Metadata modals by adding universal `.webm` and `.mp4` hardware-accelerated video playback.
+#### 🧭 Dynamic Categorized Sidebar Refresh
+- **Dynamic Storefront Detection**: The Refresh flyout now automatically categorizes authenticated stores (Steam, Epic, GOG, Xbox, Battle.net, EA, Ubisoft, Riot, Amazon) with individual rescan triggers.
+- **Consoles & Retro Subheader**: Dedicated rescan triggers for RetroAchievements and configured console profiles (PS2, GameCube, SNES, etc.) to refresh ROM directories seamlessly.
 
 ---
 
 ### 📦 Installation (Windows)
 
-1. Download `OpenPlay_0.1.2_x64-setup.exe` below.
+1. Download `OpenPlay_0.1.3_x64-setup.exe` below.
 2. Run the installer to install or upgrade OpenPlay on your system (future updates will install automatically in-app!).
 3. Enjoy an open, offline-first gaming experience!

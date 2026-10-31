@@ -22,6 +22,8 @@ import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { AppConfig, DEFAULT_APP_CONFIG } from "../types/config";
 import { PlayniteBackupTab } from "./library/PlayniteBackupTab";
+import { OpenPlayBackupTab } from "./library/OpenPlayBackupTab";
+import { CloudSyncSettingsCard } from "./library/CloudSyncSettingsCard";
 import { formatFileSize } from "../utils/image";
 import { UpdateCheckResult, UpdateProgressPayload } from "../types/update";
 
@@ -81,6 +83,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     percentage: 0,
   });
   const [installerPath, setInstallerPath] = useState<string | null>(null);
+  const [backupSubTab, setBackupSubTab] = useState<"cloud" | "openplay" | "playnite">("cloud");
 
   useEffect(() => {
     if (isOpen && initialTab) {
@@ -183,7 +186,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     { id: "appearance", label: "Appearance", icon: Palette },
     { id: "playback", label: "Playback & Media", icon: PlaySquare },
     { id: "apis", label: "APIs & Services", icon: KeyRound },
-    { id: "backup", label: "Playnite Backup", icon: Archive },
+    { id: "backup", label: "Backups & Data", icon: Archive },
     { id: "about", label: "About OpenPlay", icon: Info },
   ] as const;
 
@@ -792,9 +795,59 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </div>
             )}
 
-            {/* 5. Playnite Backup Tab */}
+            {/* 5. Backups & Data Tab */}
             {activeTab === "backup" && (
-              <PlayniteBackupTab onImportComplete={onReloadGames} />
+              <div className="space-y-4">
+                {/* Sub-navigation tabs */}
+                <div className="flex items-center space-x-1.5 p-1 bg-white/[0.04] border border-white/5 rounded-xl w-fit">
+                  <button
+                    onClick={() => setBackupSubTab("cloud")}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                      backupSubTab === "cloud"
+                        ? "bg-white/15 text-white shadow-sm border border-white/10"
+                        : "text-zinc-400 hover:text-white"
+                    }`}
+                  >
+                    Cloud Sync
+                  </button>
+                  <button
+                    onClick={() => setBackupSubTab("openplay")}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                      backupSubTab === "openplay"
+                        ? "bg-white/15 text-white shadow-sm border border-white/10"
+                        : "text-zinc-400 hover:text-white"
+                    }`}
+                  >
+                    Snapshots & Bundles
+                  </button>
+                  <button
+                    onClick={() => setBackupSubTab("playnite")}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                      backupSubTab === "playnite"
+                        ? "bg-white/15 text-white shadow-sm border border-white/10"
+                        : "text-zinc-400 hover:text-white"
+                    }`}
+                  >
+                    Import Playnite Backup
+                  </button>
+                </div>
+
+                {backupSubTab === "cloud" && (
+                  <CloudSyncSettingsCard onReloadGames={onReloadGames} />
+                )}
+
+                {backupSubTab === "openplay" && (
+                  <OpenPlayBackupTab
+                    config={formConfig}
+                    onSaveConfig={onSaveConfig}
+                    onReloadGames={onReloadGames}
+                  />
+                )}
+
+                {backupSubTab === "playnite" && (
+                  <PlayniteBackupTab onImportComplete={onReloadGames} />
+                )}
+              </div>
             )}
 
             {/* 6. About Tab */}

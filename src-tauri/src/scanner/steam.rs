@@ -722,32 +722,13 @@ impl SteamScanner {
     }
 
     /// Finds artwork locally in appcache/librarycache or falls back to official Steam CDN
+    /// Finds artwork using official Steam Akamai CDN URLs and checks for client icon locally
     fn find_artwork(steam_dir: &Path, appid: &str) -> (Option<String>, Option<String>, Option<String>, Option<String>) {
         let librarycache = steam_dir.join("appcache").join("librarycache");
-
-        // 1. Try modern nested directory: librarycache/<appid>/
         let app_dir = librarycache.join(appid);
-        let mut cover = None;
-        let mut hero = None;
-        let mut logo = None;
         let mut icon = None;
 
         if app_dir.exists() {
-            let p_cover = app_dir.join("library_600x900.jpg");
-            if p_cover.exists() {
-                cover = Some(p_cover.to_string_lossy().to_string());
-            }
-
-            let p_hero = app_dir.join("library_hero.jpg");
-            if p_hero.exists() {
-                hero = Some(p_hero.to_string_lossy().to_string());
-            }
-
-            let p_logo = app_dir.join("logo.png");
-            if p_logo.exists() {
-                logo = Some(p_logo.to_string_lossy().to_string());
-            }
-
             // Look for client icon file in app_dir
             if let Ok(entries) = fs::read_dir(&app_dir) {
                 for e in entries.flatten() {
@@ -764,25 +745,6 @@ impl SteamScanner {
             }
         }
 
-        // 2. Try legacy flat naming: librarycache/<appid>_library_600x900.jpg
-        if cover.is_none() {
-            let p = librarycache.join(format!("{}_library_600x900.jpg", appid));
-            if p.exists() {
-                cover = Some(p.to_string_lossy().to_string());
-            }
-        }
-        if hero.is_none() {
-            let p = librarycache.join(format!("{}_library_hero.jpg", appid));
-            if p.exists() {
-                hero = Some(p.to_string_lossy().to_string());
-            }
-        }
-        if logo.is_none() {
-            let p = librarycache.join(format!("{}_logo.png", appid));
-            if p.exists() {
-                logo = Some(p.to_string_lossy().to_string());
-            }
-        }
         if icon.is_none() {
             let p = librarycache.join(format!("{}_icon.jpg", appid));
             if p.exists() {
@@ -790,25 +752,19 @@ impl SteamScanner {
             }
         }
 
-        // 3. Fallback to official Steam CDN URLs so covers are ALWAYS visible even if cache was cleared
-        let final_cover = cover.or_else(|| {
-            Some(format!(
-                "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/{}/library_600x900.jpg",
-                appid
-            ))
-        });
-        let final_hero = hero.or_else(|| {
-            Some(format!(
-                "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/{}/library_hero.jpg",
-                appid
-            ))
-        });
-        let final_logo = logo.or_else(|| {
-            Some(format!(
-                "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/{}/logo.png",
-                appid
-            ))
-        });
+        // Use official Steam Akamai CDN URLs for cross-device portability without machine-specific local disk paths
+        let final_cover = Some(format!(
+            "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/{}/library_600x900.jpg",
+            appid
+        ));
+        let final_hero = Some(format!(
+            "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/{}/library_hero.jpg",
+            appid
+        ));
+        let final_logo = Some(format!(
+            "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/{}/logo.png",
+            appid
+        ));
 
         (final_cover, final_hero, final_logo, icon)
     }

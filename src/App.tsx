@@ -949,7 +949,7 @@ export function App() {
     }
   };
 
-  // Refresh Specific Library Provider
+  // Refresh Specific Library Provider (Stores, Consoles, RetroAchievements)
   const handleRefreshLibrary = async (provider: string) => {
     const p = provider.toLowerCase();
     if (p === "steam") {
@@ -958,6 +958,29 @@ export function App() {
       await handleScanEpicLibrary();
     } else if (p === "retroachievements") {
       await handleSyncRetroAchievements();
+    } else if (p.startsWith("console:")) {
+      const consoleId = provider.replace("console:", "");
+      try {
+        setIsScanning(true);
+        await invoke<number>("scan_and_import_console_roms", { consoleId });
+        const list = await invoke<Game[]>("get_games");
+        setGames(list);
+      } catch (err) {
+        console.error("Failed to rescan console ROMs:", err);
+      } finally {
+        setIsScanning(false);
+      }
+    } else {
+      try {
+        setIsScanning(true);
+        await invoke("scan_provider_library", { provider: p });
+        const list = await invoke<Game[]>("get_games");
+        setGames(list);
+      } catch (err) {
+        console.error(`Failed to scan provider '${provider}':`, err);
+      } finally {
+        setIsScanning(false);
+      }
     }
   };
 

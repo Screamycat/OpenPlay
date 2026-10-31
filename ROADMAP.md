@@ -43,6 +43,7 @@ Welcome to the central tracking document for **OpenPlay**. Use this document to 
 - [ ] **Steam other device**: Right now if you play the a steam game on another device it will update your OpenPlay library to say you recently played it. To avoid confusion a indication could be implemented, like a subtle icon thats only visible o that game was not recently played on the device youre currently on. (Maybe its the same for other integrations like epic?)
 - [ ] **Save location**: Add support for finding out where it stores save files and config files.
 - [ ] **Feedback button**: A button that lets users send feedback.
+- [] **Save/Load backup**: The settings should provide a way to make a backup as well as rollback to an earlier backup.
 
 ### ⚙️ Implemented but Non-Tested Features
 - [ ] **Dual launch**: Make it possible to choose on play what exe to launhc. (for mod managers or something other) Much Like playnite actions.
