@@ -23,5 +23,19 @@ dist-ssr
 *.sln
 *.sw?
 
-# Other
+# Developer Tools & Scripts
 *.bat
+scripts/
+archive/
+
+# Agent & Assistant Workflows
+.agents/
+GEMINI.md
+
+# Environment, Secrets, and Local Databases
+.env
+.env.*
+*.db
+*.sqlite
+*.sqlite3
+*.bak
