@@ -1,0 +1,41 @@
+{
+  "id": "starter-custom-theme",
+  "name": "Starter Custom Theme",
+  "version": "1.0.0",
+  "author": "Your Name",
+  "description": "A clean template to start building custom OpenPlay themes with 3 screenshots, icon, and in-app settings.",
+  "icon": "icon.svg",
+  "screenshots": [
+    "screenshot_1.svg",
+    "screenshot_2.svg",
+    "screenshot_3.svg"
+  ],
+  "css": "theme.css",
+  "colors": {
+    "accent": "#06b6d4",
+    "panel_tint": "#0d1117",
+    "background": "#080c10"
+  },
+  "settings": [
+    {
+      "id": "card_border_radius",
+      "label": "Game Card Corner Radius",
+      "type": "select",
+      "options": ["Sleek (8px)", "Rounded (16px)", "Ultra Rounded (24px)"],
+      "default": "Rounded (16px)"
+    },
+    {
+      "id": "enable_card_glow",
+      "label": "Card Hover Glow",
+      "type": "boolean",
+      "default": true
+    },
+    {
+      "id": "glass_intensity",
+      "label": "Glassmorphism Blur",
+      "type": "select",
+      "options": ["Subtle (12px)", "Standard (24px)", "Intense (48px)"],
+      "default": "Standard (24px)"
+    }
+  ]
+}

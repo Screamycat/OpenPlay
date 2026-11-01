@@ -41,7 +41,7 @@ A blazing-fast, cross-platform sanctuary for your entire game collection built o
 ### 🖥️ Desktop Split View
 *A sleek split layout designed for responsive library exploration. Navigate an adaptive grid of animated cover art on the left, paired with an immersive glassmorphic hero backdrop on the right featuring transparent clear logos, live Steam player counts, HowLongToBeat completion metrics, user and critic review scores, community patch notes, and instant video trailers.*
 
-<img src="https://imgur.com/3xwQqDW.gif">
+<img src="https://i.imgur.com/3xwQqDW.gif">
 
 ---
 
@@ -101,7 +101,8 @@ Every launcher has its own design philosophy and purpose. Here is how they compa
 | **In-App Video Trailers** | ✅ **Built-in (Store / YouTube / Video files)** | 🔌 Requires Plugin | ❌ *No* | ❌ *No* |
 | **HowLongToBeat Completion Metrics** | ✅ **Built-in** | 🔌 Requires Plugin | ❌ *No* | ✅ Built-in (HLTB API) |
 | **Live Concurrent Player Counts** | ✅ **Built-in (All platforms via title matching)** | 🔌 Requires Plugin | ❌ *No* | ❌ *No* |
-| **Dynamic Unified Accent Theming** | ✅ **Built-in (Theme-ready token architecture)** | 🔌 Requires Custom Themes | ❌ GTK Theme only | ⚠️ Fixed Palettes |
+| **Theme & Visual Customization** | ✅ **Built-in (Dedicated Themes Manager, 3+ Screenshot Gallery, .zip Import & In-App Config)** | 🔌 Requires Custom Themes | ❌ GTK Theme only | ⚠️ Fixed Palettes |
+| **Plugin & Extension Architecture** | ✅ **Built-in (Dedicated Plugins Manager, .zip Import & In-App Config)** | 🔌 Extensive Plugins | ⚠️ Community Scripts | ❌ *No* |
 | **Critic & User Review Scores** | ✅ **Built-in (OpenCritic & Steam)** | 🔌 Requires Plugin | ❌ *No* | ❌ *No* |
 | *Trophies & Achievements* | | | | |
 | **Unified Achievement Hub** | ✅ **Built-in (Global Hall of Fame)** | 🔌 Requires Plugin | ❌ *No* | ❌ *No* |
@@ -228,7 +229,7 @@ Ensure you have the following installed on your machine:
 OpenPlay is proudly free and open source under the **[GNU General Public License v3.0 (GPLv3)](./LICENSE)**.
 
 ### Our Stance on Forks & Contributions:
-- **Extensions & Themes**: We enthusiastically encourage community members to create custom themes, extensions, and integrations.
+- **Extensions & Themes**: We enthusiastically encourage community members to create custom themes, extensions, and integrations. Check out our **[Theme Creation Guide](./docs/THEMES.md)** and **[Plugin Creation Guide](./docs/PLUGINS.md)** with starter templates!
 - **Copyleft Protection**: GPLv3 guarantees that OpenPlay and any derivative works remain **permanently open source and free**.
 - **No Commercial Exploitation**: You may not take OpenPlay, close the source code, slap a new name on it, and sell or redistribute it as your own closed product.
 - **Forks**: Legitimate forks created to fix critical issues, improve accessibility, or contribute upstream back to the community are warmly welcomed.

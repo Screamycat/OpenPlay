@@ -638,6 +638,35 @@ impl Database {
         Ok(())
     }
 
+    pub fn update_game_installed(&self, game_id: &str, is_installed: bool) -> Result<(), String> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE games SET is_installed = ?1 WHERE id = ?2",
+            params![if is_installed { 1 } else { 0 }, game_id],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub fn batch_update_game_installed(&self, updates: &[(String, bool)]) -> Result<(), String> {
+        if updates.is_empty() {
+            return Ok(());
+        }
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
+        {
+            let mut stmt = tx
+                .prepare("UPDATE games SET is_installed = ?1 WHERE id = ?2")
+                .map_err(|e| e.to_string())?;
+            for (id, is_installed) in updates {
+                stmt.execute(params![if *is_installed { 1 } else { 0 }, id])
+                    .map_err(|e| e.to_string())?;
+            }
+        }
+        tx.commit().map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
     pub fn toggle_favorite(&self, id: &str) -> Result<bool, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn

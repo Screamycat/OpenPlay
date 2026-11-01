@@ -216,8 +216,14 @@ export const AddConsoleWizardModal: React.FC<AddConsoleWizardModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
-      <div className="relative w-full max-w-4xl h-[620px] bg-[#10131d] border border-white/10 rounded-3xl shadow-2xl flex flex-col overflow-hidden text-zinc-200">
+    <div
+      data-theme-part="add-console-modal"
+      className="fixed inset-0 z-[100] flex items-center justify-center p-4 theme-modal-backdrop animate-in fade-in duration-150"
+    >
+      <div
+        data-theme-part="modal-container"
+        className="relative w-full max-w-4xl h-[620px] theme-modal-container rounded-3xl flex flex-col overflow-hidden text-zinc-200"
+      >
         {/* Top Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 bg-[#141824]/60">
           <div className="flex items-center space-x-2.5">

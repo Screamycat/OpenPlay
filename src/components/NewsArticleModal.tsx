@@ -94,11 +94,13 @@ export const NewsArticleModal: React.FC<NewsArticleModalProps> = ({
   return (
     <div
       onClick={onClose}
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 select-none animate-in fade-in duration-150 modal-backdrop-overlay"
+      data-theme-part="news-modal"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 select-none animate-in fade-in duration-150 theme-modal-backdrop"
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-3xl max-h-[88vh] theme-panel-surface backdrop-blur-2xl border border-white/10 rounded-2xl shadow-[0_20px_60px_rgba(0,0,0,0.85)] flex flex-col overflow-hidden text-xs text-zinc-200 animate-in zoom-in-95 duration-150"
+        data-theme-part="modal-container"
+        className="w-full max-w-3xl max-h-[88vh] theme-modal-container rounded-2xl flex flex-col overflow-hidden text-xs text-zinc-200 animate-in zoom-in-95 duration-150"
       >
         {/* Header */}
         <div className="px-6 py-4 border-b border-white/10 flex items-center justify-between bg-white/[0.02] shrink-0">

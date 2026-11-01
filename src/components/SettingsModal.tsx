@@ -26,10 +26,14 @@ import { OpenPlayBackupTab } from "./library/OpenPlayBackupTab";
 import { CloudSyncSettingsCard } from "./library/CloudSyncSettingsCard";
 import { formatFileSize } from "../utils/image";
 import { UpdateCheckResult, UpdateProgressPayload } from "../types/update";
+import { ThemeInfo } from "../types/themes";
+import { resolveImageSrc } from "../utils/image";
+import { applyTheme } from "../utils/themeEngine";
 
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onOpenThemes?: () => void;
   onScanLibrary?: () => void;
   onReloadGames?: () => Promise<void>;
   isScanning?: boolean;
@@ -51,6 +55,7 @@ type SettingsTab =
 export const SettingsModal: React.FC<SettingsModalProps> = ({
   isOpen,
   onClose,
+  onOpenThemes,
   config: initialConfig,
   onSaveConfig,
   onReloadGames,
@@ -60,6 +65,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [activeTab, setActiveTab] = useState<SettingsTab>(
     (initialTab as SettingsTab) || "general"
   );
+  const [activeTheme, setActiveTheme] = useState<ThemeInfo | null>(null);
   const [formConfig, setFormConfig] = useState<AppConfig>({
     ...DEFAULT_APP_CONFIG,
     ...initialConfig,
@@ -90,6 +96,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       setActiveTab(initialTab as SettingsTab);
     }
   }, [isOpen, initialTab]);
+
+  useEffect(() => {
+    if (isOpen) {
+      invoke<ThemeInfo[]>("get_installed_themes")
+        .then((themes) => {
+          const active =
+            themes.find((t) => t.is_active) ||
+            themes.find((t) => t.manifest.id === "default") ||
+            themes[0];
+          setActiveTheme(active || null);
+        })
+        .catch((err) => console.warn("Failed to load active theme in settings:", err));
+    }
+  }, [isOpen]);
 
   useEffect(() => {
     if (initialUpdateResult) {
@@ -181,6 +201,34 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setTimeout(() => setIsSavedNotice(false), 2000);
   };
 
+  const updateAppearanceSetting = (key: string, value: any) => {
+    // 1. Update formConfig & appConfig
+    const updated = { ...formConfig, [key]: value };
+    setFormConfig(updated);
+    onSaveConfig(updated);
+    setIsSavedNotice(true);
+    setTimeout(() => setIsSavedNotice(false), 2000);
+
+    // 2. Also save to activeTheme config and apply live
+    if (activeTheme) {
+      const updatedConfigValues = {
+        ...activeTheme.config_values,
+        [key]: value,
+      };
+      const updatedTheme: ThemeInfo = {
+        ...activeTheme,
+        config_values: updatedConfigValues,
+      };
+      setActiveTheme(updatedTheme);
+      applyTheme(updatedTheme);
+
+      invoke("save_theme_config", {
+        themeId: activeTheme.manifest.id,
+        configJson: JSON.stringify(updatedConfigValues),
+      }).catch((e) => console.warn("Failed to persist theme config:", e));
+    }
+  };
+
   const navItems = [
     { id: "general", label: "General", icon: Sliders },
     { id: "appearance", label: "Appearance", icon: Palette },
@@ -193,11 +241,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   return (
     <div
       onClick={onClose}
-      className="fixed inset-0 z-50 bg-black/45 backdrop-blur-sm flex items-center justify-center p-4 select-none animate-in fade-in duration-150"
+      data-theme-part="settings-modal"
+      className="fixed inset-0 z-50 theme-modal-backdrop flex items-center justify-center p-4 select-none animate-in fade-in duration-150"
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="theme-panel-surface backdrop-blur-2xl border border-white/10 rounded-2xl w-full max-w-4xl h-[620px] max-h-[90vh] shadow-[0_20px_60px_rgba(0,0,0,0.85)] flex flex-col overflow-hidden text-zinc-200"
+        data-theme-part="modal-container"
+        className="theme-modal-container rounded-2xl w-full max-w-4xl h-[620px] max-h-[90vh] flex flex-col overflow-hidden text-zinc-200"
       >
         {/* Header */}
         <div className="h-14 px-5 border-b border-white/10 flex items-center justify-between bg-white/[0.02] shrink-0">
@@ -409,20 +459,72 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     Interface & Theme Customization
                   </h3>
                   <p className="text-[11px] text-zinc-400">
-                    Adjust library background effects, blur intensity, and layout defaults.
+                    Control the appearance, geometry, and visual style of the active theme.
                   </p>
                 </div>
 
+                {/* Active Theme Hero Card */}
+                {activeTheme && (
+                  <div className="p-4 rounded-xl bg-white/[0.03] border border-white/10 flex items-center justify-between gap-4">
+                    <div className="flex items-center space-x-3.5 min-w-0">
+                      <div className="w-12 h-12 rounded-xl bg-black/40 border border-white/10 overflow-hidden flex items-center justify-center shrink-0 shadow-sm">
+                        {activeTheme.resolved_icon ? (
+                          <img
+                            src={resolveImageSrc(activeTheme.resolved_icon)}
+                            alt={activeTheme.manifest.name}
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <Palette className="w-6 h-6 theme-accent-text" />
+                        )}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center space-x-2">
+                          <span className="text-sm font-bold text-white truncate">
+                            {activeTheme.manifest.name}
+                          </span>
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/10 font-mono text-zinc-300">
+                            v{activeTheme.manifest.version}
+                          </span>
+                          {activeTheme.is_builtin && (
+                            <span className="text-[9px] px-1.5 py-0.2 rounded bg-white/10 text-zinc-400 font-mono">
+                              BUILT-IN
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-zinc-400 truncate mt-0.5">
+                          by <span className="text-zinc-200">{activeTheme.manifest.author}</span> • {activeTheme.manifest.description}
+                        </p>
+                      </div>
+                    </div>
+
+                    {onOpenThemes && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onClose();
+                          onOpenThemes();
+                        }}
+                        className="px-3.5 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-zinc-200 hover:text-white text-xs font-semibold flex items-center space-x-1.5 transition-all cursor-pointer shrink-0"
+                      >
+                        <Palette className="w-3.5 h-3.5 text-zinc-400" />
+                        <span>Browse Themes</span>
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {/* Theme Config Settings */}
                 <div className="space-y-4 bg-white/[0.02] border border-white/5 rounded-xl p-4">
                   {/* Default View Mode */}
                   <div className="space-y-1.5">
-                    <label className="font-semibold text-zinc-200">Default View Mode</label>
+                    <label className="font-semibold text-zinc-200 text-xs">Default View Mode</label>
                     <div className="grid grid-cols-3 gap-2">
                       {(["split", "grid", "list"] as const).map((m) => (
                         <button
                           key={m}
                           type="button"
-                          onClick={() => updateField("view_mode", m)}
+                          onClick={() => updateAppearanceSetting("view_mode", m)}
                           className={`py-2 px-3 rounded-lg border text-xs font-semibold capitalize transition-all cursor-pointer ${
                             (formConfig.view_mode || "split") === m
                               ? "bg-white text-zinc-950 border-white font-bold"
@@ -437,51 +539,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
                   <div className="border-t border-white/5" />
 
-                  {/* Background Blur */}
-                  <div className="space-y-2">
-                    <div className="flex justify-between">
-                      <label className="font-semibold text-zinc-200">Dynamic Background Blur</label>
-                      <span className="font-mono text-zinc-400">{formConfig.background_blur ?? 32}px</span>
-                    </div>
-                    <input
-                      type="range"
-                      min="0"
-                      max="64"
-                      step="4"
-                      value={formConfig.background_blur ?? 32}
-                      onChange={(e) => updateField("background_blur", Number(e.target.value))}
-                      className="w-full h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer accent-white"
-                    />
-                  </div>
-
-                  <div className="border-t border-white/5" />
-
-                  {/* Background Opacity */}
-                  <div className="space-y-2">
-                    <div className="flex justify-between">
-                      <label className="font-semibold text-zinc-200">Background Dimming Opacity</label>
-                      <span className="font-mono text-zinc-400">
-                        {Math.round((formConfig.background_opacity ?? 0.75) * 100)}%
-                      </span>
-                    </div>
-                    <input
-                      type="range"
-                      min="0.2"
-                      max="1.0"
-                      step="0.05"
-                      value={formConfig.background_opacity ?? 0.75}
-                      onChange={(e) => updateField("background_opacity", Number(e.target.value))}
-                      className="w-full h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer accent-white"
-                    />
-                  </div>
-
-                  <div className="border-t border-white/5" />
-
                   {/* Theme Accent Color */}
                   <div className="space-y-2">
                     <div className="flex justify-between items-center">
                       <div>
-                        <label className="font-semibold text-zinc-200 block">Theme Accent Color</label>
+                        <label className="font-semibold text-zinc-200 text-xs block">Theme Accent Color</label>
                         <span className="text-[11px] text-zinc-400">
                           Highlights, focus rings, badges, and primary interactive accents
                         </span>
@@ -507,7 +569,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           <button
                             key={preset.hex}
                             type="button"
-                            onClick={() => updateField("accent_color", preset.hex)}
+                            onClick={() => updateAppearanceSetting("accent_color", preset.hex)}
                             title={preset.name}
                             className={`w-7 h-7 rounded-full transition-all cursor-pointer flex items-center justify-center border ${
                               isSelected
@@ -531,7 +593,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         <input
                           type="color"
                           value={formConfig.accent_color || "#a855f7"}
-                          onChange={(e) => updateField("accent_color", e.target.value)}
+                          onChange={(e) => updateAppearanceSetting("accent_color", e.target.value)}
                           className="opacity-0 absolute inset-0 w-full h-full cursor-pointer"
                         />
                         <Palette className="w-3.5 h-3.5 text-zinc-400" />
@@ -545,7 +607,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <div className="space-y-2">
                     <div className="flex justify-between items-center">
                       <div>
-                        <label className="font-semibold text-zinc-200 block">Panel Tint & Windows Background</label>
+                        <label className="font-semibold text-zinc-200 text-xs block">Panel Tint & Windows Background</label>
                         <span className="text-[11px] text-zinc-400">
                           Base background shade applied to dialogs, menus, and side panes
                         </span>
@@ -569,7 +631,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           <button
                             key={preset.hex}
                             type="button"
-                            onClick={() => updateField("panel_tint", preset.hex)}
+                            onClick={() => updateAppearanceSetting("panel_tint", preset.hex)}
                             title={preset.name}
                             className={`w-7 h-7 rounded-full transition-all cursor-pointer flex items-center justify-center border ${
                               isSelected
@@ -587,12 +649,165 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         <input
                           type="color"
                           value={formConfig.panel_tint || "#0e0e11"}
-                          onChange={(e) => updateField("panel_tint", e.target.value)}
+                          onChange={(e) => updateAppearanceSetting("panel_tint", e.target.value)}
                           className="opacity-0 absolute inset-0 w-full h-full cursor-pointer"
                         />
                         <Palette className="w-3.5 h-3.5 text-zinc-400" />
                       </label>
                     </div>
+                  </div>
+
+                  <div className="border-t border-white/5" />
+
+                  {/* Card Corner Radius */}
+                  <div className="space-y-1.5">
+                    <label className="font-semibold text-zinc-200 text-xs">Game Card Corner Radius</label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {["Sleek (8px)", "Rounded (16px)", "Ultra Rounded (24px)"].map((radius) => (
+                        <button
+                          key={radius}
+                          type="button"
+                          onClick={() => updateAppearanceSetting("card_border_radius", radius)}
+                          className={`py-2 px-3 rounded-lg border text-xs font-semibold transition-all cursor-pointer ${
+                            (formConfig.card_border_radius || "Rounded (16px)") === radius
+                              ? "bg-white text-zinc-950 border-white font-bold"
+                              : "bg-white/5 border-white/10 text-zinc-300 hover:bg-white/10"
+                          }`}
+                        >
+                          {radius}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="border-t border-white/5" />
+
+                  {/* Card Glow & Glass Intensity */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <label className="font-semibold text-zinc-200 text-xs">Card Hover Glow</label>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateAppearanceSetting(
+                            "enable_card_glow",
+                            !(formConfig.enable_card_glow ?? true)
+                          )
+                        }
+                        className={`w-full py-2 px-3 rounded-lg border text-xs font-semibold flex items-center justify-between transition-colors cursor-pointer ${
+                          formConfig.enable_card_glow ?? true
+                            ? "theme-accent-subtle-bg theme-accent-subtle-border text-white"
+                            : "bg-white/5 border-white/10 text-zinc-400 hover:text-white"
+                        }`}
+                      >
+                        <span>{formConfig.enable_card_glow ?? true ? "Enabled" : "Disabled"}</span>
+                        {(formConfig.enable_card_glow ?? true) && (
+                          <Check className="w-3.5 h-3.5 theme-accent-text" />
+                        )}
+                      </button>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="font-semibold text-zinc-200 text-xs">Glassmorphism Intensity</label>
+                      <div className="grid grid-cols-3 gap-1">
+                        {["Subtle (12px)", "Standard (24px)", "Intense (48px)"].map((intensity) => (
+                          <button
+                            key={intensity}
+                            type="button"
+                            onClick={() => updateAppearanceSetting("glass_intensity", intensity)}
+                            className={`py-2 px-1 text-center rounded-lg border text-[11px] font-semibold truncate transition-all cursor-pointer ${
+                              (formConfig.glass_intensity || "Standard (24px)") === intensity
+                                ? "bg-white text-zinc-950 border-white font-bold"
+                                : "bg-white/5 border-white/10 text-zinc-300 hover:bg-white/10"
+                            }`}
+                          >
+                            {intensity.split(" ")[0]}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="border-t border-white/5" />
+
+                  {/* Background Blur Slider */}
+                  <div className="space-y-2">
+                    <div className="flex justify-between">
+                      <label className="font-semibold text-zinc-200 text-xs">Dynamic Background Blur</label>
+                      <span className="font-mono text-zinc-400 text-xs">{formConfig.background_blur ?? 32}px</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0"
+                      max="64"
+                      step="4"
+                      value={formConfig.background_blur ?? 32}
+                      onChange={(e) => updateAppearanceSetting("background_blur", Number(e.target.value))}
+                      className="w-full h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer accent-white"
+                    />
+                  </div>
+
+                  <div className="border-t border-white/5" />
+
+                  {/* Background Opacity Slider */}
+                  <div className="space-y-2">
+                    <div className="flex justify-between">
+                      <label className="font-semibold text-zinc-200 text-xs">Background Dimming Opacity</label>
+                      <span className="font-mono text-zinc-400 text-xs">
+                        {Math.round((formConfig.background_opacity ?? 0.75) * 100)}%
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0.2"
+                      max="1.0"
+                      step="0.05"
+                      value={formConfig.background_opacity ?? 0.75}
+                      onChange={(e) => updateAppearanceSetting("background_opacity", Number(e.target.value))}
+                      className="w-full h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer accent-white"
+                    />
+                  </div>
+
+                  <div className="border-t border-white/5" />
+
+                  {/* Modal Backdrop Dimming Opacity Slider */}
+                  <div className="space-y-2">
+                    <div className="flex justify-between">
+                      <label className="font-semibold text-zinc-200 text-xs">Modal Backdrop Dimming Opacity</label>
+                      <span className="font-mono text-zinc-400 text-xs">
+                        {Math.round((formConfig.modal_backdrop_opacity ?? 0.45) * 100)}%
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0.2"
+                      max="0.9"
+                      step="0.05"
+                      value={formConfig.modal_backdrop_opacity ?? 0.45}
+                      onChange={(e) => updateAppearanceSetting("modal_backdrop_opacity", Number(e.target.value))}
+                      className="w-full h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer accent-white"
+                    />
+                  </div>
+
+                  <div className="border-t border-white/5" />
+
+                  {/* Modal Backdrop Blur Intensity Slider */}
+                  <div className="space-y-2">
+                    <div className="flex justify-between">
+                      <label className="font-semibold text-zinc-200 text-xs">Modal Backdrop Blur Intensity</label>
+                      <span className="font-mono text-zinc-400 text-xs">
+                        {formConfig.modal_backdrop_blur ?? 8}px
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0"
+                      max="32"
+                      step="2"
+                      value={formConfig.modal_backdrop_blur ?? 8}
+                      onChange={(e) => updateAppearanceSetting("modal_backdrop_blur", Number(e.target.value))}
+                      className="w-full h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer accent-white"
+                    />
                   </div>
                 </div>
               </div>

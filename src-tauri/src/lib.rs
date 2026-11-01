@@ -5,7 +5,9 @@ pub mod emulator;
 pub mod launcher;
 pub mod metadata;
 pub mod models;
+pub mod plugins;
 pub mod scanner;
+pub mod themes;
 
 use autostart::AutostartManager;
 use db::Database;
@@ -29,6 +31,7 @@ use scanner::providers::{
     RobloxScanner, UbisoftScanner, XboxScanner,
 };
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State, Url, WebviewUrl, WebviewWindowBuilder};
 
@@ -36,14 +39,142 @@ struct AppState {
     db: Arc<Database>,
 }
 
+pub fn is_local_filesystem_path(path: &str) -> bool {
+    let trimmed = path.trim();
+    if trimmed.is_empty() || trimmed == r"\\" || trimmed == "//" {
+        return false;
+    }
+    let bytes = trimmed.as_bytes();
+    let is_windows_drive = bytes.len() >= 2
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && (bytes.len() == 2 || bytes[2] == b'\\' || bytes[2] == b'/');
+    let is_unc = (trimmed.starts_with(r"\\") || trimmed.starts_with("//")) && trimmed.len() > 3;
+    let is_unix_abs = trimmed.starts_with('/') && !trimmed.starts_with("//");
+
+    (is_windows_drive || is_unc || is_unix_abs) && !trimmed.contains("://")
+}
+
+pub fn check_game_installation_status(game: &Game) -> bool {
+    let src = game.source.trim().to_lowercase();
+    let gid = &game.id;
+
+    let is_riot = src == "riot games" || src == "riot" || gid.starts_with("riot_");
+    let is_local_manual = src == "manual" || src == "local" || gid.starts_with("local_") || gid.starts_with("manual_");
+    let is_emulation = src == "emulation" || gid.starts_with("rom_");
+
+    if is_riot {
+        if let Some(ref dir) = game.install_directory {
+            if is_local_filesystem_path(dir) && Path::new(dir).exists() {
+                if let Ok(mut read) = std::fs::read_dir(dir) {
+                    if read.next().is_some() {
+                        return true;
+                    }
+                }
+            }
+        }
+        if gid.contains("teamfighttactics") {
+            let lol_dir = Path::new(r"C:\Riot Games\League of Legends");
+            if lol_dir.exists() {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    if is_local_manual {
+        // If executable is a protocol or shell app, treat as installed
+        if let Some(ref exe) = game.executable_path {
+            let trimmed = exe.trim();
+            if trimmed.contains("://") || trimmed.to_lowercase().starts_with("shell:appsfolder\\") {
+                return true;
+            }
+            if is_local_filesystem_path(trimmed) && Path::new(trimmed).exists() {
+                return true;
+            }
+        }
+
+        // Check install_directory
+        if let Some(ref dir) = game.install_directory {
+            let trimmed = dir.trim();
+            if is_local_filesystem_path(trimmed) && Path::new(trimmed).exists() {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    if is_emulation {
+        if let Some(ref rom_path) = game.executable_path {
+            let trimmed = rom_path.trim();
+            if is_local_filesystem_path(trimmed) {
+                return Path::new(trimmed).exists();
+            }
+        }
+        return false;
+    }
+
+    // For other storefront/installed games, if marked installed, check if local directory was deleted
+    if game.is_installed {
+        if let Some(ref dir) = game.install_directory {
+            let trimmed = dir.trim();
+            if is_local_filesystem_path(trimmed) && !Path::new(trimmed).exists() {
+                // If executable exists elsewhere on disk, keep installed
+                if let Some(ref exe) = game.executable_path {
+                    let trimmed_exe = exe.trim();
+                    if is_local_filesystem_path(trimmed_exe) && Path::new(trimmed_exe).exists() {
+                        return true;
+                    }
+                }
+                return false;
+            }
+        } else if let Some(ref exe) = game.executable_path {
+            let trimmed_exe = exe.trim();
+            if is_local_filesystem_path(trimmed_exe) && !Path::new(trimmed_exe).exists() {
+                return false;
+            }
+        }
+    }
+
+    game.is_installed
+}
+
+fn sync_and_get_all_games(state: &State<'_, AppState>) -> Result<Vec<Game>, String> {
+    let mut games = state.db.get_all_games()?;
+    let mut updates = Vec::new();
+
+    for game in &mut games {
+        let actual_installed = check_game_installation_status(game);
+        if actual_installed != game.is_installed {
+            updates.push((game.id.clone(), actual_installed));
+            game.is_installed = actual_installed;
+        }
+    }
+
+    if !updates.is_empty() {
+        let _ = state.db.batch_update_game_installed(&updates);
+    }
+
+    Ok(games)
+}
+
+fn normalize_title_for_match(title: &str) -> String {
+    title
+        .to_lowercase()
+        .chars()
+        .filter(|c| c.is_alphanumeric())
+        .collect()
+}
+
 #[tauri::command]
 fn get_games(state: State<'_, AppState>) -> Result<Vec<Game>, String> {
-    state.db.get_all_games()
+    sync_and_get_all_games(&state)
 }
 
 #[tauri::command]
 fn get_all_games(state: State<'_, AppState>) -> Result<Vec<Game>, String> {
-    state.db.get_all_games()
+    sync_and_get_all_games(&state)
 }
 
 #[tauri::command]
@@ -2381,6 +2512,60 @@ async fn sync_all_metadata(
 
 #[tauri::command]
 fn save_game(game: Game, app_handle: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    // If saving a new manual or local game (id starts with manual_ or local_), check if it matches an existing entry
+    let is_temp_id = game.id.starts_with("manual_") || game.id.starts_with("local_");
+    if is_temp_id {
+        let norm_incoming = normalize_title_for_match(&game.title);
+        if let Ok(existing_games) = state.db.get_all_games() {
+            let matching_existing = existing_games.iter().find(|eg| {
+                if eg.id == game.id {
+                    return false;
+                }
+                if let (Some(ref e_exe), Some(ref in_exe)) = (&eg.executable_path, &game.executable_path) {
+                    if !e_exe.is_empty() && e_exe.eq_ignore_ascii_case(in_exe) {
+                        return true;
+                    }
+                }
+                if !norm_incoming.is_empty() && normalize_title_for_match(&eg.title) == norm_incoming {
+                    return true;
+                }
+                false
+            });
+
+            if let Some(existing) = matching_existing {
+                let mut merged = existing.clone();
+                if game.executable_path.is_some() {
+                    merged.executable_path = game.executable_path.clone();
+                }
+                if game.install_directory.is_some() {
+                    merged.install_directory = game.install_directory.clone();
+                }
+                if game.launch_arguments.is_some() {
+                    merged.launch_arguments = game.launch_arguments.clone();
+                }
+                merged.is_installed = true;
+                if (merged.cover_image.is_none() || merged.cover_image.as_deref().unwrap_or("").trim().is_empty()) && game.cover_image.is_some() {
+                    merged.cover_image = game.cover_image.clone();
+                }
+                if (merged.background_image.is_none() || merged.background_image.as_deref().unwrap_or("").trim().is_empty()) && game.background_image.is_some() {
+                    merged.background_image = game.background_image.clone();
+                }
+                if merged.developer.is_none() && game.developer.is_some() {
+                    merged.developer = game.developer.clone();
+                }
+                if merged.publisher.is_none() && game.publisher.is_some() {
+                    merged.publisher = game.publisher.clone();
+                }
+                if merged.description.is_none() && game.description.is_some() {
+                    merged.description = game.description.clone();
+                }
+                state.db.save_game_exact(&merged)?;
+                let _ = app_handle.emit("game-updated", &merged);
+                return Ok(());
+            }
+        }
+    }
+
     state.db.save_game_exact(&game)?;
     let _ = app_handle.emit("game-updated", &game);
     Ok(())
@@ -2873,10 +3058,12 @@ async fn check_for_app_updates() -> Result<UpdateCheckResult, String> {
                     let url = a.get("browser_download_url").and_then(|v| v.as_str()).unwrap_or("").to_string();
                     let size = a.get("size").and_then(|v| v.as_u64()).unwrap_or(0);
                     if !name.is_empty() && !url.is_empty() {
-                        if name.ends_with(".exe") || name.ends_with(".msi") || name.ends_with(".zip") {
-                            if download_url.is_none() {
-                                download_url = Some(url.clone());
-                            }
+                        let lower_name = name.to_lowercase();
+                        // Always prefer NSIS .exe setup over .msi or .zip
+                        if lower_name.ends_with(".exe") {
+                            download_url = Some(url.clone());
+                        } else if (lower_name.ends_with(".msi") || lower_name.ends_with(".zip")) && download_url.is_none() {
+                            download_url = Some(url.clone());
                         }
                         assets.push(ReleaseAssetInfo {
                             name,
@@ -2941,7 +3128,12 @@ async fn download_app_update(
     let total = resp.content_length().unwrap_or(0);
     let temp_dir = std::env::temp_dir();
     let clean_version = target_version.trim_start_matches(|c| c == 'v' || c == 'V');
-    let file_name = format!("OpenPlay-Setup-{}.exe", clean_version);
+    let ext = if download_url.to_lowercase().ends_with(".msi") {
+        "msi"
+    } else {
+        "exe"
+    };
+    let file_name = format!("OpenPlay-Setup-{}.{}", clean_version, ext);
     let dest_path = temp_dir.join(file_name);
 
     let mut file = std::fs::File::create(&dest_path)
@@ -3012,20 +3204,36 @@ async fn apply_update_and_restart(
     {
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x08000000;
-        const DETACHED_PROCESS: u32 = 0x00000008;
 
         let current_exe = std::env::current_exe().map_err(|e| e.to_string())?;
         let current_exe_str = current_exe.to_string_lossy().to_string();
         let installer_str = path.to_string_lossy().to_string();
 
-        let script = format!(
-            "timeout /t 2 /nobreak >nul & start \"\" /wait \"{}\" /S & timeout /t 1 /nobreak >nul & start \"\" \"{}\"",
-            installer_str, current_exe_str
+        let install_cmd = if installer_str.to_lowercase().ends_with(".msi") {
+            format!("msiexec /i \"{}\" /qn /norestart", installer_str)
+        } else {
+            format!("\"{}\" /S", installer_str)
+        };
+
+        // Write a self-deleting batch script to %TEMP% so Rust's CRT argument quote-escaping
+        // (`\"` -> `\\` in cmd.exe) never corrupts paths or triggers "Windows cannot find '\\'".
+        let script_path = std::env::temp_dir().join("openplay_apply_update.cmd");
+        let script_contents = format!(
+            "@echo off\r\n\
+             ping 127.0.0.1 -n 3 >nul\r\n\
+             {}\r\n\
+             ping 127.0.0.1 -n 2 >nul\r\n\
+             start \"\" \"{}\"\r\n\
+             del \"%~f0\" >nul 2>&1\r\n",
+            install_cmd, current_exe_str
         );
 
+        std::fs::write(&script_path, script_contents)
+            .map_err(|e| format!("Failed to write update script: {}", e))?;
+
         std::process::Command::new("cmd")
-            .args(["/C", &script])
-            .creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS)
+            .args(["/C", &script_path.to_string_lossy()])
+            .creation_flags(CREATE_NO_WINDOW)
             .spawn()
             .map_err(|e| format!("Failed to launch updater: {}", e))?;
 
@@ -3279,11 +3487,75 @@ fn add_local_games(
     app_handle: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<usize, String> {
+    let existing_games = state.db.get_all_games().unwrap_or_default();
     let count = games.len();
-    for game in games {
-        let _ = state.db.upsert_game(&game);
-        let _ = app_handle.emit("game-updated", &game);
+
+    for incoming in games {
+        let norm_incoming = normalize_title_for_match(&incoming.title);
+
+        let matching_existing = existing_games.iter().find(|eg| {
+            if eg.id == incoming.id {
+                return true;
+            }
+            if let (Some(ref e_exe), Some(ref in_exe)) = (&eg.executable_path, &incoming.executable_path) {
+                if !e_exe.is_empty() && e_exe.eq_ignore_ascii_case(in_exe) {
+                    return true;
+                }
+            }
+            if let (Some(ref e_dir), Some(ref in_dir)) = (&eg.install_directory, &incoming.install_directory) {
+                if !e_dir.is_empty() && e_dir.eq_ignore_ascii_case(in_dir) {
+                    return true;
+                }
+            }
+            if !norm_incoming.is_empty() && normalize_title_for_match(&eg.title) == norm_incoming {
+                return true;
+            }
+            false
+        });
+
+        if let Some(existing) = matching_existing {
+            // Re-link to existing game! Keep existing id, user progress, artwork, ratings, tags, notes.
+            let mut merged = existing.clone();
+            if incoming.executable_path.is_some() {
+                merged.executable_path = incoming.executable_path.clone();
+            }
+            if incoming.install_directory.is_some() {
+                merged.install_directory = incoming.install_directory.clone();
+            }
+            if incoming.launch_arguments.is_some() && !incoming.launch_arguments.as_deref().unwrap_or("").trim().is_empty() {
+                merged.launch_arguments = incoming.launch_arguments.clone();
+            }
+            if incoming.size_on_disk.is_some() {
+                merged.size_on_disk = incoming.size_on_disk;
+            }
+
+            // Restore installed and playable state
+            merged.is_installed = true;
+
+            // Artwork fallback: retain existing if present, otherwise populate from incoming
+            if merged.cover_image.is_none() || merged.cover_image.as_deref().unwrap_or("").trim().is_empty() {
+                merged.cover_image = incoming.cover_image.clone();
+            }
+            if merged.background_image.is_none() || merged.background_image.as_deref().unwrap_or("").trim().is_empty() {
+                merged.background_image = incoming.background_image.clone();
+            }
+            if merged.logo_image.is_none() || merged.logo_image.as_deref().unwrap_or("").trim().is_empty() {
+                merged.logo_image = incoming.logo_image.clone();
+            }
+            if merged.icon_image.is_none() || merged.icon_image.as_deref().unwrap_or("").trim().is_empty() {
+                merged.icon_image = incoming.icon_image.clone();
+            }
+
+            let _ = state.db.save_game_exact(&merged);
+            let _ = app_handle.emit("game-updated", &merged);
+        } else {
+            let mut new_game = incoming;
+            new_game.is_installed = true;
+            let _ = state.db.upsert_game(&new_game);
+            let _ = app_handle.emit("game-updated", &new_game);
+        }
     }
+
     Ok(count)
 }
 
@@ -5216,6 +5488,112 @@ async fn trigger_cloud_sync(
     Ok(summary)
 }
 
+// -------------------------------------------------------------
+// Themes Management Commands
+// -------------------------------------------------------------
+
+#[tauri::command]
+fn get_installed_themes(state: State<'_, AppState>) -> Result<Vec<themes::ThemeInfo>, String> {
+    themes::list_themes(&state.db)
+}
+
+#[tauri::command]
+fn import_theme_zip(zip_path: String, state: State<'_, AppState>) -> Result<themes::ThemeInfo, String> {
+    themes::import_theme_zip(&state.db, &zip_path)
+}
+
+#[tauri::command]
+fn delete_theme(theme_id: String, state: State<'_, AppState>) -> Result<(), String> {
+    themes::delete_theme(&state.db, &theme_id)
+}
+
+#[tauri::command]
+fn get_active_theme_id(state: State<'_, AppState>) -> Result<String, String> {
+    Ok(themes::get_active_theme_id(&state.db))
+}
+
+#[tauri::command]
+fn set_active_theme(theme_id: String, state: State<'_, AppState>) -> Result<(), String> {
+    themes::set_active_theme(&state.db, &theme_id)
+}
+
+#[tauri::command]
+fn get_theme_config(theme_id: String, state: State<'_, AppState>) -> Result<std::collections::HashMap<String, serde_json::Value>, String> {
+    themes::get_theme_config(&state.db, &theme_id)
+}
+
+#[tauri::command]
+fn save_theme_config(theme_id: String, config_json: String, state: State<'_, AppState>) -> Result<(), String> {
+    themes::save_theme_config(&state.db, &theme_id, &config_json)
+}
+
+#[tauri::command]
+fn get_theme_css(theme_id: String) -> Result<String, String> {
+    themes::get_theme_css(&theme_id)
+}
+
+#[tauri::command]
+fn open_themes_folder() -> Result<(), String> {
+    let dir = themes::get_themes_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(dir)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+// -------------------------------------------------------------
+// Plugins Management Commands
+// -------------------------------------------------------------
+
+#[tauri::command]
+fn get_installed_plugins(state: State<'_, AppState>) -> Result<Vec<plugins::PluginInfo>, String> {
+    plugins::list_plugins(&state.db)
+}
+
+#[tauri::command]
+fn import_plugin_zip(zip_path: String, state: State<'_, AppState>) -> Result<plugins::PluginInfo, String> {
+    plugins::import_plugin_zip(&state.db, &zip_path)
+}
+
+#[tauri::command]
+fn delete_plugin(plugin_id: String, state: State<'_, AppState>) -> Result<(), String> {
+    plugins::delete_plugin(&state.db, &plugin_id)
+}
+
+#[tauri::command]
+fn toggle_plugin(plugin_id: String, enabled: bool, state: State<'_, AppState>) -> Result<(), String> {
+    plugins::toggle_plugin(&state.db, &plugin_id, enabled)
+}
+
+#[tauri::command]
+fn get_plugin_config(plugin_id: String, state: State<'_, AppState>) -> Result<std::collections::HashMap<String, serde_json::Value>, String> {
+    plugins::get_plugin_config(&state.db, &plugin_id)
+}
+
+#[tauri::command]
+fn save_plugin_config(plugin_id: String, config_json: String, state: State<'_, AppState>) -> Result<(), String> {
+    plugins::save_plugin_config(&state.db, &plugin_id, &config_json)
+}
+
+#[tauri::command]
+fn open_plugins_folder() -> Result<(), String> {
+    let dir = plugins::get_plugins_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(dir)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let database = Arc::new(Database::new().expect("Failed to initialize OpenPlay SQLite database"));
@@ -5225,6 +5603,10 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .manage(AppState { db: database })
         .setup(move |app| {
+            // Seed default theme and bundled plugins if not present
+            let _ = themes::seed_default_theme();
+            let _ = plugins::seed_bundled_plugins();
+
             if let Some(window) = app.get_webview_window("main") {
                 if let Some(icon) = app.default_window_icon() {
                     let _ = window.set_icon(icon.clone());
@@ -5470,8 +5852,81 @@ pub fn run() {
             configure_cloud_sync,
             set_sync_device_name,
             get_sync_peer_devices,
-            trigger_cloud_sync
+            trigger_cloud_sync,
+            get_installed_themes,
+            import_theme_zip,
+            delete_theme,
+            get_active_theme_id,
+            set_active_theme,
+            get_theme_config,
+            save_theme_config,
+            get_theme_css,
+            open_themes_folder,
+            get_installed_plugins,
+            import_plugin_zip,
+            delete_plugin,
+            toggle_plugin,
+            get_plugin_config,
+            save_plugin_config,
+            open_plugins_folder
         ])
         .run(tauri::generate_context!())
         .expect("error while running OpenPlay application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_local_filesystem_path() {
+        assert!(is_local_filesystem_path(r"C:\Games\Hollow Knight\hollow_knight.exe"));
+        assert!(is_local_filesystem_path("D:/Games/Hollow Knight"));
+        assert!(is_local_filesystem_path(r"\\Server\Share\game.exe"));
+        assert!(is_local_filesystem_path("/usr/games/bin/game"));
+
+        assert!(!is_local_filesystem_path(""));
+        assert!(!is_local_filesystem_path(r"\\"));
+        assert!(!is_local_filesystem_path("//"));
+        assert!(!is_local_filesystem_path("steam://run/123"));
+        assert!(!is_local_filesystem_path("com.epicgames.launcher://apps/game"));
+        assert!(!is_local_filesystem_path("shell:appsfolder\\Package!App"));
+    }
+
+    #[test]
+    fn test_normalize_title_for_match() {
+        assert_eq!(normalize_title_for_match("Hollow Knight"), "hollowknight");
+        assert_eq!(normalize_title_for_match("Hollow Knight: Silksong!"), "hollowknightsilksong");
+        assert_eq!(normalize_title_for_match("VALORANT"), "valorant");
+        assert_eq!(normalize_title_for_match("The Witcher 3: Wild Hunt"), "thewitcher3wildhunt");
+    }
+
+    #[test]
+    fn test_check_game_installation_status_riot_nonexistent() {
+        let game = Game {
+            id: "riot_valorant".to_string(),
+            title: "VALORANT".to_string(),
+            source: "Riot Games".to_string(),
+            install_directory: Some(r"C:\Nonexistent_Riot_Games_Path_12345\VALORANT".to_string()),
+            is_installed: true,
+            ..Default::default()
+        };
+        // Should detect directory doesn't exist and return false
+        assert!(!check_game_installation_status(&game));
+    }
+
+    #[test]
+    fn test_check_game_installation_status_local_missing() {
+        let game = Game {
+            id: "local_12345".to_string(),
+            title: "My Custom Game".to_string(),
+            source: "Manual".to_string(),
+            install_directory: Some(r"C:\Nonexistent_Games_Folder_9999\Game".to_string()),
+            executable_path: Some(r"C:\Nonexistent_Games_Folder_9999\Game\game.exe".to_string()),
+            is_installed: true,
+            ..Default::default()
+        };
+        // Neither executable nor install dir exists on disk
+        assert!(!check_game_installation_status(&game));
+    }
 }

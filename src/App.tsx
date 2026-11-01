@@ -20,6 +20,8 @@ import { AddGameModal } from "./components/AddGameModal";
 import { EditGameModal } from "./components/EditGameModal";
 import { SettingsModal } from "./components/SettingsModal";
 import { LeftDrawer } from "./components/LeftDrawer";
+import { ThemesManagerModal } from "./components/ThemesManagerModal";
+import { PluginsManagerModal } from "./components/PluginsManagerModal";
 import { LibraryManagerModal, CategoryTab } from "./components/LibraryManagerModal";
 import { GameContextMenu } from "./components/GameContextMenu";
 import { SteamGridDBModal } from "./components/SteamGridDBModal";
@@ -30,7 +32,10 @@ import { HunterProfile } from "./types/achievement";
 import { mergeDuplicateGames, findMergeCandidate } from "./utils/merger";
 import { Gamepad2, Loader2, Sparkles, RefreshCw } from "lucide-react";
 import { resolveImageSrc } from "./utils/image";
+import { applyTheme } from "./utils/themeEngine";
+import { ThemeInfo } from "./types/themes";
 import { UpdateCheckResult } from "./types/update";
+import { pluginRuntime } from "./utils/pluginRuntime";
 import "./App.css";
 
 interface ScanResult {
@@ -122,14 +127,38 @@ export function App() {
   const isConfigLoadedRef = useRef(false);
   const saveConfigTimeoutRef = useRef<number | null>(null);
 
-  // Apply user-configured theme accent and panel tint to document CSS variables
+  // Apply user-configured theme accent, panel tint, and modal backdrop to document CSS variables
   useEffect(() => {
     const accent = appConfig.accent_color || "#a855f7";
     const tint = appConfig.panel_tint || "#0e0e11";
+    const modalOpacity = `${Math.round((appConfig.modal_backdrop_opacity ?? 0.45) * 100)}%`;
+    const modalBlur = `${appConfig.modal_backdrop_blur ?? 8}px`;
     document.documentElement.style.setProperty("--app-accent-color", accent);
     document.documentElement.style.setProperty("--app-panel-tint", tint);
     document.documentElement.style.setProperty("--accent", accent);
-  }, [appConfig.accent_color, appConfig.panel_tint]);
+    document.documentElement.style.setProperty("--modal-backdrop-opacity", modalOpacity);
+    document.documentElement.style.setProperty("--modal-backdrop-blur", modalBlur);
+  }, [
+    appConfig.accent_color,
+    appConfig.panel_tint,
+    appConfig.modal_backdrop_opacity,
+    appConfig.modal_backdrop_blur,
+  ]);
+
+  // Load and apply installed active theme
+  useEffect(() => {
+    invoke<ThemeInfo[]>("get_installed_themes")
+      .then((themes) => {
+        const active =
+          themes.find((t) => t.is_active) ||
+          themes.find((t) => t.manifest.id === "default") ||
+          themes[0];
+        if (active) {
+          applyTheme(active);
+        }
+      })
+      .catch((err) => console.warn("Failed to apply initial active theme:", err));
+  }, []);
 
   // Default cardWidth to 108 for 7 columns, persist in localStorage
   const [cardWidth, setCardWidth] = useState(() => {
@@ -162,6 +191,8 @@ export function App() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [editingGame, setEditingGame] = useState<Game | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isThemesOpen, setIsThemesOpen] = useState(false);
+  const [isPluginsOpen, setIsPluginsOpen] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState<string>("general");
   const [availableUpdate, setAvailableUpdate] = useState<UpdateCheckResult | null>(null);
 
@@ -407,6 +438,12 @@ export function App() {
             prev.map((g) => (g.id === id ? { ...g, last_played: lastPlayed } : g))
           );
         }
+        invoke<Game[]>("get_all_games")
+          .then((all) => {
+            const launched = all.find((g) => g.id === id);
+            if (launched) pluginRuntime.emit("game:launch", launched);
+          })
+          .catch(() => {});
       }
     );
 
@@ -437,6 +474,13 @@ export function App() {
           return g;
         })
       );
+
+      invoke<Game[]>("get_all_games")
+        .then((all) => {
+          const stopped = all.find((g) => g.id === id);
+          if (stopped) pluginRuntime.emit("game:exit", { game: stopped, durationSeconds: elapsed_seconds });
+        })
+        .catch(() => {});
 
       // Auto-sync live store playtime, achievements, and HLTB upon game exit (after launcher flushes state)
       window.setTimeout(() => {
@@ -503,6 +547,9 @@ export function App() {
         }, 3000);
       }
     });
+
+    // Initialize all enabled plugins
+    pluginRuntime.syncWithBackend();
 
     return () => {
       unlistenLaunched.then((f) => f());
@@ -1132,8 +1179,10 @@ export function App() {
         ...partialGame,
       };
       await invoke("save_game", { game: newGame });
-      setGames((prev) => [newGame, ...prev]);
-      handleSelectGame(newGame.id);
+      const list = await invoke<Game[]>("get_games");
+      setGames(list);
+      const target = list.find((g) => g.title.toLowerCase() === (newGame.title || "").toLowerCase()) || newGame;
+      handleSelectGame(target.id);
     } catch (err) {
       console.error("Failed to add manual game:", err);
     }
@@ -1690,6 +1739,8 @@ export function App() {
           setLibraryManagerTab("steam");
           setIsLibraryManagerOpen(true);
         }}
+        onOpenThemes={() => setIsThemesOpen(true)}
+        onOpenPlugins={() => setIsPluginsOpen(true)}
         onOpenSettings={handleOpenSettings}
         gameCount={filteredGames.length}
         onRefreshAll={handleRefreshAll}
@@ -1762,6 +1813,10 @@ export function App() {
       <SettingsModal
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
+        onOpenThemes={() => {
+          setIsSettingsOpen(false);
+          setIsThemesOpen(true);
+        }}
         initialTab={settingsInitialTab}
         initialUpdateResult={availableUpdate}
         onScanLibrary={handleScanLibrary}
@@ -1775,6 +1830,21 @@ export function App() {
             console.warn("Failed to persist config:", e)
           );
           if (updated.view_mode) setViewMode(updated.view_mode as ViewMode);
+        }}
+      />
+
+      {/* Themes Manager Modal */}
+      <ThemesManagerModal
+        isOpen={isThemesOpen}
+        onClose={() => setIsThemesOpen(false)}
+      />
+
+      {/* Plugins Manager Modal */}
+      <PluginsManagerModal
+        isOpen={isPluginsOpen}
+        onClose={() => setIsPluginsOpen(false)}
+        onPluginsChanged={() => {
+          pluginRuntime.syncWithBackend();
         }}
       />
 

@@ -84,11 +84,13 @@ export const AchievementDetailModal: React.FC<AchievementDetailModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-black/45 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150 select-none"
+      data-theme-part="achievement-detail-modal"
+      className="fixed inset-0 z-50 theme-modal-backdrop flex items-center justify-center p-4 animate-in fade-in duration-150 select-none"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-md theme-panel-surface border border-white/10 rounded-2xl shadow-2xl overflow-hidden flex flex-col relative animate-in zoom-in-95 duration-150 backdrop-blur-2xl"
+        data-theme-part="modal-container"
+        className="w-full max-w-md theme-modal-container rounded-2xl overflow-hidden flex flex-col relative animate-in zoom-in-95 duration-150"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header Bar */}

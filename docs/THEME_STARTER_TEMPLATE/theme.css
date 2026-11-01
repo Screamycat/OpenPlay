@@ -1,0 +1,19 @@
+/* ========================================================
+   OpenPlay Custom Theme Stylesheet Template
+   ======================================================== */
+
+[data-theme-id="starter-custom-theme"] {
+  /* Primary Accent & Highlight overrides */
+  --app-accent-color: #06b6d4;
+  --accent: #06b6d4;
+  --app-panel-tint: #0d1117;
+
+  /* Card radius linked to user in-app setting */
+  --card-radius: var(--theme-card-radius, 16px);
+}
+
+/* Example: Custom glowing border on active cards */
+[data-theme-id="starter-custom-theme"] .game-poster-card:hover {
+  box-shadow: 0 0 20px rgba(6, 182, 212, 0.35);
+  border-color: rgba(6, 182, 212, 0.6);
+}

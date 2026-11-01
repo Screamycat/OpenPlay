@@ -177,11 +177,13 @@ export const TrailerModal: React.FC<TrailerModalProps> = ({
   return (
     <div
       onClick={onClose}
-      className="fixed inset-0 z-50 bg-black/45 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150"
+      data-theme-part="trailer-modal"
+      className="fixed inset-0 z-50 theme-modal-backdrop flex items-center justify-center p-4 animate-in fade-in duration-150"
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="theme-panel-surface backdrop-blur-2xl border border-white/10 rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
+        data-theme-part="modal-container"
+        className="theme-modal-container rounded-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]"
       >
         {/* Header */}
         <div className="px-6 py-4 border-b border-[#202538] flex items-center justify-between">

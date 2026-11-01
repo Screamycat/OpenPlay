@@ -737,6 +737,115 @@ impl SteamMetadataFetcher {
             });
         }
 
+        // 4. Fallback: If XML was empty (or redirected by Steam to HTML), fetch modern SSR JSON from https://steamcommunity.com/achievements/<appid>
+        if achievements.is_empty() {
+            let html_url = format!("https://steamcommunity.com/achievements/{}", appid);
+            if let Ok(resp) = client
+                .get(&html_url)
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                .send()
+                .await
+            {
+                if let Ok(html_text) = resp.text().await {
+                    let ssr_re = regex::Regex::new(r#"id="valve-ssr-data"[^>]*>([\s\S]*?)</script>"#).unwrap();
+                    if let Some(cap) = ssr_re.captures(&html_text) {
+                        if let Some(json_raw) = cap.get(1) {
+                            if let Ok(val) = serde_json::from_str::<Value>(json_raw.as_str()) {
+                                let qd_val = val.pointer("/renderContext/queryData");
+                                let queries_val = if let Some(Value::String(s)) = qd_val {
+                                    serde_json::from_str::<Value>(s).ok().and_then(|v| v.get("queries").cloned())
+                                } else if let Some(Value::Object(o)) = qd_val {
+                                    o.get("queries").cloned()
+                                } else {
+                                    None
+                                };
+
+                                if let Some(Value::Array(queries)) = queries_val {
+                                    // Extract global percentages map by internal_key
+                                    let mut local_rarities: std::collections::HashMap<i64, f64> = std::collections::HashMap::new();
+                                    for q in &queries {
+                                        if let Some(key_arr) = q.get("queryKey").and_then(|k| k.as_array()) {
+                                            if key_arr.get(0).and_then(|k| k.as_str()) == Some("achievements")
+                                                && key_arr.get(2).and_then(|k| k.as_str()) == Some("globalpercentages")
+                                            {
+                                                if let Some(pcts_obj) = q.pointer("/state/data/percentages").and_then(|p| p.as_object()) {
+                                                    for (k_str, v_num) in pcts_obj {
+                                                        if let (Ok(k_int), Some(v_f)) = (k_str.parse::<i64>(), v_num.as_f64()) {
+                                                            local_rarities.insert(k_int, (v_f * 10.0).round() / 10.0);
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    // Extract achievement schema
+                                    for q in &queries {
+                                        if let Some(key_arr) = q.get("queryKey").and_then(|k| k.as_array()) {
+                                            if key_arr.get(0).and_then(|k| k.as_str()) == Some("achievements")
+                                                && key_arr.get(2).and_then(|k| k.as_str()) == Some("schema_v2")
+                                            {
+                                                if let Some(groups) = q.pointer("/state/data/groups").and_then(|g| g.as_array()) {
+                                                    for grp in groups {
+                                                        if let Some(ach_arr) = grp.get("achievements").and_then(|a| a.as_array()) {
+                                                            for a in ach_arr {
+                                                                let api_name = a.get("api_name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                                                if api_name.is_empty() {
+                                                                    continue;
+                                                                }
+                                                                let display_name = a.get("name").and_then(|v| v.as_str()).unwrap_or(&api_name).to_string();
+                                                                let description = a.get("description").and_then(|v| v.as_str()).map(|s| s.to_string());
+                                                                let hidden = a.get("hidden").and_then(|v| v.as_bool()).unwrap_or(false);
+                                                                let internal_key = a.get("internal_key").and_then(|v| v.as_i64()).unwrap_or(0);
+
+                                                                let icon_achieved = a.get("icon_achieved").and_then(|v| v.as_str()).unwrap_or("");
+                                                                let icon_unachieved = a.get("icon_unachieved").and_then(|v| v.as_str()).unwrap_or("");
+
+                                                                let icon_url = if !icon_achieved.is_empty() {
+                                                                    format!("https://shared.fastly.steamstatic.com/community_assets/images/apps/{}/{}", appid, icon_achieved)
+                                                                } else {
+                                                                    String::new()
+                                                                };
+
+                                                                let icon_gray_url = if !icon_unachieved.is_empty() {
+                                                                    Some(format!("https://shared.fastly.steamstatic.com/community_assets/images/apps/{}/{}", appid, icon_unachieved))
+                                                                } else {
+                                                                    None
+                                                                };
+
+                                                                let rarity = local_rarities
+                                                                    .get(&internal_key)
+                                                                    .copied()
+                                                                    .or_else(|| rarity_map.get(&api_name).or_else(|| rarity_map.get(&api_name.to_lowercase())).copied())
+                                                                    .unwrap_or(0.0);
+
+                                                                achievements.push(Achievement {
+                                                                    game_id: game_id.to_string(),
+                                                                    api_name,
+                                                                    display_name,
+                                                                    description,
+                                                                    icon_url,
+                                                                    icon_gray_url,
+                                                                    is_unlocked: false,
+                                                                    unlock_time: None,
+                                                                    rarity_percentage: rarity,
+                                                                    is_secret: hidden,
+                                                                });
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // Sort: Unlocked first, then by rarity ascending (rarest first), then display_name
         achievements.sort_by(|a, b| {
             b.is_unlocked

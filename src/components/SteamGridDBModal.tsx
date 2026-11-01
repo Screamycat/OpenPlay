@@ -207,11 +207,13 @@ export const SteamGridDBModal: React.FC<SteamGridDBModalProps> = ({
   return (
     <div
       onClick={onClose}
-      className="fixed inset-0 z-50 bg-black/45 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150"
+      data-theme-part="steamgriddb-modal"
+      className="fixed inset-0 z-50 theme-modal-backdrop flex items-center justify-center p-4 animate-in fade-in duration-150"
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="theme-panel-surface backdrop-blur-2xl border border-white/10 rounded-2xl w-full max-w-5xl h-[720px] shadow-2xl flex flex-col overflow-hidden"
+        data-theme-part="modal-container"
+        className="theme-modal-container rounded-2xl w-full max-w-5xl h-[720px] flex flex-col overflow-hidden"
       >
         {/* Modal Header */}
         <div className="h-14 px-6 border-b border-white/10 flex items-center justify-between bg-white/[0.02] shrink-0">

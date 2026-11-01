@@ -613,11 +613,13 @@ export const AchievementHunterHub: React.FC<AchievementHunterHubProps> = ({
       {/* 5. In-Hub Game Achievement Inspector Modal */}
       {inspectGame && (
         <div
-          className="fixed inset-0 z-50 bg-black/45 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150"
+          data-theme-part="achievement-inspector-modal"
+          className="fixed inset-0 z-50 theme-modal-backdrop flex items-center justify-center p-4 animate-in fade-in duration-150"
           onClick={() => setInspectGame(null)}
         >
           <div
-            className="theme-panel-surface border border-white/10 rounded-2xl w-full max-w-4xl max-h-[85vh] flex flex-col shadow-2xl overflow-hidden backdrop-blur-2xl"
+            data-theme-part="modal-container"
+            className="theme-modal-container rounded-2xl w-full max-w-4xl max-h-[85vh] flex flex-col overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="px-6 py-4 border-b border-white/10 flex items-center justify-between">

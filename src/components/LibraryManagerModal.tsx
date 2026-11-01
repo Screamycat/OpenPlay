@@ -616,11 +616,13 @@ export const LibraryManagerModal: React.FC<LibraryManagerModalProps> = ({
   return (
     <div
       onClick={onClose}
-      className="fixed inset-0 z-50 bg-black/45 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150"
+      data-theme-part="library-manager-modal"
+      className="fixed inset-0 z-50 theme-modal-backdrop flex items-center justify-center p-4 select-none animate-in fade-in duration-150"
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-5xl theme-panel-surface border border-white/10 rounded-2xl shadow-2xl overflow-hidden flex flex-col h-[88vh] max-h-[880px] min-h-[640px]"
+        data-theme-part="modal-container"
+        className="w-full max-w-5xl theme-modal-container rounded-2xl flex flex-col h-[88vh] max-h-[880px] min-h-[640px] overflow-hidden"
       >
         {/* Header Bar */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-[#1e2333] bg-[#121520]">

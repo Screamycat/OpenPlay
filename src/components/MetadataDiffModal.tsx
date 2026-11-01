@@ -122,9 +122,13 @@ export const MetadataDiffModal: React.FC<MetadataDiffModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md animate-in fade-in duration-200">
+    <div
+      data-theme-part="metadata-diff-modal"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 theme-modal-backdrop animate-in fade-in duration-150"
+    >
       <div
-        className="w-full max-w-4xl bg-[#10121a]/95 border border-white/10 rounded-2xl shadow-2xl flex flex-col max-h-[85vh] overflow-hidden text-zinc-200 animate-in zoom-in-95 duration-200"
+        data-theme-part="modal-container"
+        className="w-full max-w-4xl theme-modal-container rounded-2xl flex flex-col max-h-[85vh] overflow-hidden text-zinc-200 animate-in zoom-in-95 duration-150"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}

@@ -576,11 +576,13 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
   return (
     <div
       onClick={onClose}
-      className="fixed inset-0 z-50 bg-black/45 backdrop-blur-sm flex items-center justify-center p-4 select-none animate-in fade-in duration-150"
+      data-theme-part="edit-game-modal"
+      className="fixed inset-0 z-50 theme-modal-backdrop flex items-center justify-center p-4 select-none animate-in fade-in duration-150"
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="theme-panel-surface backdrop-blur-2xl border border-white/10 rounded-2xl w-full max-w-4xl h-[720px] max-h-[92vh] shadow-[0_20px_60px_rgba(0,0,0,0.85)] flex flex-col overflow-hidden text-xs text-zinc-200"
+        data-theme-part="modal-container"
+        className="theme-modal-container rounded-2xl w-full max-w-4xl h-[720px] max-h-[92vh] flex flex-col overflow-hidden text-xs text-zinc-200"
       >
         {/* Top Header */}
         <div className="px-6 py-3.5 border-b border-white/10 flex items-center justify-between bg-white/[0.03] backdrop-blur-sm shrink-0">

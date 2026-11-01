@@ -11,6 +11,8 @@ import {
   Loader2,
   HardDrive,
   Gamepad2,
+  Palette,
+  Blocks,
 } from "lucide-react";
 import { ConnectedLibraryItem } from "../types/backup";
 
@@ -24,6 +26,8 @@ interface LeftDrawerProps {
   isOpen: boolean;
   onClose: () => void;
   onOpenLibraryManager: () => void;
+  onOpenThemes?: () => void;
+  onOpenPlugins?: () => void;
   onOpenSettings: (tab?: string) => void;
   gameCount?: number;
   onRefreshAll: () => void;
@@ -40,6 +44,8 @@ export const LeftDrawer: React.FC<LeftDrawerProps> = ({
   isOpen,
   onClose,
   onOpenLibraryManager,
+  onOpenThemes,
+  onOpenPlugins,
   onOpenSettings,
   onRefreshAll,
   onRefreshAllLibraries,
@@ -128,6 +134,40 @@ export const LeftDrawer: React.FC<LeftDrawerProps> = ({
               <div className="text-zinc-100">Library Manager</div>
               <div className="text-[10px] text-zinc-500 font-normal truncate">
                 Steam, Epic, GOG & Emulators
+              </div>
+            </div>
+          </button>
+
+          {/* Themes Button */}
+          <button
+            onClick={() => {
+              onClose();
+              if (onOpenThemes) onOpenThemes();
+            }}
+            className="w-full flex items-center space-x-3 px-3 py-2.5 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-zinc-200 hover:text-white border border-white/10 font-semibold transition-all shadow-sm cursor-pointer group"
+          >
+            <Palette className="w-4 h-4 text-zinc-400 group-hover:text-white shrink-0 transition-colors" />
+            <div className="text-left flex-1 min-w-0">
+              <div className="text-zinc-100">Themes</div>
+              <div className="text-[10px] text-zinc-500 font-normal truncate">
+                Visual styles & UI layouts
+              </div>
+            </div>
+          </button>
+
+          {/* Plugins Button */}
+          <button
+            onClick={() => {
+              onClose();
+              if (onOpenPlugins) onOpenPlugins();
+            }}
+            className="w-full flex items-center space-x-3 px-3 py-2.5 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-zinc-200 hover:text-white border border-white/10 font-semibold transition-all shadow-sm cursor-pointer group"
+          >
+            <Blocks className="w-4 h-4 text-zinc-400 group-hover:text-white shrink-0 transition-colors" />
+            <div className="text-left flex-1 min-w-0">
+              <div className="text-zinc-100">Plugins</div>
+              <div className="text-[10px] text-zinc-500 font-normal truncate">
+                Extensions & feature add-ons
               </div>
             </div>
           </button>

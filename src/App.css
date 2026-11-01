@@ -9,6 +9,8 @@
     --accent: #a855f7;
     --app-accent-color: #a855f7;
     --app-panel-tint: #0e0e11;
+    --modal-backdrop-opacity: 45%;
+    --modal-backdrop-blur: 8px;
     --border-color: rgba(255, 255, 255, 0.08);
     --text-primary: #f8fafc;
     --text-muted: #94a3b8;
@@ -21,6 +23,20 @@
 
   .theme-panel-solid {
     background-color: var(--app-panel-tint, #0e0e11) !important;
+  }
+
+  .theme-modal-backdrop {
+    background-color: color-mix(in srgb, #000000 var(--modal-backdrop-opacity, 45%), transparent) !important;
+    backdrop-filter: blur(var(--modal-backdrop-blur, 8px)) !important;
+    -webkit-backdrop-filter: blur(var(--modal-backdrop-blur, 8px)) !important;
+  }
+
+  .theme-modal-container {
+    background-color: color-mix(in srgb, var(--app-panel-tint, #0e0e11) 94%, transparent) !important;
+    backdrop-filter: blur(24px) !important;
+    -webkit-backdrop-filter: blur(24px) !important;
+    border-color: rgba(255, 255, 255, 0.1) !important;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.85) !important;
   }
 
   .theme-accent-bg {

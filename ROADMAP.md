@@ -19,37 +19,36 @@ Welcome to the central tracking document for **OpenPlay**. Use this document to 
 - [x] **SFW SteamGridDB**: A NSFW toggle when selecting artwork to show or hide NSFW content.
 - [x] **Playnite backup**: Make it possible to import data from a playnite backup file.
 - [x] **Full refresh**: Have a way to fetch minimal data for all games, like description, time played, last played and much more.
-- [ ] **Emulation backup support**: Roms imported from playnite backup appears as local games, once emulators is implemented, roms should be supported through backups as well.
-- [ ] **Online saving**: Store all configs, metadata and settnigs online. So it's accessible from all devices.
 - [x] **Auto status**: In the completionist status it should feature statuses like,"Untouched", "Forgotten", "In Progress", "Hunting", "Beaten", "Mastered" and "Auto". Auto should auto assign these statuses based on time played and last played and achivements.
 - [x] **Duplicate merger**: owning the same game on differ,0ent platforms should not create two slots. Rather, they should conbine and it should be notable by the user that they own it on those platforms. (like duplicate hider in playnite)
-- [ ] **Side menu refresh** All connected libraries should appear in this menu.
+- [x] **Side menu refresh** All connected libraries should appear in this menu.
 
 ### 🟡 Medium Priority / Future Enhancements
-- [ ] **Extention / Theme support**: Open up the application for custom plugins (extention) and themes.
-- [ ] **Emulation Scanner & Launch Profiles**: Auto-detect emulator installations (RetroArch, RPCS3, Dolphin, PCSX2, Ryujinx) and ROM paths.
 - [x] **Custom Theme Tinting**: Option in Settings to choose primary accent color
 - [x] **Trailer Autoplay Controls in Settings**: Option to toggle video trailer autoplay on/off or mute by default.
-- [ ] **Controller**: Full gamepad navigation support in desktop mode.
 - [x] **Hide**: Be able to hide and unhide a game.
-- [ ] **Achievement system**: Optional native OpenPlay extention that makes it possible to track achivements for local games?
+- [ ] **Controller**: Full gamepad navigation support in desktop mode.
 - [ ] **Custom installer**: Replace the native wizard with a sleek and modern installer. A chance to prepare settings and so on.
 
 ### 🟢 Backlog & Wishlist
-- [ ] **Custom Soundtrack / Background Audio Player**: Play theme music when viewing game details (e.g. from Steam or custom mp3).
-- [ ] **Stats & Analytics Dashboard**: Charts showing playtime trends, most played genres, and monthly play history.
-- [ ] **Android Support**: An android apk, to view all data on mobile.
-- [ ] **Console Mode**: Much like fullscreen mode, only that its main focus is making your pc into a console (big picture mode if you will).
-- [ ] **Steam other device**: Right now if you play the a steam game on another device it will update your OpenPlay library to say you recently played it. To avoid confusion a indication could be implemented, like a subtle icon thats only visible o that game was not recently played on the device youre currently on. (Maybe its the same for other integrations like epic?)
 - [ ] **Save location**: Add support for finding out where it stores save files and config files.
+- [ ] **Console Mode**: Much like fullscreen mode, only that its main focus is making your pc into a console (big picture mode if you will).
+- [ ] **Steam other device**: Right now if you play the a steam game on another device it will update your OpenPlay library to say you recently played it. To avoid confusion an indication could be implemented, like a subtle icon thats only visible o that game was not recently played on the device youre currently on. (Maybe its the same for other integrations like epic?)
 - [ ] **Feedback button**: A button that lets users send feedback.
-- [] **Save/Load backup**: The settings should provide a way to make a backup as well as rollback to an earlier backup.
+- [ ] **Android Support**: An android apk, to view all data on mobile.
+- [ ] **Stats & Analytics Dashboard**: Charts showing playtime trends, most played genres, and monthly play history.
 
 ### ⚙️ Implemented but Non-Tested Features
-- [ ] **Dual launch**: Make it possible to choose on play what exe to launhc. (for mod managers or something other) Much Like playnite actions.
+- [ ] **Dual launch**: Make it possible to choose on play what exe to launch. (for mod managers or something other) Much Like playnite actions.
 - [ ] **Update in app**: Updating should not open a installer, it should update within the app.
 - [ ] **Launch option on start up (Settings)**: An option in settings to enable start OpenPLay on device boot.
-- [ ] **Custom Game Integrations (Epic Games / GOG / Xbox)**: Connect accounts or import local installed libraries automatically.
+- [x] **Custom Game Integrations (Epic Games / GOG / Xbox)**: Connect accounts or import local installed libraries automatically.
+- [ ] **Online saving**: Store all configs, metadata and settnigs online. So it's accessible from all devices.
+- [ ] **Extention / Theme support**: Open up the application for custom plugins (extention) and themes.
+
+### ❓ Ignored Features at This Time
+- [ ] **Emulation backup support (Advanced)**: Roms imported from playnite backup appears as local games, once emulators is implemented, roms should be supported through backups as well.
+- [ ] **Achievement system**: Optional native OpenPlay extention that makes it possible to track achivements for local games.
 
 ### 🎨 UI & Design Polish
 - [x] **Tag & Category Filters in Grid**: Expand the quick filter bar to dynamically filter games by clicked genre or category tags.
@@ -72,18 +71,21 @@ Welcome to the central tracking document for **OpenPlay**. Use this document to 
 - [x] **In game counter for all**: Make in game counter not fixed for only steam games, and open to all platforms.
 - [x] **Cover favorite icon**: The yellow star icon in the top right corner of game covers should be white instead of yellow.
 - [ ] **Platform Icons**: Xbox, Epic, GOG, Battle.net are in need of a upgraded, high res icon. Ubisoft, EA, Riot Games all says Local PC with defualt icon, they should recive similar treatment.
-- [x] **Longer UI**: Filter menu and library manager should be a little longer to avoind short travel scrollbars.
-
+- [ ] **Title image percentage**: Instead of the title image being confined  to pixels, it should be confiend to a max of 50% of the heros width and 65% of the heros height.
+- [ ] **Ontouched games in hub**: Untouched games in the achivement hub should not be in calcualtion for things like avarege completion and unlocked count etc.
+- [ ] **Sidebar version number** The version number in the bottom sidebar is not automatically synced.
 ---
 
 ## 🐛 Bug Tracker
 | ID | Issue Description | Severity | Thoughts / Reproduce | Status |
 |:---|:------------------|:--------:|:-------------------|:------:|
-| *001* | *Window completely disappears sometimes after restarting the application and imeaditly try to move it.* | Medium | *This can be becasue of VITE or something with the window management?* | Resolved |
-| *002* | *Incomming artwork from steam is null in the metadata window* | Small | *Fetching manual steam emtadata* | Resolved
-| *003* | *Random selected artwork covers can appear empty* | Small | *This issue  occurance is uknown but is easliy fixed buy restarting, or via VITE update.* | Testing fix
-| *004* | *Animated artwork covers are null (with the iamge icon) in places like game settings and achivement hub* | Medium | *This happens only with animated covers, which should be animated in these instances* | Resolved
-| *005* | *Animated covers in the grid view that is not installed is not grey like static covers are* | Medium | *Animated covers should match the grayscale affect of the static covers when not installed* | Resolved
-| *006* | *More often than usual the window refuses top open. Its icon is visible in the task bar, only a click apon it does nothing.* | High | *When this happens OpenPlay is still running in the background, and a restart is required to open the window again.* | Testing fix
-| *007* | *When importing a playnite backup, if chosen not to import example, artwork. All artwork for the already existing games gets removed and set to empty* | High | *When importing playnite backups it should never be destructive, it should on replace the data that was selected to be imported. Unless the existing data has already been modified by the user. User modification always goes first.* | Testing fix
-| *008* | *When importing a playnite backup, if that game already exists, instad of merging or replacing data. It makes a new platform cell of the same platform.* | High | *When importing playnite backups, it should check the existing unique id from the import file and match it to the exists. This fix also need to fix the already broken library entries that now conissts of multiple libraries of the same platform.* | Testing fix
+| 001 | *Window completely disappears sometimes after restarting the application and imeaditly try to move it.* | Medium | *This can be becasue of VITE or something with the window management?* | Resolved |
+| 002 | *Incomming artwork from steam is null in the metadata window* | Small | *Fetching manual steam emtadata* | Resolved
+| 003 | *Random selected artwork covers can appear empty* | Small | *This issue  occurance is uknown but is easliy fixed buy restarting, or via VITE update.* | Testing fix
+| 004 | *Animated artwork covers are null (with the iamge icon) in places like game settings and achivement hub* | Medium | *This happens only with animated covers, which should be animated in these instances* | Resolved
+| 005 | *Animated covers in the grid view that is not installed is not grey like static covers are* | Medium | *Animated covers should match the grayscale affect of the static covers when not installed* | Resolved
+| 006 | *More often than usual the window refuses top open. Its icon is visible in the task bar, only a click apon it does nothing.* | High | *When this happens OpenPlay is still running in the background, and a restart is required to open the window again.* | Testing fix
+| 007 | *When importing a playnite backup, if chosen not to import example, artwork. All artwork for the already existing games gets removed and set to empty* | High | *When importing playnite backups it should never be destructive, it should on replace the data that was selected to be imported. Unless the existing data has already been modified by the user. User modification always goes first.* | Testing fix
+| 008 | *When importing a playnite backup, if that game already exists, instad of merging or replacing data. It makes a new platform cell of the same platform.* | High | *When importing playnite backups, it should check the existing unique id from the import file and match it to the exists. This fix also need to fix the already broken library entries that now conissts of multiple libraries of the same platform.* | Testing fix
+| 009 | *When having "minimize openplay" active it dose not appear again when game is closed* | Medium | *If this option is active it should also open openplay backup when the game is no longer running.* | Needs attention
+| 010 | *GOG is not saving metadata or artwork, or is simply overwriting metadata with its own useless metadata* | Medium | *It should not do this.* | Needs attention

@@ -30,11 +30,13 @@ export const StoryBeatenModal: React.FC<StoryBeatenModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65 backdrop-blur-md animate-in fade-in duration-200"
+      data-theme-part="story-beaten-modal"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 theme-modal-backdrop animate-in fade-in duration-150"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-md theme-panel-surface border border-white/15 rounded-3xl p-6 shadow-2xl relative animate-in zoom-in-95 duration-200 overflow-hidden"
+        data-theme-part="modal-container"
+        className="w-full max-w-md theme-modal-container rounded-3xl p-6 relative animate-in zoom-in-95 duration-150 overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Subtle Background Glow Accent */}

@@ -20,6 +20,11 @@ fn running_games_map() -> &'static Mutex<HashMap<String, RunningGameInfo>> {
     RUNNING_GAMES.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+fn unregister_running_game(gid: &str) -> Option<RunningGameInfo> {
+    let mut map = running_games_map().lock().unwrap();
+    map.remove(gid)
+}
+
 /// Recursively scans an installation folder (up to depth 2) to collect legitimate game executable filenames
 fn get_candidate_executables(install_dir: &str) -> Vec<String> {
     let mut exes = Vec::new();
@@ -166,6 +171,16 @@ impl GameLauncher {
     ) -> Result<String, String> {
         let now_str = chrono::Local::now().format("%Y-%m-%d %H:%M").to_string();
 
+        if source.eq_ignore_ascii_case("riot games") || source.eq_ignore_ascii_case("riot") {
+            if let Some(ref dir) = install_directory {
+                if !Path::new(dir).exists() {
+                    let _ = db.update_game_installed(&game_id, false);
+                    let _ = app_handle.emit("game-updated", serde_json::json!({ "id": &game_id, "is_installed": false }));
+                    return Err(format!("Riot game folder not found at '{}'. Please verify installation via Riot Client.", dir));
+                }
+            }
+        }
+
         if source.to_lowercase() == "steam" {
             if let Some(appid) = source_id {
                 let steam_url = format!("steam://run/{}", appid);
@@ -279,10 +294,7 @@ impl GameLauncher {
                     }
 
                     // Unregister running state
-                    {
-                        let mut map = running_games_map().lock().unwrap();
-                        map.remove(&gid);
-                    }
+                    unregister_running_game(&gid);
                     let elapsed = start_time.elapsed().as_secs();
                     let end_str = chrono::Local::now().format("%Y-%m-%d %H:%M").to_string();
                     let _ = db_clone.update_playtime(&gid, elapsed, &end_str);
@@ -405,10 +417,7 @@ impl GameLauncher {
                         }
                     }
 
-                    {
-                        let mut map = running_games_map().lock().unwrap();
-                        map.remove(&gid);
-                    }
+                    unregister_running_game(&gid);
                     let elapsed = start_time.elapsed().as_secs();
                     let end_str = chrono::Local::now().format("%Y-%m-%d %H:%M").to_string();
                     let _ = db_clone.update_playtime(&gid, elapsed, &end_str);
@@ -579,10 +588,7 @@ impl GameLauncher {
                     }
                 }
 
-                {
-                    let mut map = running_games_map().lock().unwrap();
-                    map.remove(&gid);
-                }
+                unregister_running_game(&gid);
                 let elapsed = start_time.elapsed().as_secs();
                 let end_str = chrono::Local::now().format("%Y-%m-%d %H:%M").to_string();
                 let _ = db_clone.update_playtime(&gid, elapsed, &end_str);
@@ -617,12 +623,24 @@ impl GameLauncher {
         // Custom / Manual / Storefront URI / Shortcut game
         if let Some(exe_path) = resolved_executable {
             let trimmed_exe = exe_path.trim();
+            if trimmed_exe.is_empty() || trimmed_exe == r"\\" || trimmed_exe == "//" {
+                let _ = db.update_game_installed(&game_id, false);
+                let _ = app_handle.emit("game-updated", serde_json::json!({ "id": &game_id, "is_installed": false }));
+                return Err("Cannot launch game: executable path is invalid or empty.".to_string());
+            }
+
             let is_protocol_uri = trimmed_exe.contains("://") || trimmed_exe.starts_with("roblox-player:");
             let is_shell_app = trimmed_exe.to_lowercase().starts_with("shell:appsfolder\\");
             let is_shortcut = trimmed_exe.to_lowercase().ends_with(".lnk")
                 || trimmed_exe.to_lowercase().ends_with(".url");
 
             if is_protocol_uri || is_shell_app || is_shortcut {
+                if is_shortcut && !Path::new(trimmed_exe).exists() {
+                    let _ = db.update_game_installed(&game_id, false);
+                    let _ = app_handle.emit("game-updated", serde_json::json!({ "id": &game_id, "is_installed": false }));
+                    return Err(format!("Shortcut file not found at '{}'. The file may have been moved or deleted.", trimmed_exe));
+                }
+
                 #[cfg(target_os = "windows")]
                 {
                     if is_shell_app {
@@ -718,10 +736,7 @@ impl GameLauncher {
                                 }
                             }
 
-                            {
-                                let mut map = running_games_map().lock().unwrap();
-                                map.remove(&gid);
-                            }
+                            unregister_running_game(&gid);
                             let elapsed = start_time.elapsed().as_secs();
                             let end_str = chrono::Local::now().format("%Y-%m-%d %H:%M").to_string();
                             let _ = db_clone.update_playtime(&gid, elapsed, &end_str);
@@ -740,8 +755,13 @@ impl GameLauncher {
                 return Ok(now_str);
             }
 
-            let mut cmd = Command::new(&exe_path);
             let exe_path_buf = std::path::PathBuf::from(&exe_path);
+            if !exe_path_buf.exists() {
+                let _ = db.update_game_installed(&game_id, false);
+                let _ = app_handle.emit("game-updated", serde_json::json!({ "id": &game_id, "is_installed": false }));
+                return Err(format!("Game executable not found at '{}'. The directory may have been moved or deleted.", exe_path));
+            }
+            let mut cmd = Command::new(&exe_path);
             let parent_dir = install_directory
                 .clone()
                 .or_else(|| exe_path_buf.parent().map(|p| p.to_string_lossy().to_string()));
@@ -842,10 +862,7 @@ impl GameLauncher {
                     }
                 }
 
-                {
-                    let mut map = running_games_map().lock().unwrap();
-                    map.remove(&gid);
-                }
+                unregister_running_game(&gid);
                 let elapsed = start_time.elapsed().as_secs();
                 let end_str = chrono::Local::now().format("%Y-%m-%d %H:%M").to_string();
                 let _ = db_clone.update_playtime(&gid, elapsed, &end_str);
@@ -875,22 +892,30 @@ impl GameLauncher {
     ) -> Result<String, String> {
         let now_str = chrono::Local::now().format("%Y-%m-%d %H:%M").to_string();
         let target = executable_path.ok_or_else(|| "No target executable or URL provided for action".to_string())?;
+        let trimmed_target = target.trim();
+        if trimmed_target.is_empty() || trimmed_target == r"\\" || trimmed_target == "//" {
+            return Err("Cannot execute action: target executable or path is invalid or empty.".to_string());
+        }
 
         // If target is a protocol or web URL (e.g. steam://, ror2mm://, https://)
-        if target.contains("://") {
+        if trimmed_target.contains("://") {
             #[cfg(target_os = "windows")]
             {
                 Command::new("cmd")
-                    .args(["/C", "start", "", &target])
+                    .args(["/C", "start", "", trimmed_target])
                     .spawn()
-                    .map_err(|e| format!("Failed to launch action URL '{}': {}", target, e))?;
+                    .map_err(|e| format!("Failed to launch action URL '{}': {}", trimmed_target, e))?;
             }
             let _ = db.update_playtime(&game_id, 0, &now_str);
             let _ = app_handle.emit("game-launched", serde_json::json!({ "id": &game_id, "last_played": &now_str }));
             return Ok(now_str);
         }
 
-        let mut cmd = Command::new(&target);
+        let path_buf = std::path::PathBuf::from(trimmed_target);
+        if !path_buf.exists() {
+            return Err(format!("Action target executable not found at '{}'.", trimmed_target));
+        }
+        let mut cmd = Command::new(trimmed_target);
         let path_buf = std::path::PathBuf::from(&target);
         let work_dir = working_directory
             .map(std::path::PathBuf::from)
@@ -980,10 +1005,7 @@ impl GameLauncher {
                 }
             }
 
-            {
-                let mut map = running_games_map().lock().unwrap();
-                map.remove(&gid);
-            }
+            unregister_running_game(&gid);
             let elapsed = start_time.elapsed().as_secs();
             let end_str = chrono::Local::now().format("%Y-%m-%d %H:%M").to_string();
             let _ = db_clone.update_playtime(&gid, elapsed, &end_str);
@@ -1004,12 +1026,9 @@ impl GameLauncher {
         let mut pids_to_kill = Vec::new();
         let mut candidate_exes = Vec::new();
 
-        {
-            let mut map = running_games_map().lock().unwrap();
-            if let Some(info) = map.remove(game_id) {
-                pids_to_kill = info.pids;
-                candidate_exes = info.candidate_exes;
-            }
+        if let Some(info) = unregister_running_game(game_id) {
+            pids_to_kill = info.pids;
+            candidate_exes = info.candidate_exes;
         }
 
         #[cfg(target_os = "windows")]
@@ -1089,9 +1108,8 @@ impl GameLauncher {
         }
 
         if !dead_games.is_empty() {
-            let mut map = running_games_map().lock().unwrap();
             for (gid, start_time) in dead_games {
-                map.remove(&gid);
+                unregister_running_game(&gid);
                 let elapsed = start_time.elapsed().as_secs();
                 let end_str = chrono::Local::now().format("%Y-%m-%d %H:%M").to_string();
                 if let Some(database) = db {

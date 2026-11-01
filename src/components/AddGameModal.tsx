@@ -127,11 +127,13 @@ export const AddGameModal: React.FC<AddGameModalProps> = ({
   return (
     <div
       onClick={onClose}
-      className="fixed inset-0 z-50 bg-black/55 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-150"
+      data-theme-part="add-game-modal"
+      className="fixed inset-0 z-50 theme-modal-backdrop flex items-center justify-center p-4 animate-in fade-in duration-150"
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="theme-panel-surface backdrop-blur-2xl border border-white/10 rounded-2xl w-full max-w-xl shadow-2xl overflow-hidden flex flex-col text-zinc-200"
+        data-theme-part="modal-container"
+        className="theme-modal-container rounded-2xl w-full max-w-xl overflow-hidden flex flex-col text-zinc-200"
       >
         {/* Header */}
         <div className="px-6 py-4 border-b border-white/10 flex items-center justify-between bg-white/[0.02]">

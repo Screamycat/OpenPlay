@@ -3036,6 +3036,28 @@ impl RiotScanner {
 
                     let inst_dir = install_path.unwrap_or_else(|| format!(r"C:\Riot Games\{}", product_id));
 
+                    // Verify that the install directory actually exists on disk!
+                    let inst_dir_path = Path::new(&inst_dir);
+                    if product_id == "teamfighttactics" {
+                        // TFT has no standalone directory on PC and runs via League of Legends.
+                        // If neither League nor a dedicated directory exists, it is not installed.
+                        let lol_dir = Path::new(r"C:\Riot Games\League of Legends");
+                        if !lol_dir.exists() && !inst_dir_path.exists() {
+                            continue;
+                        }
+                    } else if !inst_dir_path.exists() {
+                        continue;
+                    }
+
+                    // Ensure the directory is not an empty leftover folder
+                    if inst_dir_path.exists() {
+                        if let Ok(mut read) = fs::read_dir(inst_dir_path) {
+                            if read.next().is_none() {
+                                continue;
+                            }
+                        }
+                    }
+
                     let title = match product_id.as_str() {
                         "league_of_legends" => "League of Legends".to_string(),
                         "valorant" => "VALORANT".to_string(),
