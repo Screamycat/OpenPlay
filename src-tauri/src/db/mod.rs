@@ -1172,31 +1172,37 @@ impl Database {
         for game in all_games {
             let summary = self.get_game_achievement_summary(game)?;
             if summary.total_achievements > 0 {
-                games_with_achievements_count += 1;
-                total_completion_sum += summary.completion_percentage;
-                total_achievements_count += summary.total_achievements;
-                unlocked_achievements_count += summary.unlocked_achievements;
+                // Untouched games (0 unlocked achievements) are excluded from average completion
+                // and unlocked trophies calculations, so unplayed library backlog doesn't skew stats.
+                let is_untouched = summary.unlocked_achievements == 0;
 
-                if summary.is_perfect {
-                    perfect_games_count += 1;
-                    total_score += 250; // Perfect game bonus!
-                }
+                if !is_untouched {
+                    games_with_achievements_count += 1;
+                    total_completion_sum += summary.completion_percentage;
+                    total_achievements_count += summary.total_achievements;
+                    unlocked_achievements_count += summary.unlocked_achievements;
 
-                // Add points for each unlocked achievement based on rarity
-                let achs = self.get_game_achievements(&game.id)?;
-                for ach in achs {
-                    if ach.is_unlocked {
-                        let pts = if ach.rarity_percentage > 0.0 && ach.rarity_percentage < 10.0 {
-                            100 // Ultra Rare (< 10%)
-                        } else if ach.rarity_percentage >= 10.0 && ach.rarity_percentage < 20.0 {
-                            50  // Rare (10% - 20%)
-                        } else if ach.rarity_percentage >= 20.0 && ach.rarity_percentage < 50.0 {
-                            25  // Uncommon (20% - 50%)
-                        } else {
-                            10  // Common (>= 50% or unrated)
-                        };
-                        total_score += pts;
-                        all_unlocked_achievements.push(ach);
+                    if summary.is_perfect {
+                        perfect_games_count += 1;
+                        total_score += 250; // Perfect game bonus!
+                    }
+
+                    // Add points for each unlocked achievement based on rarity
+                    let achs = self.get_game_achievements(&game.id)?;
+                    for ach in achs {
+                        if ach.is_unlocked {
+                            let pts = if ach.rarity_percentage > 0.0 && ach.rarity_percentage < 10.0 {
+                                100 // Ultra Rare (< 10%)
+                            } else if ach.rarity_percentage >= 10.0 && ach.rarity_percentage < 20.0 {
+                                50  // Rare (10% - 20%)
+                            } else if ach.rarity_percentage >= 20.0 && ach.rarity_percentage < 50.0 {
+                                25  // Uncommon (20% - 50%)
+                            } else {
+                                10  // Common (>= 50% or unrated)
+                            };
+                            total_score += pts;
+                            all_unlocked_achievements.push(ach);
+                        }
                     }
                 }
 

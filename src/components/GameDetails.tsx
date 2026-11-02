@@ -16,7 +16,6 @@ import {
   Cloud,
   ExternalLink,
   Sparkles,
-  Monitor,
   Loader2,
   Calendar,
   Clock,
@@ -25,7 +24,6 @@ import {
   HardDrive,
   MoreHorizontal,
   Settings,
-  Gamepad2,
   Award,
   Tag,
   ShieldAlert,
@@ -45,68 +43,9 @@ import {
 } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { getEffectiveCompletionStatus, shouldPromptBeatenModal } from "../utils/completionStatus";
-import { formatReleaseYear } from "../utils/date";
+import { formatReleaseYear, formatLastPlayed } from "../utils/date";
 import { StoryBeatenModal } from "./StoryBeatenModal";
-
-const SteamIcon: React.FC<{ className?: string }> = ({ className = "w-4 h-4" }) => (
-  <svg viewBox="0 0 496 512" fill="currentColor" className={className} aria-hidden="true">
-    <path d="M496 256c0 137-111.2 248-248.4 248-113.8 0-209.6-76.3-239-180.4l95.2 39.3c6.4 32.1 34.9 56.4 68.9 56.4 39.2 0 71.9-32.4 70.2-73.5l84.5-60.2c52.1 1.3 95.8-40.9 95.8-93.5 0-51.6-42-93.5-93.7-93.5s-93.7 42-93.7 93.5v1.2L176.6 279c-15.5-.9-30.7 3.4-43.5 12.1L0 236.1C10.2 108.4 117.1 8 247.6 8 384.8 8 496 119 496 256zM155.7 384.3l-30.5-12.6a52.79 52.79 0 0 0 27.2 25.8c26.9 11.2 57.8-1.6 69-28.4 5.4-13 5.5-27.3.1-40.3-5.4-13-15.5-23.2-28.5-28.6-12.9-5.4-26.7-5.2-38.9-.6l31.5 13c19.8 8.2 29.2 30.9 20.9 50.7-8.3 19.9-31 29.2-50.8 21zm173.8-129.9c-34.4 0-62.4-28-62.4-62.3s28-62.3 62.4-62.3 62.4 28 62.4 62.3-27.9 62.3-62.4 62.3zm.1-15.6c25.9 0 46.9-21 46.9-46.8 0-25.9-21-46.8-46.9-46.8s-46.9 21-46.9 46.8c.1 25.8 21.1 46.8 46.9 46.8z" />
-  </svg>
-);
-
-const EpicIcon: React.FC<{ className?: string }> = ({ className = "w-4 h-4" }) => (
-  <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
-    <path d="M12 0C7.2 0 4 3.4 4 3.4v13.5l8 7.1 8-7.1V3.4S16.8 0 12 0zm0 3.3c3.8 0 5.8 2.2 5.8 2.2v9.8L12 19.3l-5.8-4V5.5s2-2.2 5.8-2.2zm-2.4 3.5v7.4h4.8v-1.7h-2.9V11h2.5V9.4h-2.5V8.5h2.9V6.8H9.6z" />
-  </svg>
-);
-
-const GogIcon: React.FC<{ className?: string }> = ({ className = "w-4 h-4" }) => (
-  <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
-    <path d="M12 2C6.477 2 2 6.477 2 12c0 5.522 4.477 10 10 10 5.522 0 10-4.478 10-10 0-5.523-4.478-10-10-10zm0 3.2c3.755 0 6.8 3.045 6.8 6.8 0 3.755-3.045 6.8-6.8 6.8-3.755 0-6.8-3.045-6.8-6.8 0-3.755 3.045-6.8 6.8-6.8zm-1.8 3.4a3.4 3.4 0 00-3.4 3.4 3.4 3.4 0 003.4 3.4c1.878 0 3.4-1.522 3.4-3.4h-3.4v-1.6h5c.08.525.12 1.056.12 1.6 0 3.645-2.955 6.6-6.6 6.6-3.645 0-6.6-2.955-6.6-6.6 0-3.645 2.955-6.6 6.6-6.6 1.764 0 3.37.69 4.56 1.82l-1.18 1.18c-.89-.85-2.08-1.4-3.4-1.4z" />
-  </svg>
-);
-
-const BattleNetIcon: React.FC<{ className?: string }> = ({ className = "w-4 h-4" }) => (
-  <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
-    <path d="M2.58 8.16l4.67 8.09 3.05-1.76-3.14-5.44 2.87-1.66 3.14 5.44 3.05-1.76-4.67-8.09-8.97 5.18zm8.97 10.66l6.23-3.6-1.53-2.65-4.7 2.71v-3.32l4.7-2.71-1.53-2.65-6.23 3.6v8.62h3.06z" />
-  </svg>
-);
-
-const XboxIcon: React.FC<{ className?: string }> = ({ className = "w-4 h-4" }) => (
-  <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
-    <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm-4.3 4.2c1.3 1.1 2.9 2.5 4.3 3.9 1.4-1.4 3-2.8 4.3-3.9 2.2 1.5 3.9 3.7 4.8 6.3-1.6-1.6-3.8-2.7-5.9-2.7-1.3 0-2.4.4-3.2 1.1-.8-.7-1.9-1.1-3.2-1.1-2.1 0-4.3 1.1-5.9 2.7.9-2.6 2.6-4.8 4.8-6.3zm-4.3 9.7c1.8-1.5 3.9-2.3 5.9-2.3 1.1 0 2 .3 2.7.9-1.9 1.8-3.9 3.7-5.6 5.8-1.6-1.3-2.7-2.9-3-4.4zm17.2 4.4c-1.7-2.1-3.7-4-5.6-5.8.7-.6 1.6-.9 2.7-.9 2 0 4.1.8 5.9 2.3-.3 1.5-1.4 3.1-3 4.4z" />
-  </svg>
-);
-
-const PlayStationIcon: React.FC<{ className?: string }> = ({ className = "w-4 h-4" }) => (
-  <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
-    <path d="M8.985 2.59c-.43.16-.86.42-1.18.77-.38.41-.53.94-.53 1.54v9.84l4.24-1.52V4.54c0-.79-.58-1.5-1.37-1.81-.36-.14-.77-.19-1.16-.14zm6.67 5.24l-3.23 1.15v2.85l3.23-1.15c.67-.24 1.15-.88 1.15-1.6 0-.82-.57-1.46-1.15-1.25zM1.77 15.69c.5.18 1.05.27 1.59.27 1.8 0 3.32-.97 3.86-2.51l.3-.85-4.83 1.73c-.56.2-.96.65-.96 1.19 0 .1.01.17.04.17zm13.79-1.41c-1.44 0-2.73.66-3.56 1.71l2.58.93c.47-.41 1.06-.64 1.7-.64.91 0 1.63.45 1.84 1.15.08.28.05.54-.08.77-.17.3-.5.48-.96.48-1.28 0-2.69-.74-3.79-1.78l-2.03.73c1.55 1.64 3.65 2.52 5.82 2.52 1.44 0 2.65-.45 3.42-1.28.69-.74.88-1.71.53-2.67-.47-1.33-2.03-2.19-3.87-2.19z" />
-  </svg>
-);
-
-const EaIcon: React.FC<{ className?: string }> = ({ className = "w-4 h-4" }) => (
-  <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
-    <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm-1.8 17.5l-1.3-2.6H6.1L4.8 17.5H2.4l4.9-9.8h2.6l4.9 9.8h-2.6zm-1.9-4.3l-1.4-2.8-1.4 2.8h2.8zm11.5 4.3h-7.3V7.7h7.1v2H14v2h4.5v2H14v2.1h5.8v1.7z" />
-  </svg>
-);
-
-const UbisoftIcon: React.FC<{ className?: string }> = ({ className = "w-4 h-4" }) => (
-  <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
-    <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm.08 3.52c4.71 0 8.52 3.81 8.52 8.52 0 4.71-3.81 8.52-8.52 8.52-4.71 0-8.52-3.81-8.52-8.52 0-2.35 1.01-4.47 2.62-5.96l1.38 1.48c-1.23 1.15-2 2.76-2 4.48 0 3.6 2.92 6.52 6.52 6.52s6.52-2.92 6.52-6.52-2.92-6.52-6.52-6.52c-1.3 0-2.52.38-3.54 1.04l-1.12-1.68c1.39-.9 3.01-1.36 4.66-1.36z" />
-  </svg>
-);
-
-const RiotIcon: React.FC<{ className?: string }> = ({ className = "w-4 h-4" }) => (
-  <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
-    <path d="M13.8 2.3L2.4 8.7l2.8 11.2L8 18.6l-.9-3.7 1.6-.9.9 3.7 2.5-.8-.9-3.7 1.6-.9.9 3.7 2.5-.8-.9-3.7 1.6-.9.9 3.7 2.3-.7L21.6 3.8l-7.8-1.5zM2.4 20.7l6.8-2.2 4.1 3.2-8.4-1z" />
-  </svg>
-);
-
-const AmazonIcon: React.FC<{ className?: string }> = ({ className = "w-4 h-4" }) => (
-  <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
-    <path d="M13.9 12.3c-.1-.7-.4-1.2-.8-1.6-.5-.4-1.1-.6-1.9-.6-.9 0-1.6.3-2.1.8-.5.5-.8 1.1-.9 1.9.7 0 1.5-.1 2.3-.2.8-.1 1.7-.2 2.5-.3h.9v-.01zm2.3 4.2c-.3-.3-.5-.7-.5-1.2v-4.1c0-1.5-.4-2.7-1.3-3.6-.9-.9-2.2-1.4-3.9-1.4-1.2 0-2.3.2-3.2.7-.9.5-1.5 1.1-1.8 1.8l1.7 1.1c.4-.8 1.3-1.4 2.6-1.4 1 0 1.8.3 2.3.8.5.5.7 1.2.7 2.1v.4c-.9.1-1.9.2-2.9.4-1.1.2-2 .5-2.7 1-.7.5-1.1 1.2-1.1 2.1 0 .9.3 1.6 1 2.2.7.6 1.6.9 2.6.9 1.1 0 2-.3 2.8-1 .7-.7 1.1-1.4 1.3-2.1l.1.5v.3c0 .3.1.6.3.8.2.2.5.3.8.3.4 0 .8-.1 1.2-.3l-.4-1.5c-.2.1-.4.1-.5.1zm5.2 2.3C18.2 21 13.9 22 8.7 22c-4.4 0-8.2-1.5-11.5-4.4-.3-.2-.3-.6 0-.8.3-.3.8-.2 1.1 0 3 2.6 6.5 4 10.4 4 4.8 0 8.7-.9 11.8-2.8.4-.2.9-.1 1.1.3.2.4.1.9-.3 1.1v-.1zm-1.3-1.6c-.3-.4-1.7-.2-2.5-.1-.3 0-.3-.3 0-.5 1.7-1.1 3.6-.8 3.8-.5.3.3-.1 2.2-1.7 3.5-.2.2-.4.1-.4-.1.1-.9.7-1.9.8-2.3z" />
-  </svg>
-);
+import { PlatformIcon } from "./icons/PlatformIcons";
 
 export interface GamePlatformBadge {
   id: string;
@@ -126,7 +65,7 @@ function createBadgeForGame(g: Game): GamePlatformBadge {
       gameId: g.id,
       title: "Steam",
       label: "STEAM",
-      icon: <SteamIcon className="w-4 h-4 mx-auto text-slate-200" />,
+      icon: <PlatformIcon platform="steam" className="w-4 h-4 mx-auto" />,
       isInstalled: !!g.is_installed,
       gameInstance: g,
     };
@@ -136,7 +75,7 @@ function createBadgeForGame(g: Game): GamePlatformBadge {
       gameId: g.id,
       title: "Epic Games",
       label: "EPIC",
-      icon: <EpicIcon className="w-4 h-4 mx-auto text-slate-200" />,
+      icon: <PlatformIcon platform="epic" className="w-4 h-4 mx-auto" />,
       isInstalled: !!g.is_installed,
       gameInstance: g,
     };
@@ -146,7 +85,7 @@ function createBadgeForGame(g: Game): GamePlatformBadge {
       gameId: g.id,
       title: "GOG Galaxy",
       label: "GOG",
-      icon: <GogIcon className="w-4 h-4 mx-auto text-slate-200" />,
+      icon: <PlatformIcon platform="gog" className="w-4 h-4 mx-auto" />,
       isInstalled: !!g.is_installed,
       gameInstance: g,
     };
@@ -156,7 +95,7 @@ function createBadgeForGame(g: Game): GamePlatformBadge {
       gameId: g.id,
       title: "Battle.net",
       label: "BATTLE.NET",
-      icon: <BattleNetIcon className="w-4 h-4 mx-auto text-slate-200" />,
+      icon: <PlatformIcon platform="battlenet" className="w-4 h-4 mx-auto" />,
       isInstalled: !!g.is_installed,
       gameInstance: g,
     };
@@ -166,7 +105,7 @@ function createBadgeForGame(g: Game): GamePlatformBadge {
       gameId: g.id,
       title: "EA App",
       label: "EA APP",
-      icon: <EaIcon className="w-4 h-4 mx-auto text-slate-200" />,
+      icon: <PlatformIcon platform="ea" className="w-4 h-4 mx-auto" />,
       isInstalled: !!g.is_installed,
       gameInstance: g,
     };
@@ -176,7 +115,7 @@ function createBadgeForGame(g: Game): GamePlatformBadge {
       gameId: g.id,
       title: "Ubisoft Connect",
       label: "UBISOFT",
-      icon: <UbisoftIcon className="w-4 h-4 mx-auto text-slate-200" />,
+      icon: <PlatformIcon platform="ubisoft" className="w-4 h-4 mx-auto" />,
       isInstalled: !!g.is_installed,
       gameInstance: g,
     };
@@ -186,7 +125,7 @@ function createBadgeForGame(g: Game): GamePlatformBadge {
       gameId: g.id,
       title: "Riot Games",
       label: "RIOT",
-      icon: <RiotIcon className="w-4 h-4 mx-auto text-slate-200" />,
+      icon: <PlatformIcon platform="riot" className="w-4 h-4 mx-auto" />,
       isInstalled: !!g.is_installed,
       gameInstance: g,
     };
@@ -196,7 +135,7 @@ function createBadgeForGame(g: Game): GamePlatformBadge {
       gameId: g.id,
       title: "Amazon Games",
       label: "AMAZON",
-      icon: <AmazonIcon className="w-4 h-4 mx-auto text-slate-200" />,
+      icon: <PlatformIcon platform="amazon" className="w-4 h-4 mx-auto" />,
       isInstalled: !!g.is_installed,
       gameInstance: g,
     };
@@ -206,7 +145,7 @@ function createBadgeForGame(g: Game): GamePlatformBadge {
       gameId: g.id,
       title: "Xbox",
       label: "XBOX",
-      icon: <XboxIcon className="w-4 h-4 mx-auto text-slate-200" />,
+      icon: <PlatformIcon platform="xbox" className="w-4 h-4 mx-auto" />,
       isInstalled: !!g.is_installed,
       gameInstance: g,
     };
@@ -216,51 +155,352 @@ function createBadgeForGame(g: Game): GamePlatformBadge {
       gameId: g.id,
       title: "PlayStation",
       label: "PSN",
-      icon: <PlayStationIcon className="w-4 h-4 mx-auto text-slate-200" />,
+      icon: <PlatformIcon platform="psn" className="w-4 h-4 mx-auto" />,
       isInstalled: !!g.is_installed,
       gameInstance: g,
     };
-  } else if (src.includes("retro") || src === "emulation") {
+  } else if (src.includes("retroachievements") || src === "retro" || g.id.startsWith("ra_")) {
     return {
-      id: "retro",
+      id: "retroachievements",
       gameId: g.id,
-      title: "Retro / Emulated",
+      title: "RetroAchievements",
       label: "RETRO",
-      icon: <Gamepad2 className="w-4 h-4 mx-auto text-amber-300" />,
+      icon: <PlatformIcon platform="retroachievements" className="w-4 h-4 mx-auto" />,
       isInstalled: !!g.is_installed,
       gameInstance: g,
     };
   } else {
-    // Check if local game is actually a console / retro ROM
+    // Check if game is an emulated title or belongs to a specific console platform
     const platforms = (g.platforms || []).map((p) => p.toLowerCase().trim());
-    const isRetroConsole =
-      g.source.toLowerCase() === "emulation" ||
-      g.id.startsWith("ra_") ||
+    const emu = (g.emulator_id || "").toLowerCase();
+    const isEmulated =
+      src === "emulation" ||
+      g.id.startsWith("rom_") ||
+      Boolean(g.emulator_id) ||
       platforms.some((p) =>
         [
-          "retro",
-          "nintendo 64",
+          "switch",
+          "snes",
+          "nes",
           "n64",
-          "nintendo ds",
+          "gamecube",
           "game boy",
           "gba",
-          "snes",
-          "playstation 2",
+          "nds",
+          "3ds",
+          "wii",
+          "ps1",
           "ps2",
-          "nes",
+          "ps3",
+          "psp",
+          "psvita",
           "genesis",
-          "sega",
-          "megadrive",
+          "saturn",
+          "dreamcast",
+          "atari",
         ].some((c) => p.includes(c))
       );
 
-    if (isRetroConsole) {
+    if (isEmulated) {
+      // 1. Nintendo Switch
+      if (platforms.some((p) => p.includes("switch")) || emu.includes("switch")) {
+        return {
+          id: "switch",
+          gameId: g.id,
+          title: "Nintendo Switch",
+          label: "SWITCH",
+          icon: <PlatformIcon platform="switch" className="w-4 h-4 mx-auto" />,
+          isInstalled: !!g.is_installed,
+          gameInstance: g,
+        };
+      }
+      // 2. Super Nintendo (SNES)
+      if (
+        platforms.some((p) => p.includes("snes") || p.includes("super nintendo") || p.includes("super famicom")) ||
+        emu.includes("snes")
+      ) {
+        return {
+          id: "snes",
+          gameId: g.id,
+          title: "Super Nintendo",
+          label: "SNES",
+          icon: <PlatformIcon platform="snes" className="w-4 h-4 mx-auto" />,
+          isInstalled: !!g.is_installed,
+          gameInstance: g,
+        };
+      }
+      // 3. Nintendo Entertainment System (NES)
+      if (
+        platforms.some(
+          (p) =>
+            p === "nes" ||
+            p.includes("famicom") ||
+            p.includes("nintendo entertainment system")
+        ) ||
+        emu.includes("nes")
+      ) {
+        return {
+          id: "nes",
+          gameId: g.id,
+          title: "NES",
+          label: "NES",
+          icon: <PlatformIcon platform="nes" className="w-4 h-4 mx-auto" />,
+          isInstalled: !!g.is_installed,
+          gameInstance: g,
+        };
+      }
+      // 4. Nintendo 64
+      if (platforms.some((p) => p.includes("n64") || p.includes("nintendo 64")) || emu.includes("n64")) {
+        return {
+          id: "n64",
+          gameId: g.id,
+          title: "Nintendo 64",
+          label: "N64",
+          icon: <PlatformIcon platform="n64" className="w-4 h-4 mx-auto" />,
+          isInstalled: !!g.is_installed,
+          gameInstance: g,
+        };
+      }
+      // 5. Nintendo GameCube
+      if (platforms.some((p) => p.includes("gamecube") || p === "gc") || emu.includes("gamecube")) {
+        return {
+          id: "gamecube",
+          gameId: g.id,
+          title: "Nintendo GameCube",
+          label: "GAMECUBE",
+          icon: <PlatformIcon platform="gamecube" className="w-4 h-4 mx-auto" />,
+          isInstalled: !!g.is_installed,
+          gameInstance: g,
+        };
+      }
+      // 6. Nintendo Wii U
+      if (platforms.some((p) => p.includes("wii u") || p.includes("wiiu")) || emu.includes("wiiu")) {
+        return {
+          id: "wiiu",
+          gameId: g.id,
+          title: "Nintendo Wii U",
+          label: "WII U",
+          icon: <PlatformIcon platform="wiiu" className="w-4 h-4 mx-auto" />,
+          isInstalled: !!g.is_installed,
+          gameInstance: g,
+        };
+      }
+      // 7. Nintendo Wii
+      if (platforms.some((p) => p.includes("wii")) || emu.includes("wii")) {
+        return {
+          id: "wii",
+          gameId: g.id,
+          title: "Nintendo Wii",
+          label: "WII",
+          icon: <PlatformIcon platform="wii" className="w-4 h-4 mx-auto" />,
+          isInstalled: !!g.is_installed,
+          gameInstance: g,
+        };
+      }
+      // 8. Game Boy Advance
+      if (
+        platforms.some(
+          (p) =>
+            p.includes("gba") ||
+            p.includes("game boy advance") ||
+            p.includes("gameboy advance")
+        ) ||
+        emu.includes("gba")
+      ) {
+        return {
+          id: "gba",
+          gameId: g.id,
+          title: "Game Boy Advance",
+          label: "GBA",
+          icon: <PlatformIcon platform="gba" className="w-4 h-4 mx-auto" />,
+          isInstalled: !!g.is_installed,
+          gameInstance: g,
+        };
+      }
+      // 9. Game Boy / Color
+      if (
+        platforms.some(
+          (p) =>
+            p === "gb" ||
+            p === "gbc" ||
+            p.includes("game boy") ||
+            p.includes("gameboy")
+        ) ||
+        emu.includes("gb")
+      ) {
+        return {
+          id: "gb",
+          gameId: g.id,
+          title: "Game Boy",
+          label: "GAME BOY",
+          icon: <PlatformIcon platform="gb" className="w-4 h-4 mx-auto" />,
+          isInstalled: !!g.is_installed,
+          gameInstance: g,
+        };
+      }
+      // 10. Nintendo DS
+      if (
+        platforms.some(
+          (p) => p === "nds" || p === "ds" || p.includes("nintendo ds")
+        ) ||
+        emu.includes("ds") ||
+        emu.includes("nds")
+      ) {
+        return {
+          id: "nds",
+          gameId: g.id,
+          title: "Nintendo DS",
+          label: "NDS",
+          icon: <PlatformIcon platform="nds" className="w-4 h-4 mx-auto" />,
+          isInstalled: !!g.is_installed,
+          gameInstance: g,
+        };
+      }
+      // 11. Nintendo 3DS
+      if (platforms.some((p) => p.includes("3ds")) || emu.includes("3ds")) {
+        return {
+          id: "3ds",
+          gameId: g.id,
+          title: "Nintendo 3DS",
+          label: "3DS",
+          icon: <PlatformIcon platform="3ds" className="w-4 h-4 mx-auto" />,
+          isInstalled: !!g.is_installed,
+          gameInstance: g,
+        };
+      }
+      // 12. PlayStation 2
+      if (platforms.some((p) => p === "ps2" || p.includes("playstation 2")) || emu.includes("ps2")) {
+        return {
+          id: "ps2",
+          gameId: g.id,
+          title: "PlayStation 2",
+          label: "PS2",
+          icon: <PlatformIcon platform="ps2" className="w-4 h-4 mx-auto" />,
+          isInstalled: !!g.is_installed,
+          gameInstance: g,
+        };
+      }
+      // 13. PlayStation 3
+      if (platforms.some((p) => p === "ps3" || p.includes("playstation 3")) || emu.includes("ps3")) {
+        return {
+          id: "ps3",
+          gameId: g.id,
+          title: "PlayStation 3",
+          label: "PS3",
+          icon: <PlatformIcon platform="ps3" className="w-4 h-4 mx-auto" />,
+          isInstalled: !!g.is_installed,
+          gameInstance: g,
+        };
+      }
+      // 14. PlayStation Portable
+      if (platforms.some((p) => p === "psp" || p.includes("playstation portable")) || emu.includes("psp")) {
+        return {
+          id: "psp",
+          gameId: g.id,
+          title: "PlayStation Portable",
+          label: "PSP",
+          icon: <PlatformIcon platform="psp" className="w-4 h-4 mx-auto" />,
+          isInstalled: !!g.is_installed,
+          gameInstance: g,
+        };
+      }
+      // 15. PlayStation Vita
+      if (
+        platforms.some((p) => p === "psvita" || p === "vita" || p.includes("playstation vita") || p.includes("ps vita")) ||
+        emu.includes("vita")
+      ) {
+        return {
+          id: "psvita",
+          gameId: g.id,
+          title: "PlayStation Vita",
+          label: "PS VITA",
+          icon: <PlatformIcon platform="psvita" className="w-4 h-4 mx-auto" />,
+          isInstalled: !!g.is_installed,
+          gameInstance: g,
+        };
+      }
+      // 16. PlayStation 1
+      if (platforms.some((p) => p === "ps1" || p === "psx" || p.includes("playstation 1")) || emu.includes("ps1") || emu.includes("psx")) {
+        return {
+          id: "ps1",
+          gameId: g.id,
+          title: "PlayStation",
+          label: "PS1",
+          icon: <PlatformIcon platform="ps1" className="w-4 h-4 mx-auto" />,
+          isInstalled: !!g.is_installed,
+          gameInstance: g,
+        };
+      }
+      // 17. Sega Genesis
+      if (platforms.some((p) => p.includes("genesis") || p.includes("mega drive") || p.includes("megadrive")) || emu.includes("genesis")) {
+        return {
+          id: "genesis",
+          gameId: g.id,
+          title: "Sega Genesis",
+          label: "GENESIS",
+          icon: <PlatformIcon platform="genesis" className="w-4 h-4 mx-auto" />,
+          isInstalled: !!g.is_installed,
+          gameInstance: g,
+        };
+      }
+      // 18. Sega Saturn
+      if (platforms.some((p) => p.includes("saturn")) || emu.includes("saturn")) {
+        return {
+          id: "saturn",
+          gameId: g.id,
+          title: "Sega Saturn",
+          label: "SATURN",
+          icon: <PlatformIcon platform="saturn" className="w-4 h-4 mx-auto" />,
+          isInstalled: !!g.is_installed,
+          gameInstance: g,
+        };
+      }
+      // 19. Sega Dreamcast
+      if (platforms.some((p) => p.includes("dreamcast")) || emu.includes("dreamcast")) {
+        return {
+          id: "dreamcast",
+          gameId: g.id,
+          title: "Sega Dreamcast",
+          label: "DREAMCAST",
+          icon: <PlatformIcon platform="dreamcast" className="w-4 h-4 mx-auto" />,
+          isInstalled: !!g.is_installed,
+          gameInstance: g,
+        };
+      }
+      // 20. Atari
+      if (platforms.some((p) => p.includes("atari")) || emu.includes("atari")) {
+        return {
+          id: "atari",
+          gameId: g.id,
+          title: "Atari",
+          label: "ATARI",
+          icon: <PlatformIcon platform="atari" className="w-4 h-4 mx-auto" />,
+          isInstalled: !!g.is_installed,
+          gameInstance: g,
+        };
+      }
+      // 21. Xbox 360
+      if (platforms.some((p) => p.includes("360")) || emu.includes("360")) {
+        return {
+          id: "xbox360",
+          gameId: g.id,
+          title: "Xbox 360",
+          label: "XBOX 360",
+          icon: <PlatformIcon platform="xbox360" className="w-4 h-4 mx-auto" />,
+          isInstalled: !!g.is_installed,
+          gameInstance: g,
+        };
+      }
+
+      // Generic Emulation fallback with exact name
+      const consoleTitle = g.platforms?.[0] || "Emulation";
+      const consoleLabel = consoleTitle.toUpperCase().replace(/\s+/g, " ").slice(0, 10);
       return {
-        id: "retro",
+        id: `emu_${consoleLabel.toLowerCase().replace(/[^a-z0-9]/g, "_")}`,
         gameId: g.id,
-        title: "Retro / Console",
-        label: "RETRO",
-        icon: <Gamepad2 className="w-4 h-4 mx-auto text-amber-300" />,
+        title: consoleTitle,
+        label: consoleLabel,
+        icon: <PlatformIcon platform={consoleTitle} className="w-4 h-4 mx-auto" />,
         isInstalled: !!g.is_installed,
         gameInstance: g,
       };
@@ -271,7 +511,7 @@ function createBadgeForGame(g: Game): GamePlatformBadge {
       gameId: g.id,
       title: "PC (Local)",
       label: "LOCAL PC",
-      icon: <Monitor className="w-4 h-4 mx-auto text-slate-200" />,
+      icon: <PlatformIcon platform="local" className="w-4 h-4 mx-auto" />,
       isInstalled: !!g.is_installed,
       gameInstance: g,
     };
@@ -310,7 +550,7 @@ export function getGamePlatformBadges(
       gameId: game.id,
       title: "RetroAchievements",
       label: "RETRO",
-      icon: <Gamepad2 className="w-4 h-4 mx-auto text-amber-300" />,
+      icon: <PlatformIcon platform="retroachievements" className="w-4 h-4 mx-auto text-amber-300" />,
       isInstalled: false, // Cloud linked platform
       gameInstance: game,
     });
@@ -357,6 +597,7 @@ interface GameDetailsProps {
   onToggleSource?: (source: string) => void;
   trailerAutoplay?: boolean;
   trailerMuted?: boolean;
+  lastPlayedDateFormat?: "date_and_time" | "date_only";
 }
 
 export const GameDetails: React.FC<GameDetailsProps> = ({
@@ -384,6 +625,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
   onToggleSource,
   trailerAutoplay = true,
   trailerMuted = true,
+  lastPlayedDateFormat = "date_and_time",
 }) => {
   const [activeTab, setActiveTab] = useState<"overview" | "achievements" | "news">("overview");
   const [isExitModalOpen, setIsExitModalOpen] = useState(false);
@@ -760,7 +1002,10 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
   };
 
   return (
-    <div className="relative flex-1 w-full h-full bg-transparent overflow-hidden select-text font-sans">
+    <div
+      data-theme-part="game-details"
+      className="relative flex-1 w-full h-full bg-transparent overflow-hidden select-text font-sans"
+    >
       {/* Static bottom-fade mask wrapper (kept off the scrolling element so GPU tiled scroll compositing stays fast) */}
       <div
         className="w-full h-[calc(100%-80px)] overflow-hidden"
@@ -777,10 +1022,15 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
           className="w-full h-full overflow-y-auto pb-10"
         >
         {/* Top Hero Header - Strictly 96/31 Aspect Ratio & 50% Opacity Mask Fading */}
-        <div className="relative w-full aspect-[96/31] select-none mb-[100px]">
+        <div
+          data-theme-part="hero-banner"
+          style={{ aspectRatio: "var(--theme-hero-aspect, 96 / 31)" }}
+          className="relative w-full select-none mb-[100px]"
+        >
           {/* Background Hero Art with Pure Alpha Mask Fading & Seamless Dual-Layer Morphing */}
           {(currentHero || prevHero) ? (
             <div
+              data-theme-part="hero-backdrop"
               className="absolute inset-0 translate-y-[10px] pointer-events-none overflow-hidden"
               style={{
                 WebkitMaskImage:
@@ -856,11 +1106,18 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
             </div>
           ) : null}
 
-          {/* Prominent Title Logo Positioned in Top-Left (Target 500px wide, max 200px tall) */}
+          {/* Prominent Title Logo Scaled Responsively Against Hero Banner (Max 50% width, 65% height) */}
           {logoSrc ? (
             <div
               key={`logo_${game.id}`}
-              className="absolute top-[30px] left-6 lg:top-[38px] lg:left-8 z-20 pointer-events-auto w-[500px] max-w-[calc(100%-48px)] max-h-[200px] flex items-start animate-game-switch"
+              data-theme-part="hero-title-logo"
+              className="absolute top-[30px] left-6 lg:top-[38px] lg:left-8 z-20 pointer-events-auto flex items-start animate-game-switch"
+              style={{
+                width: "var(--theme-logo-max-w, 50%)",
+                maxWidth: "var(--theme-logo-max-w, 50%)",
+                height: "var(--theme-logo-max-h, 65%)",
+                maxHeight: "var(--theme-logo-max-h, 65%)",
+              }}
             >
               {logoSrc.endsWith(".webm") || logoSrc.endsWith(".mp4") ? (
                 <video
@@ -869,14 +1126,14 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                   loop
                   muted
                   playsInline
-                  className="w-[500px] max-w-full max-h-[200px] h-auto object-contain object-left drop-shadow-[0_6px_24px_rgba(0,0,0,0.95)]"
+                  className="w-full h-full max-w-full max-h-full object-contain object-left-top drop-shadow-[0_6px_24px_rgba(0,0,0,0.95)]"
                 />
               ) : (
                 <img
                   src={logoSrc}
                   alt={game.title}
                   decoding="async"
-                  className="w-[500px] max-w-full max-h-[200px] h-auto object-contain object-left drop-shadow-[0_6px_24px_rgba(0,0,0,0.95)]"
+                  className="w-full h-full max-w-full max-h-full object-contain object-left-top drop-shadow-[0_6px_24px_rgba(0,0,0,0.95)]"
                   onError={(e) => {
                     (e.target as HTMLElement).style.display = "none";
                   }}
@@ -888,6 +1145,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
           {/* Foreground Header Content: Shifted ~100px Down from Bottom of Hero */}
           <div
             key={`header_${game.id}`}
+            data-theme-part="hero-meta"
             className="absolute inset-0 translate-y-[100px] px-6 lg:px-8 pb-4 flex items-end justify-between gap-6 z-10 pointer-events-none animate-game-switch"
           >
             {/* Left Column: Title + Ratings + Genres */}
@@ -907,7 +1165,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                     }}
                   />
                 ) : (
-                  <Gamepad2 className="w-3.5 h-3.5 text-slate-300 shrink-0" />
+                  <PlatformIcon platform={game.platforms?.[0] || game.source} className="w-3.5 h-3.5 text-slate-300 shrink-0" />
                 )}
                 <h1 className="text-sm sm:text-base font-bold uppercase tracking-wider text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)] truncate">
                   {game.title}
@@ -1006,7 +1264,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
             {/* Right Column: Action Widgets (Horizontal) + Anchored Cover Poster (200px wide, no line border) */}
             <div className="flex items-end space-x-3 shrink-0 pointer-events-auto">
               {/* Horizontal Widget Action Buttons (IN-GAME, PLATFORMS, VIDEO ON side-by-side with subtle line border & opacity) */}
-              <div className="flex items-center space-x-2 justify-end pb-0.5">
+              <div data-theme-part="platform-cells" className="flex items-center space-x-2 justify-end pb-0.5">
                 {/* Live In-Game Player Count Box */}
                 {playerCount !== null && (
                   <div
@@ -1114,7 +1372,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                   )
                 ) : (
                   <div className="w-full h-full flex flex-col items-center justify-center text-slate-500 p-2 text-center">
-                    <Gamepad2 className="w-8 h-8 mb-1" />
+                    <PlatformIcon platform={game.platforms?.[0] || game.source} className="w-8 h-8 mb-1" />
                     <span className="text-[10px]">No Poster</span>
                   </div>
                 )}
@@ -1224,7 +1482,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
             )}
 
             {/* Content Tabs Navigation: Clean Playnite Style with White Underline */}
-            <div className="border-b border-white/10 flex items-center space-x-8 select-none pt-2">
+            <div data-theme-part="details-tabs" className="border-b border-white/10 flex items-center space-x-8 select-none pt-2">
               <button
                 onClick={() => setActiveTab("overview")}
                 className={`pb-3 text-xs font-bold uppercase tracking-wider transition-all cursor-pointer relative ${
@@ -1360,9 +1618,9 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                                   <span
                                     className="px-2.5 py-0.5 rounded-full font-extrabold text-[10px] tracking-wider uppercase border"
                                     style={{
-                                      backgroundColor: "color-mix(in srgb, var(--app-accent-color, #a855f7) 20%, transparent)",
-                                      borderColor: "color-mix(in srgb, var(--app-accent-color, #a855f7) 35%, transparent)",
-                                      color: "var(--app-accent-color, #a855f7)",
+                                      backgroundColor: "color-mix(in srgb, var(--app-accent-color, #783efe) 20%, transparent)",
+                                      borderColor: "color-mix(in srgb, var(--app-accent-color, #783efe) 35%, transparent)",
+                                      color: "var(--app-accent-color, #783efe)",
                                     }}
                                   >
                                     {featured.category || "MAJOR UPDATE"}
@@ -1391,7 +1649,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                               <div className="pt-2 flex items-center justify-between">
                                 <span
                                   className="text-xs font-bold flex items-center space-x-1.5"
-                                  style={{ color: "var(--app-accent-color, #a855f7)" }}
+                                  style={{ color: "var(--app-accent-color, #783efe)" }}
                                 >
                                   <span>Read Full Changelog</span>
                                   <span>→</span>
@@ -1469,7 +1727,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                                   <div className="pt-2 flex items-center justify-between border-t border-white/5 text-[11px]">
                                     <span
                                       className="font-medium hover:underline"
-                                      style={{ color: "var(--app-accent-color, #a855f7)" }}
+                                      style={{ color: "var(--app-accent-color, #783efe)" }}
                                     >
                                       View Article
                                     </span>
@@ -1582,7 +1840,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                     <span>Recent Activity</span>
                   </span>
                   <span className="text-slate-300 font-mono text-right truncate">
-                    {activeGame.last_played || (activeGame.playtime_seconds > 0 ? "Played (Date unknown)" : "Never")}
+                    {formatLastPlayed(activeGame.last_played, lastPlayedDateFormat)}
                   </span>
                 </div>
 
@@ -1733,7 +1991,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
       </div>
 
       {/* Floating Bottom Stats & Action Launch Bar - Exactly matching Playnite FusionX: No Black Box, No Border Line, Scaled Controls (~200x48 Play button, w-12 buttons, large stats) */}
-      <div className="absolute bottom-0 inset-x-0 h-20 px-6 lg:px-8 pb-4 flex items-end justify-between select-none z-30 pointer-events-none bg-transparent">
+      <div data-theme-part="floating-action-bar" className="absolute bottom-0 inset-x-0 h-20 px-6 lg:px-8 pb-4 flex items-end justify-between select-none z-30 pointer-events-none bg-transparent">
         {/* Left Side: Stats (Completion Status, Last Played, Time Played - Clean and Scaled to Match Bottom Bar Enlargement) */}
         <div
           key={`stats_${activeGame.id}`}
@@ -1768,7 +2026,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
             <div>
               <div className="text-xs text-slate-400 uppercase font-bold tracking-wider">Last Played</div>
               <div className="font-extrabold text-slate-100 font-mono text-base">
-                {activeGame.last_played || (activeGame.playtime_seconds > 0 ? "Played (Date unknown)" : "Never")}
+                {formatLastPlayed(activeGame.last_played, lastPlayedDateFormat)}
               </div>
             </div>
           </div>
@@ -2109,11 +2367,11 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
       {isExitModalOpen && (
         <div
           onClick={() => setIsExitModalOpen(false)}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 backdrop-blur-sm p-4 animate-in fade-in duration-150"
+          className="fixed inset-0 z-50 flex items-center justify-center theme-modal-backdrop p-4 animate-in fade-in duration-150"
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-sm theme-panel-surface border border-white/15 rounded-2xl p-5 shadow-2xl space-y-4 text-center select-none"
+            className="w-full max-w-sm theme-modal-container rounded-2xl p-5 shadow-2xl space-y-4 text-center select-none"
           >
             <div className="w-12 h-12 rounded-full bg-rose-500/15 border border-rose-500/30 text-rose-400 flex items-center justify-center mx-auto shadow-md">
               <Square className="w-5 h-5 fill-rose-400" />

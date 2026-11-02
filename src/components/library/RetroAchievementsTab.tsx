@@ -10,11 +10,11 @@ import {
   Check,
   CheckCircle2,
   AlertCircle,
-  Gamepad2,
   Clock,
   KeyRound,
   Trash2,
 } from "lucide-react";
+import { PlatformIcon } from "../icons/PlatformIcons";
 
 interface RetroAchievementsTabProps {
   config: AppConfig;
@@ -213,7 +213,7 @@ export const RetroAchievementsTab: React.FC<RetroAchievementsTabProps> = ({
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
           <div className="p-3 rounded-lg bg-[#111420] border border-[#1d2232] space-y-1">
             <div className="font-semibold text-slate-200 flex items-center space-x-1.5">
-              <Gamepad2 className="w-3.5 h-3.5 text-amber-400" />
+              <PlatformIcon platform="retroachievements" className="w-3.5 h-3.5 text-amber-400" />
               <span>Full Played History</span>
             </div>
             <p className="text-[10px] text-slate-400 leading-relaxed">

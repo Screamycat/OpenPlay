@@ -48,6 +48,7 @@ export const ThemesManagerModal: React.FC<ThemesManagerModalProps> = ({
   // In-App Config Editor state
   const [editingTheme, setEditingTheme] = useState<ThemeInfo | null>(null);
   const [configForm, setConfigForm] = useState<Record<string, any>>({});
+  const [selectedSettingCategory, setSelectedSettingCategory] = useState<string>("All");
   const [isSavingConfig, setIsSavingConfig] = useState(false);
 
   useEffect(() => {
@@ -141,6 +142,7 @@ export const ThemesManagerModal: React.FC<ThemesManagerModalProps> = ({
 
   const handleOpenConfigEditor = (theme: ThemeInfo) => {
     setEditingTheme(theme);
+    setSelectedSettingCategory("All");
     // Initialize config form with saved values or defaults
     const initialConfig: Record<string, any> = {};
     if (theme.manifest.settings) {
@@ -211,7 +213,7 @@ export const ThemesManagerModal: React.FC<ThemesManagerModalProps> = ({
         className="theme-modal-container rounded-2xl w-full max-w-6xl h-[90vh] flex flex-col overflow-hidden text-zinc-100 z-10"
       >
         {/* Top Header */}
-        <div className="px-6 py-4 border-b border-white/10 flex items-center justify-between bg-white/[0.02] shrink-0">
+        <div className="px-6 py-4 theme-modal-header shrink-0">
           <div className="flex items-center space-x-3">
             <div className="w-9 h-9 rounded-xl bg-purple-500/15 border border-purple-500/30 flex items-center justify-center theme-accent-text">
               <Palette className="w-5 h-5" />
@@ -519,6 +521,9 @@ export const ThemesManagerModal: React.FC<ThemesManagerModalProps> = ({
                       src={resolveImageSrc(currentSlide)}
                       alt={`Preview ${activeSlideIndex + 1}`}
                       className="w-full h-full object-contain"
+                      onError={(e) => {
+                        console.warn("Theme preview failed to load:", currentSlide, e);
+                      }}
                     />
 
                     {/* Expand / Lightbox overlay button */}
@@ -603,7 +608,7 @@ export const ThemesManagerModal: React.FC<ThemesManagerModalProps> = ({
       {/* Lightbox Modal */}
       {lightboxImage && (
         <div
-          className="fixed inset-0 z-60 bg-black/95 backdrop-blur-xl flex items-center justify-center p-4 cursor-pointer"
+          className="fixed inset-0 z-60 theme-modal-backdrop flex items-center justify-center p-4 cursor-pointer"
           onClick={() => setLightboxImage(null)}
         >
           <div className="relative max-w-6xl max-h-[92vh] w-full flex items-center justify-center">
@@ -653,16 +658,59 @@ export const ThemesManagerModal: React.FC<ThemesManagerModalProps> = ({
               </button>
             </div>
 
-            {/* Dynamic Settings Fields */}
-            <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
-              {editingTheme.manifest.settings?.map((setting) => {
-                const currentVal = configForm[setting.id];
+            {/* Category Filter Pills (if theme defines categories) */}
+            {(() => {
+              const cats = Array.from(
+                new Set(
+                  (editingTheme.manifest.settings || [])
+                    .map((s) => s.category?.trim())
+                    .filter((c): c is string => Boolean(c))
+                )
+              );
+              if (cats.length <= 1) return null;
 
-                return (
-                  <div key={setting.id} className="space-y-1.5 p-3 rounded-xl bg-white/[0.03] border border-white/5">
-                    <label className="text-xs font-semibold text-zinc-200 block">
-                      {setting.label}
-                    </label>
+              return (
+                <div className="flex items-center space-x-1.5 overflow-x-auto pb-1 text-xs">
+                  {["All", ...cats].map((cat) => (
+                    <button
+                      key={cat}
+                      type="button"
+                      onClick={() => setSelectedSettingCategory(cat)}
+                      className={`px-3 py-1 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
+                        selectedSettingCategory === cat
+                          ? "theme-accent-btn"
+                          : "bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white border border-white/5"
+                      }`}
+                    >
+                      {cat}
+                    </button>
+                  ))}
+                </div>
+              );
+            })()}
+
+            {/* Dynamic Settings Fields */}
+            <div className="space-y-4 max-h-[58vh] overflow-y-auto pr-1">
+              {editingTheme.manifest.settings
+                ?.filter((setting) => {
+                  if (selectedSettingCategory === "All") return true;
+                  return (setting.category || "").trim() === selectedSettingCategory;
+                })
+                .map((setting) => {
+                  const currentVal = configForm[setting.id];
+
+                  return (
+                    <div key={setting.id} className="space-y-1.5 p-3 rounded-xl bg-white/[0.03] border border-white/5">
+                      <div>
+                        <label className="text-xs font-semibold text-zinc-200 block">
+                          {setting.label}
+                        </label>
+                        {setting.description && (
+                          <p className="text-[10px] text-zinc-400 mt-0.5 leading-snug">
+                            {setting.description}
+                          </p>
+                        )}
+                      </div>
 
                     {setting.type === "boolean" && (
                       <button
@@ -712,7 +760,7 @@ export const ThemesManagerModal: React.FC<ThemesManagerModalProps> = ({
                       <div className="flex items-center space-x-2">
                         <input
                           type="color"
-                          value={currentVal || "#a855f7"}
+                          value={currentVal || "#783efe"}
                           onChange={(e) =>
                             setConfigForm((prev) => ({
                               ...prev,
@@ -723,7 +771,7 @@ export const ThemesManagerModal: React.FC<ThemesManagerModalProps> = ({
                         />
                         <input
                           type="text"
-                          value={currentVal || "#a855f7"}
+                          value={currentVal || "#783efe"}
                           onChange={(e) =>
                             setConfigForm((prev) => ({
                               ...prev,

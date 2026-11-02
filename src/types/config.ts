@@ -22,6 +22,7 @@ export interface AppConfig {
   close_to_tray?: boolean;
   merge_duplicates?: boolean;
   unmerged_game_ids?: string[];
+  last_played_date_format?: "date_and_time" | "date_only";
 
   // Appearance
   active_theme_id?: string;
@@ -33,7 +34,7 @@ export interface AppConfig {
   card_border_radius?: string; // e.g. "Rounded (16px)"
   enable_card_glow?: boolean;
   glass_intensity?: string; // e.g. "Standard (24px)"
-  accent_color?: string; // hex color e.g. #a855f7
+  accent_color?: string; // hex color e.g. #783efe
   panel_tint?: string; // hex color e.g. #0e0e11
 
   // Playback & Media
@@ -102,9 +103,10 @@ export const DEFAULT_APP_CONFIG: AppConfig = {
   card_border_radius: "Rounded (16px)",
   enable_card_glow: true,
   glass_intensity: "Standard (24px)",
-  accent_color: "#a855f7",
+  accent_color: "#783efe",
   panel_tint: "#0e0e11",
   trailer_autoplay: true,
   trailer_muted: true,
   steamgriddb_nsfw: false,
+  last_played_date_format: "date_and_time",
 };

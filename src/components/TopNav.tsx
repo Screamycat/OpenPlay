@@ -130,6 +130,7 @@ export const TopNav: React.FC<TopNavProps> = ({
 
   return (
     <header
+      data-theme-part="top-nav"
       data-tauri-drag-region
       onDoubleClick={handleHeaderDoubleClick}
       className="h-14 bg-black/25 backdrop-blur-xl border-b border-white/10 px-4 flex items-center justify-between select-none z-30 gap-3 shadow-lg"
@@ -141,6 +142,7 @@ export const TopNav: React.FC<TopNavProps> = ({
       >
         <button
           onClick={onToggleDrawer}
+          data-theme-part="nav-brand"
           title="Open Menu & Library Manager"
           className="flex items-center space-x-2 px-2.5 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-slate-200 hover:text-white transition-all group shadow-sm cursor-pointer"
         >
@@ -155,7 +157,7 @@ export const TopNav: React.FC<TopNavProps> = ({
         </button>
 
         {/* 1. Filters (All / Installed / Uninstalled / Down Arrow dropdown) */}
-        <div ref={filterContainerRef} className="relative">
+        <div ref={filterContainerRef} data-theme-part="nav-filters" className="relative">
           <div className="flex items-center bg-black/40 rounded-lg p-0.5 border border-white/10 text-xs">
             <button
               onClick={() => onStatusFilterChange("all")}
@@ -238,9 +240,9 @@ export const TopNav: React.FC<TopNavProps> = ({
                 title="Currently showing only hidden games. Click to view all games."
                 className="ml-1 px-2 py-0.5 rounded-md border font-bold text-[10px] tracking-wider uppercase flex items-center space-x-1 cursor-pointer transition-all shadow-sm"
                 style={{
-                  backgroundColor: "color-mix(in srgb, var(--app-accent-color, #a855f7) 22%, transparent)",
-                  borderColor: "color-mix(in srgb, var(--app-accent-color, #a855f7) 45%, transparent)",
-                  color: "var(--app-accent-color, #a855f7)",
+                  backgroundColor: "color-mix(in srgb, var(--app-accent-color, #783efe) 22%, transparent)",
+                  borderColor: "color-mix(in srgb, var(--app-accent-color, #783efe) 45%, transparent)",
+                  color: "var(--app-accent-color, #783efe)",
                 }}
               >
                 <EyeOff className="w-3 h-3" />
@@ -253,9 +255,9 @@ export const TopNav: React.FC<TopNavProps> = ({
                 title="Currently viewing hidden games. Click to hide them again."
                 className="ml-1 px-2 py-0.5 rounded-md border font-bold text-[10px] tracking-wider uppercase flex items-center space-x-1 cursor-pointer transition-all"
                 style={{
-                  backgroundColor: "color-mix(in srgb, var(--app-accent-color, #a855f7) 20%, transparent)",
-                  borderColor: "color-mix(in srgb, var(--app-accent-color, #a855f7) 40%, transparent)",
-                  color: "var(--app-accent-color, #a855f7)",
+                  backgroundColor: "color-mix(in srgb, var(--app-accent-color, #783efe) 20%, transparent)",
+                  borderColor: "color-mix(in srgb, var(--app-accent-color, #783efe) 40%, transparent)",
+                  color: "var(--app-accent-color, #783efe)",
                 }}
               >
                 <Eye className="w-3 h-3" />
@@ -305,7 +307,7 @@ export const TopNav: React.FC<TopNavProps> = ({
         />
 
         {/* 3. Search Input Box */}
-        <div className="relative">
+        <div data-theme-part="nav-search" className="relative">
           <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
           <input
             type="text"
@@ -333,6 +335,7 @@ export const TopNav: React.FC<TopNavProps> = ({
 
       {/* Right: View Mode Toggle, Settings & Windows Controls */}
       <div
+        data-theme-part="nav-controls"
         className="flex items-center space-x-2 shrink-0"
         onMouseDown={(e) => e.stopPropagation()}
       >
@@ -343,8 +346,8 @@ export const TopNav: React.FC<TopNavProps> = ({
             title={`OpenPlay v${availableUpdate.latest_version} available. Click to view changelog and update.`}
             className="flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-bold cursor-pointer transition-all shadow-xs hover:scale-102 active:scale-98 animate-in fade-in"
             style={{
-              backgroundColor: "color-mix(in srgb, var(--app-accent-color, #a855f7) 18%, transparent)",
-              borderColor: "color-mix(in srgb, var(--app-accent-color, #a855f7) 45%, transparent)",
+              backgroundColor: "color-mix(in srgb, var(--app-accent-color, #783efe) 18%, transparent)",
+              borderColor: "color-mix(in srgb, var(--app-accent-color, #783efe) 45%, transparent)",
               color: "white",
             }}
           >
@@ -360,9 +363,9 @@ export const TopNav: React.FC<TopNavProps> = ({
             title="Open Achievement Hub"
             className="flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg bg-amber-400/10 hover:bg-amber-400/20 text-amber-300 border border-amber-400/30 transition-all cursor-pointer text-xs font-bold shadow-xs group"
           >
-            <Trophy className="w-3.5 h-3.5 text-amber-400 group-hover:scale-110 transition-transform" />
-            <span>Lv {hunterLevel || 1}</span>
-            <span className="text-[10px] text-amber-200/70 font-mono font-normal">
+            <Trophy className="w-3.5 h-3.5 text-amber-400 group-hover:scale-110 transition-transform shrink-0" />
+            <span className="leading-none flex items-center">Lv {hunterLevel || 1}</span>
+            <span className="text-[10px] text-amber-200/70 font-mono font-normal leading-none flex items-center pt-[1.5px]">
               • {hunterScore ? hunterScore.toLocaleString() : 0} pts
             </span>
           </button>

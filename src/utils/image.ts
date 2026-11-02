@@ -38,7 +38,9 @@ export function resolveImageSrc(pathOrUrl?: string): string | undefined {
     return pathOrUrl;
   }
   try {
-    return convertFileSrc(pathOrUrl);
+    // Normalize Windows backslashes to forward slashes to avoid Edge Webview2 %5C URL encoding issues
+    const normalized = pathOrUrl.replace(/\\/g, "/");
+    return convertFileSrc(normalized);
   } catch (err) {
     console.warn("Could not convert local file src:", pathOrUrl, err);
     return pathOrUrl;

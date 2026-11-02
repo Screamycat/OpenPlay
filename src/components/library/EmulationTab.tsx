@@ -4,7 +4,6 @@ import { ConfiguredConsole } from "../../types/emulator";
 import { Game } from "../../types/game";
 import { AddConsoleWizardModal } from "./AddConsoleWizardModal";
 import {
-  Gamepad2,
   FolderOpen,
   Plus,
   RefreshCw,
@@ -15,6 +14,7 @@ import {
   Sparkles,
   ExternalLink,
 } from "lucide-react";
+import { PlatformIcon } from "../icons/PlatformIcons";
 
 interface EmulationTabProps {
   onGameAdded?: (game: Game) => void;
@@ -113,7 +113,7 @@ export const EmulationTab: React.FC<EmulationTabProps> = ({
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/10 pb-4">
         <div>
           <h3 className="text-lg font-bold text-white flex items-center space-x-2">
-            <Gamepad2 className="w-5 h-5 theme-accent-text" />
+            <PlatformIcon platform="emulation" className="w-5 h-5 theme-accent-text" />
             <span>Emulators & Consoles</span>
           </h3>
           <p className="text-xs text-slate-400 mt-0.5">
@@ -166,7 +166,7 @@ export const EmulationTab: React.FC<EmulationTabProps> = ({
         /* Empty State */
         <div className="p-12 border border-dashed border-white/10 rounded-3xl text-center space-y-4 bg-white/[0.01]">
           <div className="w-16 h-16 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center mx-auto text-zinc-500 shadow-inner">
-            <Gamepad2 className="w-8 h-8" />
+            <PlatformIcon platform="emulation" className="w-8 h-8" />
           </div>
           <div className="space-y-1.5 max-w-md mx-auto">
             <h4 className="text-base font-bold text-white">No Retro Consoles Configured</h4>
@@ -206,7 +206,7 @@ export const EmulationTab: React.FC<EmulationTabProps> = ({
                   <div className="flex items-start justify-between">
                     <div className="flex items-center space-x-3">
                       <div className="w-10 h-10 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center theme-accent-text shadow-sm">
-                        <Gamepad2 className="w-5 h-5" />
+                        <PlatformIcon platform={conf.name} className="w-5 h-5" />
                       </div>
                       <div>
                         <h4 className="text-sm font-bold text-white leading-tight">
@@ -272,7 +272,7 @@ export const EmulationTab: React.FC<EmulationTabProps> = ({
                     className="px-3.5 py-1.5 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-semibold flex items-center space-x-1.5 transition-colors cursor-pointer active:scale-95 disabled:opacity-50"
                   >
                     <RefreshCw className={`w-3.5 h-3.5 ${isScanning ? "animate-spin" : ""}`} />
-                    <span>{isScanning ? "Scanning..." : "Rescan Folder"}</span>
+                    <span>{isScanning ? "Scanning..." : "Scan Folder"}</span>
                   </button>
                 </div>
               </div>

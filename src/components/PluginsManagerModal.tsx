@@ -191,7 +191,7 @@ export const PluginsManagerModal: React.FC<PluginsManagerModalProps> = ({
         className="theme-modal-container rounded-2xl w-full max-w-5xl h-[88vh] flex flex-col overflow-hidden text-zinc-100 z-10"
       >
         {/* Top Header */}
-        <div className="px-6 py-4 border-b border-white/10 flex items-center justify-between bg-white/[0.02] shrink-0">
+        <div className="px-6 py-4 theme-modal-header shrink-0">
           <div className="flex items-center space-x-3">
             <div className="w-9 h-9 rounded-xl bg-blue-500/15 border border-blue-500/30 flex items-center justify-center text-blue-400">
               <Blocks className="w-5 h-5" />

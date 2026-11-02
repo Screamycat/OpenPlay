@@ -6,14 +6,26 @@
     --bg-secondary: rgba(18, 20, 28, 0.75);
     --bg-card: rgba(22, 25, 36, 0.65);
     --bg-hover: rgba(255, 255, 255, 0.08);
-    --accent: #a855f7;
-    --app-accent-color: #a855f7;
+    --accent: #783efe;
+    --app-accent-color: #783efe;
     --app-panel-tint: #0e0e11;
     --modal-backdrop-opacity: 45%;
     --modal-backdrop-blur: 8px;
     --border-color: rgba(255, 255, 255, 0.08);
     --text-primary: #f8fafc;
     --text-muted: #94a3b8;
+    --theme-logo-max-w: 50%;
+    --theme-logo-max-h: 65%;
+    --theme-card-aspect: 2 / 3;
+    --theme-card-radius: 16px;
+    --theme-card-glow: 1;
+    --theme-hero-aspect: 96 / 31;
+    --theme-glass-blur: 24px;
+    --theme-surface-card: rgba(255, 255, 255, 0.035);
+    --theme-surface-card-hover: rgba(255, 255, 255, 0.07);
+    --theme-surface-input: rgba(0, 0, 0, 0.35);
+    --theme-border-color: rgba(255, 255, 255, 0.08);
+    --theme-border-color-subtle: rgba(255, 255, 255, 0.04);
   }
 
   /* Dynamic Theme Classes driven by user config */
@@ -35,45 +47,71 @@
     background-color: color-mix(in srgb, var(--app-panel-tint, #0e0e11) 94%, transparent) !important;
     backdrop-filter: blur(24px) !important;
     -webkit-backdrop-filter: blur(24px) !important;
-    border-color: rgba(255, 255, 255, 0.1) !important;
+    border: 1px solid var(--theme-border-color, rgba(255, 255, 255, 0.1)) !important;
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.85) !important;
   }
 
+  .theme-modal-header {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    border-bottom: 1px solid var(--theme-border-color, rgba(255, 255, 255, 0.08)) !important;
+    background-color: rgba(0, 0, 0, 0.25) !important;
+  }
+
+  .theme-surface-card {
+    background-color: var(--theme-surface-card) !important;
+    border: 1px solid var(--theme-border-color) !important;
+  }
+
+  .theme-surface-input {
+    background-color: var(--theme-surface-input) !important;
+    border: 1px solid var(--theme-border-color) !important;
+  }
+
+  .theme-border {
+    border-color: var(--theme-border-color) !important;
+  }
+
+  .theme-border-subtle {
+    border-color: var(--theme-border-color-subtle) !important;
+  }
+
   .theme-accent-bg {
-    background-color: var(--app-accent-color, #a855f7) !important;
+    background-color: var(--app-accent-color, #783efe) !important;
   }
 
   .theme-accent-text {
-    color: var(--app-accent-color, #a855f7) !important;
+    color: var(--app-accent-color, #783efe) !important;
   }
 
   .theme-accent-border {
-    border-color: var(--app-accent-color, #a855f7) !important;
+    border-color: var(--app-accent-color, #783efe) !important;
   }
 
   .theme-accent-subtle-bg {
-    background-color: color-mix(in srgb, var(--app-accent-color, #a855f7) 16%, transparent) !important;
+    background-color: color-mix(in srgb, var(--app-accent-color, #783efe) 16%, transparent) !important;
   }
 
   .theme-accent-subtle-border {
-    border-color: color-mix(in srgb, var(--app-accent-color, #a855f7) 30%, transparent) !important;
+    border-color: color-mix(in srgb, var(--app-accent-color, #783efe) 30%, transparent) !important;
   }
 
   .theme-accent-pill {
-    background-color: color-mix(in srgb, var(--app-accent-color, #a855f7) 18%, transparent) !important;
-    border-color: color-mix(in srgb, var(--app-accent-color, #a855f7) 35%, transparent) !important;
-    color: var(--app-accent-color, #a855f7) !important;
+    background-color: color-mix(in srgb, var(--app-accent-color, #783efe) 18%, transparent) !important;
+    border-color: color-mix(in srgb, var(--app-accent-color, #783efe) 35%, transparent) !important;
+    color: var(--app-accent-color, #783efe) !important;
   }
 
   .theme-accent-btn {
-    background-color: var(--app-accent-color, #a855f7) !important;
+    background-color: var(--app-accent-color, #783efe) !important;
     color: #ffffff !important;
-    box-shadow: 0 4px 14px 0 color-mix(in srgb, var(--app-accent-color, #a855f7) 30%, transparent);
+    box-shadow: 0 4px 14px 0 color-mix(in srgb, var(--app-accent-color, #783efe) 30%, transparent);
     transition: all 0.15s ease;
   }
   .theme-accent-btn:hover {
     filter: brightness(1.12);
-    box-shadow: 0 6px 20px 0 color-mix(in srgb, var(--app-accent-color, #a855f7) 45%, transparent);
+    box-shadow: 0 6px 20px 0 color-mix(in srgb, var(--app-accent-color, #783efe) 45%, transparent);
   }
   .theme-accent-btn:active {
     filter: brightness(0.95);
@@ -83,16 +121,16 @@
   .theme-accent-focus:focus,
   .theme-accent-focus:focus-visible {
     outline: none !important;
-    border-color: var(--app-accent-color, #a855f7) !important;
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--app-accent-color, #a855f7) 35%, transparent) !important;
+    border-color: var(--app-accent-color, #783efe) !important;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--app-accent-color, #783efe) 35%, transparent) !important;
   }
 
   .theme-accent-ring {
-    --tw-ring-color: color-mix(in srgb, var(--app-accent-color, #a855f7) 50%, transparent) !important;
+    --tw-ring-color: color-mix(in srgb, var(--app-accent-color, #783efe) 50%, transparent) !important;
   }
 
   .theme-accent-glow {
-    box-shadow: 0 0 16px color-mix(in srgb, var(--app-accent-color, #a855f7) 35%, transparent) !important;
+    box-shadow: 0 0 16px color-mix(in srgb, var(--app-accent-color, #783efe) 35%, transparent) !important;
   }
 
   body {

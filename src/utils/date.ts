@@ -79,3 +79,63 @@ export function formatUnlockDate(raw?: string | null, shortOnly: boolean = false
 
   return s;
 }
+
+function toIsoDate(d: Date): string {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function toIsoTime(d: Date): string {
+  const hours = String(d.getHours()).padStart(2, "0");
+  const minutes = String(d.getMinutes()).padStart(2, "0");
+  return `${hours}:${minutes}`;
+}
+
+/**
+ * Formats a game's last_played timestamp according to user preference ("date_and_time" or "date_only").
+ * Outputs strict ISO format "YYYY-MM-DD" or "YYYY-MM-DD • HH:mm" for clean visual consistency.
+ * Handles Unix epoch timestamps, ISO 8601 strings, and space-separated strings.
+ */
+export function formatLastPlayed(
+  raw?: string | null,
+  formatMode: "date_and_time" | "date_only" = "date_and_time"
+): string {
+  if (!raw || !raw.trim()) return "Never";
+  const s = raw.trim();
+
+  // 1. Unix epoch numeric string (seconds or milliseconds)
+  if (/^\d{9,13}$/.test(s)) {
+    const num = parseInt(s, 10);
+    const ms = num < 1e11 ? num * 1000 : num;
+    const d = new Date(ms);
+    if (!isNaN(d.getTime())) {
+      if (formatMode === "date_only") {
+        return toIsoDate(d);
+      }
+      return `${toIsoDate(d)} • ${toIsoTime(d)}`;
+    }
+  }
+
+  // 2. Standard ISO 8601 / RFC 3339 or parseable date string
+  const d = new Date(s);
+  if (!isNaN(d.getTime())) {
+    const hasTime = s.includes("T") || (s.includes(":") && !s.startsWith("http"));
+    if (formatMode === "date_and_time" && hasTime) {
+      return `${toIsoDate(d)} • ${toIsoTime(d)}`;
+    }
+    return toIsoDate(d);
+  }
+
+  // 3. Fallback: Clean up ISO strings with 'T' and microseconds
+  if (s.includes("T")) {
+    const parts = s.split("T");
+    const datePart = parts[0];
+    const timePart = parts[1] ? parts[1].split(".")[0].replace("Z", "").slice(0, 5) : "";
+    return formatMode === "date_only" || !timePart ? datePart : `${datePart} • ${timePart}`;
+  }
+
+  return s;
+}
+

@@ -60,7 +60,12 @@ A blazing-fast, cross-platform sanctuary for your entire game collection built o
 ---
 
 ### 🕹️ Native Emulation & Smart ROM Scanner
-*Seamlessly manage your retro collection alongside modern PC titles. OpenPlay automatically detects installed standalone emulators (Dolphin, PCSX2, DuckStation, RPCS3, mGBA, PPSSPP, Cemu, Ryujinx) and RetroArch Libretro cores. Point to any ROM directory: OpenPlay strips dump release tags, deduplicates multi-track `.bin` files, matches console platforms, and extracts local boxart or scrapes from SteamGridDB.*
+*Seamlessly manage your retro collection alongside modern PC titles. OpenPlay automatically detects installed standalone emulators (Dolphin, PCSX2, DuckStation, RPCS3, mGBA, PPSSPP, Cemu, Ryujinx, Eden) and RetroArch Libretro cores. Point to any ROM directory: OpenPlay strips dump release tags, deduplicates multi-track `.bin` files, matches console platforms with dedicated hardware badges, and extracts local boxart or scrapes from SteamGridDB.*
+
+---
+
+### 🎨 Modular Theme Engine & In-App Customization
+*Personalize OpenPlay with live stylesheet hot-reloading and modular theme extensions. Tweak geometry (poster corner radius, card aspect ratios, logo scaling constraints), smoke tints, and accent colors with real-time CSS variable bindings, or drop in custom `.zip` theme packages that overhaul the interface into console-inspired layouts (like a Nintendo Switch UI).*
 
 ---
 

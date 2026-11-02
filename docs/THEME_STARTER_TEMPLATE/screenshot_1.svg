@@ -1,10 +1,42 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 675" fill="none">
-  <rect width="1200" height="675" fill="#080c10"/>
-  <rect x="30" y="30" width="240" height="615" rx="16" fill="#0d1117" stroke="#ffffff15"/>
-  <rect x="290" y="30" width="880" height="615" rx="16" fill="#0d1117" stroke="#ffffff15"/>
-  <rect x="320" y="60" width="150" height="220" rx="12" fill="#06b6d425" stroke="#06b6d460"/>
-  <rect x="490" y="60" width="150" height="220" rx="12" fill="#3b82f625" stroke="#3b82f660"/>
-  <rect x="660" y="60" width="150" height="220" rx="12" fill="#10b98125" stroke="#10b98160"/>
-  <text x="590" y="440" font-family="sans-serif" font-size="28" font-weight="bold" fill="#ffffff" text-anchor="middle">Starter Theme — Library Grid View</text>
-  <text x="590" y="480" font-family="sans-serif" font-size="16" fill="#64748b" text-anchor="middle">Cyan &amp; Deep Teal Accents</text>
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="675" viewBox="0 0 1200 675" fill="none">
+  <rect width="1200" height="675" fill="#090a0f"/>
+  <rect x="24" y="24" width="220" height="627" rx="16" fill="#12141c" stroke="#ffffff" stroke-opacity="0.1"/>
+  <rect x="44" y="50" width="180" height="36" rx="10" fill="#783efe" fill-opacity="0.2" stroke="#783efe" stroke-opacity="0.5"/>
+  <text x="90" y="73" font-family="Segoe UI, sans-serif" font-size="13" font-weight="bold" fill="#ffffff">All Games (128)</text>
+  <rect x="44" y="96" width="180" height="32" rx="8" fill="#ffffff" fill-opacity="0.04"/>
+  <text x="90" y="117" font-family="Segoe UI, sans-serif" font-size="12" fill="#a1a1aa">Steam (84)</text>
+  <rect x="44" y="136" width="180" height="32" rx="8" fill="#ffffff" fill-opacity="0.04"/>
+  <text x="90" y="157" font-family="Segoe UI, sans-serif" font-size="12" fill="#a1a1aa">Nintendo Switch (14)</text>
+  <rect x="44" y="176" width="180" height="32" rx="8" fill="#ffffff" fill-opacity="0.04"/>
+  <text x="90" y="197" font-family="Segoe UI, sans-serif" font-size="12" fill="#a1a1aa">Epic Games (18)</text>
+
+  <rect x="264" y="24" width="912" height="627" rx="16" fill="#12141c" stroke="#ffffff" stroke-opacity="0.1"/>
+  <rect x="288" y="46" width="340" height="38" rx="12" fill="#181b26" stroke="#ffffff" stroke-opacity="0.08"/>
+  <text x="324" y="70" font-family="Segoe UI, sans-serif" font-size="13" fill="#71717a">Search games, genres, developers...</text>
+  <rect x="1040" y="46" width="112" height="38" rx="12" fill="#783efe" stroke="#783efe"/>
+  <text x="1096" y="69" font-family="Segoe UI, sans-serif" font-size="12" font-weight="bold" fill="#ffffff" text-anchor="middle">Scan All</text>
+
+  <rect x="288" y="108" width="160" height="240" rx="16" fill="#181b26" stroke="#783efe" stroke-width="2"/>
+  <rect x="300" y="120" width="136" height="180" rx="12" fill="#783efe" fill-opacity="0.25"/>
+  <text x="368" y="324" font-family="Segoe UI, sans-serif" font-size="12" font-weight="bold" fill="#ffffff" text-anchor="middle">Hades II</text>
+
+  <rect x="468" y="108" width="160" height="240" rx="16" fill="#181b26" stroke="#ffffff" stroke-opacity="0.08"/>
+  <rect x="480" y="120" width="136" height="180" rx="12" fill="#3b82f6" fill-opacity="0.2"/>
+  <text x="548" y="324" font-family="Segoe UI, sans-serif" font-size="12" font-weight="bold" fill="#ffffff" text-anchor="middle">Cyberpunk 2077</text>
+
+  <rect x="648" y="108" width="160" height="240" rx="16" fill="#181b26" stroke="#ffffff" stroke-opacity="0.08"/>
+  <rect x="660" y="120" width="136" height="180" rx="12" fill="#10b981" fill-opacity="0.2"/>
+  <text x="728" y="324" font-family="Segoe UI, sans-serif" font-size="12" font-weight="bold" fill="#ffffff" text-anchor="middle">Metroid Dread</text>
+
+  <rect x="828" y="108" width="160" height="240" rx="16" fill="#181b26" stroke="#ffffff" stroke-opacity="0.08"/>
+  <rect x="840" y="120" width="136" height="180" rx="12" fill="#f59e0b" fill-opacity="0.2"/>
+  <text x="908" y="324" font-family="Segoe UI, sans-serif" font-size="12" font-weight="bold" fill="#ffffff" text-anchor="middle">Elden Ring</text>
+
+  <rect x="1008" y="108" width="144" height="240" rx="16" fill="#181b26" stroke="#ffffff" stroke-opacity="0.08"/>
+  <rect x="1020" y="120" width="120" height="180" rx="12" fill="#ec4899" fill-opacity="0.2"/>
+  <text x="1080" y="324" font-family="Segoe UI, sans-serif" font-size="12" font-weight="bold" fill="#ffffff" text-anchor="middle">Chrono Trigger</text>
+
+  <text x="720" y="480" font-family="Segoe UI, sans-serif" font-size="30" font-weight="bold" fill="#ffffff" text-anchor="middle">Unified Gaming Workspace</text>
+  <text x="720" y="520" font-family="Segoe UI, sans-serif" font-size="15" fill="#a1a1aa" text-anchor="middle">Multi-storefront merging, real-time sync, and fluid glassmorphic styling</text>
 </svg>

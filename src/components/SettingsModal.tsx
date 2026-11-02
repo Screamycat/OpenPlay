@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   X,
   Sliders,
@@ -66,6 +66,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     (initialTab as SettingsTab) || "general"
   );
   const [activeTheme, setActiveTheme] = useState<ThemeInfo | null>(null);
+  const [appearanceCategory, setAppearanceCategory] = useState<string>("All");
   const [formConfig, setFormConfig] = useState<AppConfig>({
     ...DEFAULT_APP_CONFIG,
     ...initialConfig,
@@ -191,7 +192,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   }, [initialConfig, isOpen]);
 
-  if (!isOpen) return null;
+  const appearanceCategories = useMemo(() => {
+    if (!activeTheme?.manifest?.settings) return [];
+    const set = new Set<string>();
+    for (const s of activeTheme.manifest.settings) {
+      if (s.category && s.category.trim()) {
+        set.add(s.category.trim());
+      }
+    }
+    return Array.from(set);
+  }, [activeTheme]);
 
   const updateField = <K extends keyof AppConfig>(key: K, value: AppConfig[K]) => {
     const updated = { ...formConfig, [key]: value };
@@ -202,17 +212,25 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   };
 
   const updateAppearanceSetting = (key: string, value: any) => {
-    // 1. Update formConfig & appConfig
-    const updated = { ...formConfig, [key]: value };
+    // 1. Map specialized values for AppConfig if needed
+    let appConfigVal = value;
+    if (key === "view_mode") {
+      if (value === "Split View") appConfigVal = "split";
+      else if (value === "Full Grid") appConfigVal = "grid";
+      else if (value === "Table List") appConfigVal = "list";
+    }
+
+    // 2. Update formConfig & appConfig
+    const updated = { ...formConfig, [key]: appConfigVal };
     setFormConfig(updated);
     onSaveConfig(updated);
     setIsSavedNotice(true);
     setTimeout(() => setIsSavedNotice(false), 2000);
 
-    // 2. Also save to activeTheme config and apply live
+    // 3. Also save to activeTheme config and apply live
     if (activeTheme) {
       const updatedConfigValues = {
-        ...activeTheme.config_values,
+        ...(activeTheme.config_values || {}),
         [key]: value,
       };
       const updatedTheme: ThemeInfo = {
@@ -237,6 +255,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     { id: "backup", label: "Backups & Data", icon: Archive },
     { id: "about", label: "About OpenPlay", icon: Info },
   ] as const;
+
+  if (!isOpen) return null;
 
   return (
     <div
@@ -448,6 +468,40 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     />
                   </label>
                 </div>
+
+                {/* Display & Formatting */}
+                <div className="pt-2">
+                  <h3 className="text-xs font-bold text-white uppercase tracking-wider mb-1">
+                    Display & Formatting
+                  </h3>
+                  <p className="text-[11px] text-zinc-400">
+                    Customize how dates, timestamps, and metadata are presented across your library.
+                  </p>
+                </div>
+
+                <div className="space-y-3 bg-white/[0.02] border border-white/5 rounded-xl p-4">
+                  {/* Date & Time Display Format */}
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5 pr-4">
+                      <div className="font-semibold text-zinc-200">
+                        Date & Time Display
+                      </div>
+                      <div className="text-[11px] text-zinc-500">
+                        Choose whether last played timestamps display date only or include the clock time.
+                      </div>
+                    </div>
+                    <select
+                      value={formConfig.last_played_date_format ?? "date_and_time"}
+                      onChange={(e) =>
+                        updateField("last_played_date_format", e.target.value as "date_and_time" | "date_only")
+                      }
+                      className="bg-zinc-800 border border-zinc-700 text-xs text-white rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-zinc-500 shrink-0 cursor-pointer"
+                    >
+                      <option value="date_and_time">Date + Time (e.g. Nov 2, 2026 • 14:30)</option>
+                      <option value="date_only">Date Only (e.g. Nov 2, 2026)</option>
+                    </select>
+                  </div>
+                </div>
               </div>
             )}
 
@@ -514,301 +568,221 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   </div>
                 )}
 
-                {/* Theme Config Settings */}
-                <div className="space-y-4 bg-white/[0.02] border border-white/5 rounded-xl p-4">
-                  {/* Default View Mode */}
-                  <div className="space-y-1.5">
-                    <label className="font-semibold text-zinc-200 text-xs">Default View Mode</label>
-                    <div className="grid grid-cols-3 gap-2">
-                      {(["split", "grid", "list"] as const).map((m) => (
-                        <button
-                          key={m}
-                          type="button"
-                          onClick={() => updateAppearanceSetting("view_mode", m)}
-                          className={`py-2 px-3 rounded-lg border text-xs font-semibold capitalize transition-all cursor-pointer ${
-                            (formConfig.view_mode || "split") === m
-                              ? "bg-white text-zinc-950 border-white font-bold"
-                              : "bg-white/5 border-white/10 text-zinc-300 hover:bg-white/10"
-                          }`}
-                        >
-                          {m === "split" ? "Split View" : m === "grid" ? "Full Grid" : "Table List"}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="border-t border-white/5" />
-
-                  {/* Theme Accent Color */}
-                  <div className="space-y-2">
-                    <div className="flex justify-between items-center">
-                      <div>
-                        <label className="font-semibold text-zinc-200 text-xs block">Theme Accent Color</label>
-                        <span className="text-[11px] text-zinc-400">
-                          Highlights, focus rings, badges, and primary interactive accents
-                        </span>
-                      </div>
-                      <span className="font-mono text-zinc-300 text-xs px-2 py-0.5 rounded bg-white/5 border border-white/10">
-                        {formConfig.accent_color || "#a855f7"}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2 flex-wrap pt-1">
-                      {[
-                        { name: "Purple", hex: "#a855f7" },
-                        { name: "Cyan", hex: "#06b6d4" },
-                        { name: "Blue", hex: "#3b82f6" },
-                        { name: "Emerald", hex: "#10b981" },
-                        { name: "Amber", hex: "#f59e0b" },
-                        { name: "Rose", hex: "#f43f5e" },
-                        { name: "White", hex: "#ffffff" },
-                      ].map((preset) => {
-                        const isSelected =
-                          (formConfig.accent_color || "#a855f7").toLowerCase() ===
-                          preset.hex.toLowerCase();
-                        return (
-                          <button
-                            key={preset.hex}
-                            type="button"
-                            onClick={() => updateAppearanceSetting("accent_color", preset.hex)}
-                            title={preset.name}
-                            className={`w-7 h-7 rounded-full transition-all cursor-pointer flex items-center justify-center border ${
-                              isSelected
-                                ? "ring-2 ring-white ring-offset-2 ring-offset-black scale-110 border-white"
-                                : "border-white/20 hover:scale-105"
-                            }`}
-                            style={{ backgroundColor: preset.hex }}
-                          >
-                            {isSelected && (
-                              <Check
-                                className={`w-3.5 h-3.5 ${
-                                  preset.hex === "#ffffff" ? "text-black" : "text-white"
-                                }`}
-                              />
-                            )}
-                          </button>
-                        );
-                      })}
-                      {/* Custom color picker */}
-                      <label className="relative w-7 h-7 rounded-full border border-white/20 hover:border-white/40 cursor-pointer overflow-hidden flex items-center justify-center bg-white/5 transition-all">
-                        <input
-                          type="color"
-                          value={formConfig.accent_color || "#a855f7"}
-                          onChange={(e) => updateAppearanceSetting("accent_color", e.target.value)}
-                          className="opacity-0 absolute inset-0 w-full h-full cursor-pointer"
-                        />
-                        <Palette className="w-3.5 h-3.5 text-zinc-400" />
-                      </label>
-                    </div>
-                  </div>
-
-                  <div className="border-t border-white/5" />
-
-                  {/* Panel Background Tint */}
-                  <div className="space-y-2">
-                    <div className="flex justify-between items-center">
-                      <div>
-                        <label className="font-semibold text-zinc-200 text-xs block">Panel Tint & Windows Background</label>
-                        <span className="text-[11px] text-zinc-400">
-                          Base background shade applied to dialogs, menus, and side panes
-                        </span>
-                      </div>
-                      <span className="font-mono text-zinc-300 text-xs px-2 py-0.5 rounded bg-white/5 border border-white/10">
-                        {formConfig.panel_tint || "#0e0e11"}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2 flex-wrap pt-1">
-                      {[
-                        { name: "Greyish Black", hex: "#0e0e11" },
-                        { name: "Onyx", hex: "#070709" },
-                        { name: "Midnight Navy", hex: "#0a0d17" },
-                        { name: "Charcoal", hex: "#14151b" },
-                        { name: "Slate", hex: "#0f172a" },
-                      ].map((preset) => {
-                        const isSelected =
-                          (formConfig.panel_tint || "#0e0e11").toLowerCase() ===
-                          preset.hex.toLowerCase();
-                        return (
-                          <button
-                            key={preset.hex}
-                            type="button"
-                            onClick={() => updateAppearanceSetting("panel_tint", preset.hex)}
-                            title={preset.name}
-                            className={`w-7 h-7 rounded-full transition-all cursor-pointer flex items-center justify-center border ${
-                              isSelected
-                                ? "ring-2 ring-white ring-offset-2 ring-offset-black scale-110 border-white"
-                                : "border-white/20 hover:scale-105"
-                            }`}
-                            style={{ backgroundColor: preset.hex }}
-                          >
-                            {isSelected && <Check className="w-3.5 h-3.5 text-white" />}
-                          </button>
-                        );
-                      })}
-                      {/* Custom tint picker */}
-                      <label className="relative w-7 h-7 rounded-full border border-white/20 hover:border-white/40 cursor-pointer overflow-hidden flex items-center justify-center bg-white/5 transition-all">
-                        <input
-                          type="color"
-                          value={formConfig.panel_tint || "#0e0e11"}
-                          onChange={(e) => updateAppearanceSetting("panel_tint", e.target.value)}
-                          className="opacity-0 absolute inset-0 w-full h-full cursor-pointer"
-                        />
-                        <Palette className="w-3.5 h-3.5 text-zinc-400" />
-                      </label>
-                    </div>
-                  </div>
-
-                  <div className="border-t border-white/5" />
-
-                  {/* Card Corner Radius */}
-                  <div className="space-y-1.5">
-                    <label className="font-semibold text-zinc-200 text-xs">Game Card Corner Radius</label>
-                    <div className="grid grid-cols-3 gap-2">
-                      {["Sleek (8px)", "Rounded (16px)", "Ultra Rounded (24px)"].map((radius) => (
-                        <button
-                          key={radius}
-                          type="button"
-                          onClick={() => updateAppearanceSetting("card_border_radius", radius)}
-                          className={`py-2 px-3 rounded-lg border text-xs font-semibold transition-all cursor-pointer ${
-                            (formConfig.card_border_radius || "Rounded (16px)") === radius
-                              ? "bg-white text-zinc-950 border-white font-bold"
-                              : "bg-white/5 border-white/10 text-zinc-300 hover:bg-white/10"
-                          }`}
-                        >
-                          {radius}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="border-t border-white/5" />
-
-                  {/* Card Glow & Glass Intensity */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div className="space-y-1.5">
-                      <label className="font-semibold text-zinc-200 text-xs">Card Hover Glow</label>
+                {/* Category Filter Tabs (Mirroring theme.json categories) */}
+                {appearanceCategories.length > 0 && (
+                  <div className="flex items-center space-x-1.5 overflow-x-auto pb-1 text-xs">
+                    {["All", ...appearanceCategories].map((cat) => (
                       <button
+                        key={cat}
                         type="button"
-                        onClick={() =>
-                          updateAppearanceSetting(
-                            "enable_card_glow",
-                            !(formConfig.enable_card_glow ?? true)
-                          )
-                        }
-                        className={`w-full py-2 px-3 rounded-lg border text-xs font-semibold flex items-center justify-between transition-colors cursor-pointer ${
-                          formConfig.enable_card_glow ?? true
-                            ? "theme-accent-subtle-bg theme-accent-subtle-border text-white"
-                            : "bg-white/5 border-white/10 text-zinc-400 hover:text-white"
+                        onClick={() => setAppearanceCategory(cat)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
+                          appearanceCategory === cat
+                            ? "theme-accent-btn shadow-md text-white font-bold"
+                            : "bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white border border-white/5"
                         }`}
                       >
-                        <span>{formConfig.enable_card_glow ?? true ? "Enabled" : "Disabled"}</span>
-                        {(formConfig.enable_card_glow ?? true) && (
-                          <Check className="w-3.5 h-3.5 theme-accent-text" />
-                        )}
+                        {cat}
                       </button>
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <label className="font-semibold text-zinc-200 text-xs">Glassmorphism Intensity</label>
-                      <div className="grid grid-cols-3 gap-1">
-                        {["Subtle (12px)", "Standard (24px)", "Intense (48px)"].map((intensity) => (
-                          <button
-                            key={intensity}
-                            type="button"
-                            onClick={() => updateAppearanceSetting("glass_intensity", intensity)}
-                            className={`py-2 px-1 text-center rounded-lg border text-[11px] font-semibold truncate transition-all cursor-pointer ${
-                              (formConfig.glass_intensity || "Standard (24px)") === intensity
-                                ? "bg-white text-zinc-950 border-white font-bold"
-                                : "bg-white/5 border-white/10 text-zinc-300 hover:bg-white/10"
-                            }`}
-                          >
-                            {intensity.split(" ")[0]}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
+                    ))}
                   </div>
+                )}
 
-                  <div className="border-t border-white/5" />
+                {/* Theme Config Settings (Mirroring Active Theme theme.json) */}
+                <div className="space-y-4 bg-white/[0.02] border border-white/5 rounded-xl p-4">
+                  {activeTheme?.manifest.settings && activeTheme.manifest.settings.length > 0 ? (
+                    activeTheme.manifest.settings
+                      .filter((setting) => {
+                        if (appearanceCategory === "All") return true;
+                        return (setting.category || "").trim() === appearanceCategory;
+                      })
+                      .map((setting, idx) => {
+                        const currentVal =
+                          activeTheme?.config_values?.[setting.id] !== undefined
+                            ? activeTheme.config_values[setting.id]
+                            : setting.default;
 
-                  {/* Background Blur Slider */}
-                  <div className="space-y-2">
-                    <div className="flex justify-between">
-                      <label className="font-semibold text-zinc-200 text-xs">Dynamic Background Blur</label>
-                      <span className="font-mono text-zinc-400 text-xs">{formConfig.background_blur ?? 32}px</span>
+                        return (
+                          <React.Fragment key={setting.id}>
+                            {idx > 0 && <div className="border-t border-white/5" />}
+
+                            <div className="space-y-2">
+                              {/* Label, Description & Current Value Readout */}
+                              <div className="flex justify-between items-start gap-4">
+                                <div>
+                                  <label className="font-semibold text-zinc-200 text-xs block">
+                                    {setting.label}
+                                  </label>
+                                  {setting.description && (
+                                    <span className="text-[11px] text-zinc-400 block mt-0.5 leading-snug">
+                                      {setting.description}
+                                    </span>
+                                  )}
+                                </div>
+                                <span className="font-mono text-zinc-300 text-xs px-2 py-0.5 rounded bg-white/5 border border-white/10 shrink-0">
+                                  {setting.type === "color"
+                                    ? String(currentVal || setting.default || "")
+                                    : setting.type === "boolean"
+                                    ? currentVal ? "Enabled" : "Disabled"
+                                    : setting.type === "number"
+                                    ? (setting.min !== undefined && setting.min >= 0 && setting.max !== undefined && setting.max <= 1)
+                                      ? `${Math.round(Number(currentVal || 0) * 100)}%`
+                                      : (setting.label || "").includes("Blur")
+                                      ? `${currentVal}px`
+                                      : (setting.label || "").includes("%")
+                                      ? `${currentVal}%`
+                                      : String(currentVal ?? "")
+                                    : String(currentVal ?? "")}
+                                </span>
+                              </div>
+
+                              {/* Control: Color */}
+                              {setting.type === "color" && (
+                                <div className="flex items-center gap-2 flex-wrap pt-1">
+                                  {(setting.id === "panel_tint"
+                                    ? [
+                                        { name: "Greyish Black", hex: "#0e0e11" },
+                                        { name: "Onyx", hex: "#070709" },
+                                        { name: "Midnight Navy", hex: "#0a0d17" },
+                                        { name: "Charcoal", hex: "#14151b" },
+                                        { name: "Slate", hex: "#0f172a" },
+                                      ]
+                                    : [
+                                        { name: "Purple", hex: "#783efe" },
+                                        { name: "Cyan", hex: "#06b6d4" },
+                                        { name: "Blue", hex: "#3b82f6" },
+                                        { name: "Emerald", hex: "#10b981" },
+                                        { name: "Amber", hex: "#f59e0b" },
+                                        { name: "Rose", hex: "#f43f5e" },
+                                        { name: "White", hex: "#ffffff" },
+                                      ]
+                                  ).map((preset) => {
+                                    const isSelected =
+                                      String(currentVal || "").toLowerCase() ===
+                                      preset.hex.toLowerCase();
+                                    return (
+                                      <button
+                                        key={preset.hex}
+                                        type="button"
+                                        onClick={() => updateAppearanceSetting(setting.id, preset.hex)}
+                                        title={preset.name}
+                                        className={`w-7 h-7 rounded-full transition-all cursor-pointer flex items-center justify-center border ${
+                                          isSelected
+                                            ? "ring-2 ring-white ring-offset-2 ring-offset-black scale-110 border-white"
+                                            : "border-white/20 hover:scale-105"
+                                        }`}
+                                        style={{ backgroundColor: preset.hex }}
+                                      >
+                                        {isSelected && (
+                                          <Check
+                                            className={`w-3.5 h-3.5 ${
+                                              preset.hex === "#ffffff" ? "text-black" : "text-white"
+                                            }`}
+                                          />
+                                        )}
+                                      </button>
+                                    );
+                                  })}
+
+                                  {/* Native Custom Color Picker Swatch */}
+                                  <label className="relative w-7 h-7 rounded-full border border-white/20 hover:border-white/40 cursor-pointer overflow-hidden flex items-center justify-center bg-white/5 transition-all">
+                                    <input
+                                      type="color"
+                                      value={currentVal || setting.default || "#783efe"}
+                                      onChange={(e) => updateAppearanceSetting(setting.id, e.target.value)}
+                                      className="opacity-0 absolute inset-0 w-full h-full cursor-pointer"
+                                    />
+                                    <Palette className="w-3.5 h-3.5 text-zinc-400" />
+                                  </label>
+                                </div>
+                              )}
+
+                              {/* Control: Select */}
+                              {setting.type === "select" && setting.options && (
+                                <div
+                                  className={`grid gap-2 ${
+                                    setting.options.length <= 3
+                                      ? "grid-cols-3"
+                                      : setting.options.length === 4
+                                      ? "grid-cols-2 sm:grid-cols-4"
+                                      : "grid-cols-1 sm:grid-cols-3"
+                                  }`}
+                                >
+                                  {setting.options.map((opt) => {
+                                    const isSelected = String(currentVal) === opt;
+                                    return (
+                                      <button
+                                        key={opt}
+                                        type="button"
+                                        onClick={() => updateAppearanceSetting(setting.id, opt)}
+                                        className={`py-2 px-2.5 rounded-xl border text-xs font-semibold truncate transition-all cursor-pointer ${
+                                          isSelected
+                                            ? "bg-white text-zinc-950 border-white font-bold shadow-md"
+                                            : "bg-white/5 border-white/10 text-zinc-300 hover:bg-white/10 hover:text-white"
+                                        }`}
+                                      >
+                                        {opt}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              )}
+
+                              {/* Control: Boolean */}
+                              {setting.type === "boolean" && (
+                                <button
+                                  type="button"
+                                  onClick={() => updateAppearanceSetting(setting.id, !Boolean(currentVal))}
+                                  className={`w-full py-2.5 px-3 rounded-xl border text-xs font-semibold flex items-center justify-between transition-colors cursor-pointer ${
+                                    currentVal
+                                      ? "theme-accent-subtle-bg theme-accent-subtle-border text-white"
+                                      : "bg-white/5 border-white/10 text-zinc-400 hover:text-white"
+                                  }`}
+                                >
+                                  <span>{currentVal ? "Enabled" : "Disabled"}</span>
+                                  {currentVal && <Check className="w-3.5 h-3.5 theme-accent-text" />}
+                                </button>
+                              )}
+
+                              {/* Control: Number Slider */}
+                              {setting.type === "number" && (
+                                <div className="pt-1">
+                                  <input
+                                    type="range"
+                                    min={setting.min ?? 0}
+                                    max={setting.max ?? 100}
+                                    step={setting.step ?? 1}
+                                    value={currentVal ?? setting.default}
+                                    onChange={(e) =>
+                                      updateAppearanceSetting(setting.id, Number(e.target.value))
+                                    }
+                                    className="w-full h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer accent-white"
+                                  />
+                                  <div className="flex justify-between text-[10px] text-zinc-500 font-mono mt-1">
+                                    <span>{setting.min ?? 0}</span>
+                                    <span>{setting.max ?? 100}</span>
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Control: Text */}
+                              {setting.type === "text" && (
+                                <input
+                                  type="text"
+                                  value={currentVal || ""}
+                                  onChange={(e) => updateAppearanceSetting(setting.id, e.target.value)}
+                                  className="w-full bg-[#161a29] border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-[var(--app-accent-color)]"
+                                />
+                              )}
+                            </div>
+                          </React.Fragment>
+                        );
+                      })
+                  ) : (
+                    <div className="py-8 text-center text-zinc-500 text-xs">
+                      No configurable settings found for this theme.
                     </div>
-                    <input
-                      type="range"
-                      min="0"
-                      max="64"
-                      step="4"
-                      value={formConfig.background_blur ?? 32}
-                      onChange={(e) => updateAppearanceSetting("background_blur", Number(e.target.value))}
-                      className="w-full h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer accent-white"
-                    />
-                  </div>
-
-                  <div className="border-t border-white/5" />
-
-                  {/* Background Opacity Slider */}
-                  <div className="space-y-2">
-                    <div className="flex justify-between">
-                      <label className="font-semibold text-zinc-200 text-xs">Background Dimming Opacity</label>
-                      <span className="font-mono text-zinc-400 text-xs">
-                        {Math.round((formConfig.background_opacity ?? 0.75) * 100)}%
-                      </span>
-                    </div>
-                    <input
-                      type="range"
-                      min="0.2"
-                      max="1.0"
-                      step="0.05"
-                      value={formConfig.background_opacity ?? 0.75}
-                      onChange={(e) => updateAppearanceSetting("background_opacity", Number(e.target.value))}
-                      className="w-full h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer accent-white"
-                    />
-                  </div>
-
-                  <div className="border-t border-white/5" />
-
-                  {/* Modal Backdrop Dimming Opacity Slider */}
-                  <div className="space-y-2">
-                    <div className="flex justify-between">
-                      <label className="font-semibold text-zinc-200 text-xs">Modal Backdrop Dimming Opacity</label>
-                      <span className="font-mono text-zinc-400 text-xs">
-                        {Math.round((formConfig.modal_backdrop_opacity ?? 0.45) * 100)}%
-                      </span>
-                    </div>
-                    <input
-                      type="range"
-                      min="0.2"
-                      max="0.9"
-                      step="0.05"
-                      value={formConfig.modal_backdrop_opacity ?? 0.45}
-                      onChange={(e) => updateAppearanceSetting("modal_backdrop_opacity", Number(e.target.value))}
-                      className="w-full h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer accent-white"
-                    />
-                  </div>
-
-                  <div className="border-t border-white/5" />
-
-                  {/* Modal Backdrop Blur Intensity Slider */}
-                  <div className="space-y-2">
-                    <div className="flex justify-between">
-                      <label className="font-semibold text-zinc-200 text-xs">Modal Backdrop Blur Intensity</label>
-                      <span className="font-mono text-zinc-400 text-xs">
-                        {formConfig.modal_backdrop_blur ?? 8}px
-                      </span>
-                    </div>
-                    <input
-                      type="range"
-                      min="0"
-                      max="32"
-                      step="2"
-                      value={formConfig.modal_backdrop_blur ?? 8}
-                      onChange={(e) => updateAppearanceSetting("modal_backdrop_blur", Number(e.target.value))}
-                      className="w-full h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer accent-white"
-                    />
-                  </div>
+                  )}
                 </div>
               </div>
             )}
@@ -1094,8 +1068,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           <span
                             className="text-[10px] px-2 py-0.5 rounded-full font-mono font-bold text-white border"
                             style={{
-                              backgroundColor: "color-mix(in srgb, var(--app-accent-color, #a855f7) 25%, transparent)",
-                              borderColor: "color-mix(in srgb, var(--app-accent-color, #a855f7) 50%, transparent)",
+                              backgroundColor: "color-mix(in srgb, var(--app-accent-color, #783efe) 25%, transparent)",
+                              borderColor: "color-mix(in srgb, var(--app-accent-color, #783efe) 50%, transparent)",
                             }}
                           >
                             v{updateResult?.current_version || "0.1.1"}
@@ -1134,9 +1108,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         <span
                           className="text-[10px] px-2 py-0.5 rounded-full font-semibold border"
                           style={{
-                            backgroundColor: "color-mix(in srgb, var(--app-accent-color, #a855f7) 18%, transparent)",
-                            borderColor: "color-mix(in srgb, var(--app-accent-color, #a855f7) 35%, transparent)",
-                            color: "var(--app-accent-color, #a855f7)",
+                            backgroundColor: "color-mix(in srgb, var(--app-accent-color, #783efe) 18%, transparent)",
+                            borderColor: "color-mix(in srgb, var(--app-accent-color, #783efe) 35%, transparent)",
+                            color: "var(--app-accent-color, #783efe)",
                           }}
                         >
                           Creator & Developer
@@ -1174,7 +1148,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       disabled={isCheckingUpdate}
                       className="px-3 py-1.5 rounded-xl text-xs font-bold text-white flex items-center space-x-2 transition-all cursor-pointer shadow-sm active:scale-95 disabled:opacity-50"
                       style={{
-                        backgroundColor: "var(--app-accent-color, #a855f7)",
+                        backgroundColor: "var(--app-accent-color, #783efe)",
                       }}
                     >
                       <RefreshCw
@@ -1212,9 +1186,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         className="p-4 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-lg"
                         style={{
                           backgroundColor:
-                            "color-mix(in srgb, var(--app-accent-color, #a855f7) 18%, transparent)",
+                            "color-mix(in srgb, var(--app-accent-color, #783efe) 18%, transparent)",
                           borderColor:
-                            "color-mix(in srgb, var(--app-accent-color, #a855f7) 45%, transparent)",
+                            "color-mix(in srgb, var(--app-accent-color, #783efe) 45%, transparent)",
                         }}
                       >
                         <div className="space-y-1">
@@ -1255,7 +1229,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                   className="h-full rounded-full transition-all duration-150 ease-out"
                                   style={{
                                     width: `${downloadProgress.percentage}%`,
-                                    backgroundColor: "var(--app-accent-color, #a855f7)",
+                                    backgroundColor: "var(--app-accent-color, #783efe)",
                                   }}
                                 />
                               </div>
@@ -1273,7 +1247,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                               onClick={handleApplyUpdateAndRestart}
                               className="px-4 py-2 rounded-xl text-white font-extrabold text-xs flex items-center space-x-2 transition-all cursor-pointer shadow-lg active:scale-95 animate-pulse"
                               style={{
-                                backgroundColor: "var(--app-accent-color, #a855f7)",
+                                backgroundColor: "var(--app-accent-color, #783efe)",
                               }}
                             >
                               <CheckCircle2 className="w-4 h-4 text-white" />

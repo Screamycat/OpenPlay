@@ -5,7 +5,6 @@ import { CONSOLE_PRESETS, getMergedConsolePresets } from "../../data/consoles";
 import {
   X,
   Search,
-  Gamepad2,
   Cpu,
   Sliders,
   FolderOpen,
@@ -20,6 +19,7 @@ import {
   Loader2,
   Sparkles,
 } from "lucide-react";
+import { PlatformIcon } from "../icons/PlatformIcons";
 
 interface AddConsoleWizardModalProps {
   isOpen: boolean;
@@ -225,9 +225,9 @@ export const AddConsoleWizardModal: React.FC<AddConsoleWizardModalProps> = ({
         className="relative w-full max-w-4xl h-[620px] theme-modal-container rounded-3xl flex flex-col overflow-hidden text-zinc-200"
       >
         {/* Top Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 bg-[#141824]/60">
+        <div className="flex items-center justify-between px-6 py-4 theme-modal-header shrink-0">
           <div className="flex items-center space-x-2.5">
-            <Gamepad2 className="w-5 h-5 theme-accent-text" />
+            <PlatformIcon platform="emulation" className="w-5 h-5 theme-accent-text" />
             <h2 className="text-base font-bold text-white tracking-wide">Add Console & ROMs</h2>
           </div>
           <button
@@ -255,7 +255,11 @@ export const AddConsoleWizardModal: React.FC<AddConsoleWizardModalProps> = ({
                     : "text-zinc-500 hover:bg-white/5"
                 }`}
               >
-                <Gamepad2 className="w-5 h-5 mt-0.5 shrink-0" />
+                <PlatformIcon
+                  platform={selectedConsole ? selectedConsole.id : "emulation"}
+                  className="w-5 h-5 mt-0.5 shrink-0"
+                  active={currentStep === "console"}
+                />
                 <div className="truncate">
                   <div className="text-sm font-bold leading-tight">Console</div>
                   <div className="text-[11px] opacity-70 truncate mt-0.5">
@@ -432,7 +436,11 @@ export const AddConsoleWizardModal: React.FC<AddConsoleWizardModalProps> = ({
                             {isSelected && <Check className="w-3 h-3 text-white stroke-[3]" />}
                           </div>
 
-                          <Gamepad2 className={`w-5 h-5 ${isSelected ? "theme-accent-text" : "text-zinc-400"}`} />
+                          <PlatformIcon
+                            platform={preset.id}
+                            className="w-5 h-5 shrink-0"
+                            active={isSelected}
+                          />
 
                           <div>
                             <div className="text-sm font-bold text-white leading-tight">

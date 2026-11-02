@@ -6,6 +6,7 @@ import { ConfiguredConsole, EmulatorProfile } from "../types/emulator";
 import { resolveImageSrc, formatFileSize, isVideoSrc } from "../utils/image";
 import { MetadataDiffModal, MetadataComparison } from "./MetadataDiffModal";
 import { normalizeCompletionStatus } from "../utils/completionStatus";
+import { PlatformIcon } from "./icons/PlatformIcons";
 import {
   X,
   Save,
@@ -26,7 +27,6 @@ import {
   Clock,
   Calendar,
   Hash,
-  Gamepad2,
   Building,
   Building2,
   Globe,
@@ -585,7 +585,7 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
         className="theme-modal-container rounded-2xl w-full max-w-4xl h-[720px] max-h-[92vh] flex flex-col overflow-hidden text-xs text-zinc-200"
       >
         {/* Top Header */}
-        <div className="px-6 py-3.5 border-b border-white/10 flex items-center justify-between bg-white/[0.03] backdrop-blur-sm shrink-0">
+        <div className="px-6 py-3.5 theme-modal-header flex items-center justify-between shrink-0">
           <div className="flex items-center space-x-3.5 min-w-0">
             <div className="w-9 h-12 rounded-lg bg-black/40 border border-white/10 overflow-hidden shrink-0 shadow-sm flex items-center justify-center">
               {coverImage && resolvedHeaderCover ? (
@@ -602,7 +602,7 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
                   <img src={resolvedHeaderCover} alt="" className="w-full h-full object-cover" />
                 )
               ) : (
-                <Gamepad2 className="w-5 h-5 text-zinc-400" />
+                <PlatformIcon platform={platforms[0] || source} className="w-5 h-5 text-zinc-400" />
               )}
             </div>
             <div className="min-w-0">
@@ -681,7 +681,7 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
                   {/* Title */}
                   <div className="sm:col-span-2">
                     <label className="block text-zinc-300 font-medium mb-1 flex items-center space-x-1.5">
-                      <Gamepad2 className="w-3.5 h-3.5 text-zinc-400" />
+                      <FileText className="w-3.5 h-3.5 text-zinc-400" />
                       <span>
                         Title <span className="text-rose-400">*</span>
                       </span>
@@ -921,7 +921,7 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
                       {/* Emulator Profile Selector */}
                       <div>
                         <label className="block text-zinc-300 font-medium mb-1 flex items-center space-x-1.5">
-                          <Gamepad2 className="w-3.5 h-3.5 text-zinc-400" />
+                          <PlatformIcon platform="emulation" className="w-3.5 h-3.5 text-zinc-400" />
                           <span>Configured Emulator Profile</span>
                         </label>
                         <select

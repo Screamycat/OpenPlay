@@ -272,7 +272,7 @@ export const AchievementHunterHub: React.FC<AchievementHunterHubProps> = ({
                     / {total_achievements_count.toLocaleString()}
                   </span>
                 </div>
-                <div className="text-[10px] text-zinc-400">Total library trophies</div>
+                <div className="text-[10px] text-zinc-400">Across started games</div>
               </div>
 
               <div className="bg-black/30 border border-white/5 rounded-xl p-3.5 space-y-1">
@@ -283,7 +283,7 @@ export const AchievementHunterHub: React.FC<AchievementHunterHubProps> = ({
                 <div className="text-lg font-bold text-white">
                   {Math.round(average_completion_percent)}%
                 </div>
-                <div className="text-[10px] text-zinc-400">Across games with stats</div>
+                <div className="text-[10px] text-zinc-400">Across started games</div>
               </div>
 
               <div className="bg-black/30 border border-white/5 rounded-xl p-3.5 space-y-1">
@@ -622,7 +622,7 @@ export const AchievementHunterHub: React.FC<AchievementHunterHubProps> = ({
             className="theme-modal-container rounded-2xl w-full max-w-4xl max-h-[85vh] flex flex-col overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="px-6 py-4 border-b border-white/10 flex items-center justify-between">
+            <div className="px-6 py-4 theme-modal-header shrink-0">
               <div className="flex items-center space-x-3">
                 <Trophy className="w-4 h-4 text-amber-400" />
                 <h3 className="text-sm font-bold text-white">

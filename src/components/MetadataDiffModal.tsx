@@ -132,7 +132,7 @@ export const MetadataDiffModal: React.FC<MetadataDiffModalProps> = ({
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="px-6 py-4 border-b border-white/10 flex items-center justify-between bg-white/[0.02]">
+        <div className="px-6 py-4 theme-modal-header">
           <div className="flex items-center space-x-3">
             <div className="p-2 rounded-xl theme-accent-subtle-bg border theme-accent-subtle-border theme-accent-text">
               <Sparkles className="w-5 h-5" />

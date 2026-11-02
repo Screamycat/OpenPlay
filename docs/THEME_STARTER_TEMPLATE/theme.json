@@ -1,9 +1,9 @@
 {
   "id": "starter-custom-theme",
   "name": "Starter Custom Theme",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "Your Name",
-  "description": "A clean template to start building custom OpenPlay themes with 3 screenshots, icon, and in-app settings.",
+  "description": "A clean template to start building custom OpenPlay themes with categorized settings, semantic hooks, and custom layouts.",
   "icon": "icon.svg",
   "screenshots": [
     "screenshot_1.svg",
@@ -18,24 +18,86 @@
   },
   "settings": [
     {
+      "id": "accent_color",
+      "label": "Theme Accent Color",
+      "type": "color",
+      "default": "#06b6d4",
+      "category": "Aesthetics & Colors",
+      "description": "Primary highlight color for buttons, badges, rings, and focus outlines."
+    },
+    {
+      "id": "panel_tint",
+      "label": "Panel Tint & Windows Background",
+      "type": "color",
+      "default": "#0d1117",
+      "category": "Aesthetics & Colors",
+      "description": "Base dark tint for panels, drawers, modals, and container surfaces."
+    },
+    {
+      "id": "hero_aspect_ratio",
+      "label": "Hero Banner Aspect Ratio",
+      "type": "select",
+      "options": ["Panoramic (96:31)", "Widescreen (16:9)", "Ultrawide (21:9)", "Hidden"],
+      "default": "Panoramic (96:31)",
+      "category": "Layout & Sizing",
+      "description": "Proportions of the hero artwork banner in the game details view."
+    },
+    {
+      "id": "logo_max_width",
+      "label": "Hero Title Logo Max Width (%)",
+      "type": "number",
+      "min": 20,
+      "max": 100,
+      "step": 5,
+      "default": 50,
+      "category": "Layout & Sizing",
+      "description": "Maximum width constraint for the game logo relative to the hero banner."
+    },
+    {
+      "id": "logo_max_height",
+      "label": "Hero Title Logo Max Height (%)",
+      "type": "number",
+      "min": 20,
+      "max": 90,
+      "step": 5,
+      "default": 65,
+      "category": "Layout & Sizing",
+      "description": "Maximum height constraint for the game logo relative to the hero banner."
+    },
+    {
       "id": "card_border_radius",
       "label": "Game Card Corner Radius",
       "type": "select",
       "options": ["Sleek (8px)", "Rounded (16px)", "Ultra Rounded (24px)"],
-      "default": "Rounded (16px)"
+      "default": "Rounded (16px)",
+      "category": "Game Cards & Posters",
+      "description": "Corner roundness for game cover posters and thumbnails."
+    },
+    {
+      "id": "card_aspect_ratio",
+      "label": "Game Card Aspect Ratio",
+      "type": "select",
+      "options": ["Vertical Poster (2:3)", "Square Tile (1:1)", "Landscape Banner (16:9)"],
+      "default": "Vertical Poster (2:3)",
+      "category": "Game Cards & Posters",
+      "description": "Shape of game cover cards in the grid (e.g. Switch-style 1:1 square tiles vs 2:3 vertical posters)."
     },
     {
       "id": "enable_card_glow",
       "label": "Card Hover Glow",
       "type": "boolean",
-      "default": true
+      "default": true,
+      "category": "Game Cards & Posters",
+      "description": "Luminous accent-colored ambient glow around hovered cards."
     },
     {
       "id": "glass_intensity",
       "label": "Glassmorphism Blur",
       "type": "select",
       "options": ["Subtle (12px)", "Standard (24px)", "Intense (48px)"],
-      "default": "Standard (24px)"
+      "default": "Standard (24px)",
+      "category": "Windows & Modals",
+      "description": "Backdrop blur strength for modal containers, flyouts, and drawers."
     }
   ]
 }

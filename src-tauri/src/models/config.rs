@@ -22,6 +22,7 @@ pub struct AppConfig {
     pub auto_scan_on_startup: Option<bool>,
     pub minimize_on_game_launch: Option<bool>,
     pub close_to_tray: Option<bool>,
+    pub last_played_date_format: Option<String>,
 
     // Appearance
     pub active_theme_id: Option<String>,
@@ -88,6 +89,7 @@ impl Default for AppConfig {
             auto_scan_on_startup: Some(true),
             minimize_on_game_launch: Some(false),
             close_to_tray: Some(false),
+            last_played_date_format: Some("date_and_time".to_string()),
             active_theme_id: Some("default".to_string()),
             theme: Some("dark".to_string()),
             background_blur: Some(32),
@@ -97,7 +99,7 @@ impl Default for AppConfig {
             card_border_radius: Some("Rounded (16px)".to_string()),
             enable_card_glow: Some(true),
             glass_intensity: Some("Standard (24px)".to_string()),
-            accent_color: Some("#a855f7".to_string()),
+            accent_color: Some("#783efe".to_string()),
             panel_tint: Some("#0e0e11".to_string()),
             trailer_autoplay: Some(true),
             trailer_muted: Some(true),

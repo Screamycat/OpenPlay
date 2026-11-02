@@ -136,7 +136,7 @@ export const AddGameModal: React.FC<AddGameModalProps> = ({
         className="theme-modal-container rounded-2xl w-full max-w-xl overflow-hidden flex flex-col text-zinc-200"
       >
         {/* Header */}
-        <div className="px-6 py-4 border-b border-white/10 flex items-center justify-between bg-white/[0.02]">
+        <div className="px-6 py-4 theme-modal-header">
           <div className="flex items-center space-x-2.5">
             <div className="p-2 theme-accent-subtle-bg theme-accent-text rounded-xl border theme-accent-subtle-border">
               <Plus className="w-4 h-4" />

@@ -129,7 +129,7 @@ export function App() {
 
   // Apply user-configured theme accent, panel tint, and modal backdrop to document CSS variables
   useEffect(() => {
-    const accent = appConfig.accent_color || "#a855f7";
+    const accent = appConfig.accent_color || "#783efe";
     const tint = appConfig.panel_tint || "#0e0e11";
     const modalOpacity = `${Math.round((appConfig.modal_backdrop_opacity ?? 0.45) * 100)}%`;
     const modalBlur = `${appConfig.modal_backdrop_blur ?? 8}px`;
@@ -1470,6 +1470,7 @@ export function App() {
 
   return (
     <div
+      data-theme-part="workspace-root"
       className={`h-screen w-screen flex flex-col bg-[#07080c] text-slate-100 overflow-hidden relative font-sans select-none ${
         isWindowMaximized ? "" : "border border-white/10 shadow-2xl"
       }`}
@@ -1543,7 +1544,7 @@ export function App() {
             onCycleBackground={cycleHunterHero}
           />
         ) : (
-          <main className="flex-1 flex overflow-hidden relative">
+          <main data-theme-part="workspace-main" className="flex-1 flex overflow-hidden relative">
           {isLoading ? (
             <div className="flex-1 flex flex-col items-center justify-center space-y-3">
               <Loader2 className="w-8 h-8 theme-accent-text animate-spin" />
@@ -1578,9 +1579,10 @@ export function App() {
             </div>
           ) : viewMode === "split" ? (
             /* Split View: Fixed 7-Column Grid on Left + Details on Right */
-            <div key="split" className="flex-1 flex overflow-hidden w-full h-full animate-view-fade">
+            <div key="split" data-theme-part="workspace-split" className="flex-1 flex overflow-hidden w-full h-full animate-view-fade">
               {/* Left Column: Poster Grid */}
               <div
+                data-theme-part="split-left"
                 style={{ width: `${gridWidthPercent}%` }}
                 className="flex flex-col h-full bg-transparent shrink-0 relative"
               >
@@ -1605,7 +1607,7 @@ export function App() {
               </div>
 
               {/* Right Column: Game Details Pane */}
-              <div className="flex-1 flex flex-col h-full bg-transparent overflow-hidden">
+              <div data-theme-part="split-right" className="flex-1 flex flex-col h-full bg-transparent overflow-hidden">
                 {selectedGame ? (
                   <GameDetails
                     game={selectedGame}
@@ -1633,6 +1635,7 @@ export function App() {
                     onToggleSource={handleToggleSource}
                     trailerAutoplay={appConfig.trailer_autoplay ?? true}
                     trailerMuted={appConfig.trailer_muted ?? true}
+                    lastPlayedDateFormat={appConfig.last_played_date_format ?? "date_and_time"}
                   />
                 ) : (
                   <div className="flex-1 flex items-center justify-center text-slate-400 text-xs">
@@ -1643,7 +1646,7 @@ export function App() {
             </div>
           ) : viewMode === "grid" ? (
             /* Full Grid View */
-            <div key="grid" className="flex-1 flex flex-col h-full bg-transparent animate-view-fade">
+            <div key="grid" data-theme-part="workspace-grid" className="flex-1 flex flex-col h-full bg-transparent animate-view-fade">
               <GameGrid
                 games={filteredGames}
                 selectedGameId={selectedGame?.id}
@@ -1665,7 +1668,7 @@ export function App() {
             </div>
           ) : (
             /* List View */
-            <div key="list" className="flex-1 overflow-y-auto p-4 bg-transparent animate-view-fade">
+            <div key="list" data-theme-part="workspace-table" className="flex-1 overflow-y-auto p-4 bg-transparent animate-view-fade">
             <table className="w-full text-left text-xs text-slate-300">
               <thead className="text-[11px] uppercase tracking-wider text-slate-500 border-b border-[#1f2436]">
                 <tr>

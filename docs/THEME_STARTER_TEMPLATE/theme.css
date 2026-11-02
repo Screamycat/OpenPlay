@@ -1,19 +1,45 @@
 /* ========================================================
    OpenPlay Custom Theme Stylesheet Template
+   ========================================================
+   Themes can restyle, reposition, or overhaul any part of
+   the OpenPlay UI using semantic [data-theme-part] hooks.
    ======================================================== */
 
 [data-theme-id="starter-custom-theme"] {
-  /* Primary Accent & Highlight overrides */
+  /* Primary Accent & Surface Tint */
   --app-accent-color: #06b6d4;
   --accent: #06b6d4;
   --app-panel-tint: #0d1117;
-
-  /* Card radius linked to user in-app setting */
-  --card-radius: var(--theme-card-radius, 16px);
 }
 
-/* Example: Custom glowing border on active cards */
-[data-theme-id="starter-custom-theme"] .game-poster-card:hover {
-  box-shadow: 0 0 20px rgba(6, 182, 212, 0.35);
-  border-color: rgba(6, 182, 212, 0.6);
+/* 1. Game Cards & Posters:
+   Target [data-theme-part="game-card"] to customize radius, shadows, or borders */
+[data-theme-id="starter-custom-theme"] [data-theme-part="game-card"] {
+  border-radius: var(--theme-card-radius, 16px);
+  aspect-ratio: var(--theme-card-aspect, 2 / 3);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+[data-theme-id="starter-custom-theme"] [data-theme-part="game-card"]:hover {
+  transform: translateY(-3px) scale(1.02);
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.7), 0 0 18px rgba(6, 182, 212, 0.35);
+}
+
+/* 2. Top Navigation Bar:
+   Target [data-theme-part="top-nav"] to change header height, glassmorphism, or borders */
+[data-theme-id="starter-custom-theme"] [data-theme-part="top-nav"] {
+  border-bottom: 1px solid rgba(6, 182, 212, 0.2);
+}
+
+/* 3. Hero Banner & Details View:
+   Target [data-theme-part="hero-banner"] or [data-theme-part="hero-title-logo"] */
+[data-theme-id="starter-custom-theme"] [data-theme-part="hero-banner"] {
+  aspect-ratio: var(--theme-hero-aspect, 96 / 31);
+}
+
+/* 4. Modals & Drawers:
+   Target [data-theme-part="modal-container"] or [data-theme-part="drawer"] */
+[data-theme-id="starter-custom-theme"] [data-theme-part="modal-container"] {
+  border: 1px solid rgba(6, 182, 212, 0.25);
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.9), 0 0 30px rgba(6, 182, 212, 0.1);
 }

@@ -3,6 +3,8 @@ export interface ThemeSetting {
   label: string;
   type: "boolean" | "select" | "color" | "number" | "text";
   default: any;
+  category?: string;
+  description?: string;
   options?: string[];
   min?: number;
   max?: number;

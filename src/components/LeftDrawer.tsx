@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { getVersion } from "@tauri-apps/api/app";
 import {
   X,
   Library,
@@ -10,17 +11,11 @@ import {
   Layers,
   Loader2,
   HardDrive,
-  Gamepad2,
   Palette,
   Blocks,
 } from "lucide-react";
 import { ConnectedLibraryItem } from "../types/backup";
-
-const SteamIcon: React.FC<{ className?: string }> = ({ className = "w-4 h-4" }) => (
-  <svg viewBox="0 0 496 512" fill="currentColor" className={className} aria-hidden="true">
-    <path d="M496 256c0 137-111.2 248-248.4 248-113.8 0-209.6-76.3-239-180.4l95.2 39.3c6.4 32.1 34.9 56.4 68.9 56.4 39.2 0 71.9-32.4 70.2-73.5l84.5-60.2c52.1 1.3 95.8-40.9 95.8-93.5 0-51.6-42-93.5-93.7-93.5s-93.7 42-93.7 93.5v1.2L176.6 279c-15.5-.9-30.7 3.4-43.5 12.1L0 236.1C10.2 108.4 117.1 8 247.6 8 384.8 8 496 119 496 256zM155.7 384.3l-30.5-12.6a52.79 52.79 0 0 0 27.2 25.8c26.9 11.2 57.8-1.6 69-28.4 5.4-13 5.5-27.3.1-40.3-5.4-13-15.5-23.2-28.5-28.6-12.9-5.4-26.7-5.2-38.9-.6l31.5 13c19.8 8.2 29.2 30.9 20.9 50.7-8.3 19.9-31 29.2-50.8 21zm173.8-129.9c-34.4 0-62.4-28-62.4-62.3s28-62.3 62.4-62.3 62.4 28 62.4 62.3-27.9 62.3-62.4 62.3zm.1-15.6c25.9 0 46.9-21 46.9-46.8 0-25.9-21-46.8-46.9-46.8s-46.9 21-46.9 46.8c.1 25.8 21.1 46.8 46.9 46.8z" />
-  </svg>
-);
+import { PlatformIcon } from "./icons/PlatformIcons";
 
 interface LeftDrawerProps {
   isOpen: boolean;
@@ -59,7 +54,14 @@ export const LeftDrawer: React.FC<LeftDrawerProps> = ({
   const [isRefreshHovered, setIsRefreshHovered] = useState(false);
   const [isRefreshExpanded, setIsRefreshExpanded] = useState(false);
   const [connectedLibs, setConnectedLibs] = useState<ConnectedLibraryItem[]>([]);
+  const [appVersion, setAppVersion] = useState("0.1.4");
   const hoverTimeoutRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    getVersion()
+      .then((ver) => setAppVersion(ver))
+      .catch(() => setAppVersion("0.1.4"));
+  }, []);
 
   useEffect(() => {
     if (isOpen) {
@@ -87,13 +89,14 @@ export const LeftDrawer: React.FC<LeftDrawerProps> = ({
       {/* Backdrop */}
       <div
         onClick={onClose}
-        className={`fixed inset-0 z-40 bg-black/45 backdrop-blur-sm transition-opacity duration-200 ${
+        className={`fixed inset-0 z-40 theme-modal-backdrop transition-opacity duration-200 ${
           isOpen ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"
         }`}
       />
 
       {/* Sliding Drawer Container: Smoked Neutral Dark Glass */}
       <aside
+        data-theme-part="drawer"
         className={`fixed top-0 left-0 bottom-0 w-64 theme-panel-surface backdrop-blur-2xl border-r border-white/10 z-50 flex flex-col shadow-[0_20px_60px_rgba(0,0,0,0.85)] transition-transform duration-250 ease-out select-none ${
           isOpen ? "translate-x-0" : "-translate-x-full"
         }`}
@@ -120,7 +123,7 @@ export const LeftDrawer: React.FC<LeftDrawerProps> = ({
         </div>
 
         {/* Navigation Items */}
-        <div className="p-3 space-y-1.5 text-xs">
+        <div data-theme-part="drawer-menu" className="p-3 space-y-1.5 text-xs">
           {/* Library Button */}
           <button
             onClick={() => {
@@ -321,13 +324,7 @@ export const LeftDrawer: React.FC<LeftDrawerProps> = ({
                           className="w-full text-left px-2.5 py-1.5 rounded-xl hover:bg-white/10 transition-colors flex items-center justify-between text-xs text-zinc-300 hover:text-white cursor-pointer group border border-transparent hover:border-white/10"
                         >
                           <div className="flex items-center space-x-2.5">
-                            {lib.id === "steam" ? (
-                              <SteamIcon className="w-4 h-4 text-zinc-400 group-hover:text-white transition-colors" />
-                            ) : (
-                              <span className="w-4 h-4 rounded theme-accent-subtle-bg theme-accent-text font-mono text-[9px] flex items-center justify-center font-bold border border-[var(--app-accent-color)]/30">
-                                {lib.badge.slice(0, 1)}
-                              </span>
-                            )}
+                            <PlatformIcon platform={lib.id} className="w-4 h-4 shrink-0" />
                             <span className="font-medium truncate max-w-[130px]">{lib.name}</span>
                           </div>
                           <span className="text-[10px] text-zinc-500 group-hover:text-zinc-300 font-mono">
@@ -356,17 +353,14 @@ export const LeftDrawer: React.FC<LeftDrawerProps> = ({
                           className="w-full text-left px-2.5 py-1.5 rounded-xl hover:bg-white/10 transition-colors flex items-center justify-between text-xs text-zinc-300 hover:text-white cursor-pointer group border border-transparent hover:border-white/10"
                         >
                           <div className="flex items-center space-x-2.5">
-                            {lib.id === "retroachievements" ? (
-                              <span className="w-4 h-4 rounded bg-amber-500/20 text-amber-300 font-mono text-[9px] flex items-center justify-center font-bold border border-amber-500/30">
-                                R
-                              </span>
-                            ) : (
-                              <Gamepad2 className="w-4 h-4 text-amber-400" />
-                            )}
+                            <PlatformIcon
+                              platform={lib.id === "retroachievements" ? "retroachievements" : lib.name}
+                              className="w-4 h-4 shrink-0"
+                            />
                             <span className="font-medium truncate max-w-[130px]">{lib.name}</span>
                           </div>
                           <span className="text-[10px] text-zinc-500 group-hover:text-zinc-300 font-mono">
-                            {lib.id === "retroachievements" ? "Sync" : "Rescan"}
+                            Scan
                           </span>
                         </button>
                       ))}
@@ -391,8 +385,7 @@ export const LeftDrawer: React.FC<LeftDrawerProps> = ({
 
         {/* Footer */}
         <div className="mt-auto p-4 border-t border-white/10 bg-white/[0.02] backdrop-blur-sm text-[11px] text-zinc-500 flex justify-between items-center">
-          <span>OpenPlay v0.1.0</span>
-          <span>Cross-Platform</span>
+          <span>OpenPlay v{appVersion}</span>
         </div>
       </aside>
     </>

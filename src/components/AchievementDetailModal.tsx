@@ -8,9 +8,9 @@ import {
   Sparkles,
   Eye,
   EyeOff,
-  Gamepad2,
 } from "lucide-react";
 import { resolveImageSrc, isVideoSrc } from "../utils/image";
+import { PlatformIcon } from "./icons/PlatformIcons";
 
 interface AchievementDetailModalProps {
   achievement: Achievement | null;
@@ -94,7 +94,7 @@ export const AchievementDetailModal: React.FC<AchievementDetailModalProps> = ({
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header Bar */}
-        <div className="px-5 py-3.5 border-b border-white/10 flex items-center justify-between bg-white/[0.02]">
+        <div className="px-5 py-3.5 theme-modal-header">
           <div className="flex items-center space-x-2 min-w-0">
             {gameCover ? (
               isVideoSrc(gameCover) ? (
@@ -114,7 +114,7 @@ export const AchievementDetailModal: React.FC<AchievementDetailModalProps> = ({
                 />
               )
             ) : (
-              <Gamepad2 className="w-4 h-4 text-zinc-400 shrink-0" />
+              <PlatformIcon platform="pc" className="w-4 h-4 text-zinc-400 shrink-0" />
             )}
             <span className="text-xs font-semibold text-zinc-300 truncate">
               {gameTitle || "Achievement Details"}

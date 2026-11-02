@@ -13,6 +13,10 @@ pub struct ThemeSetting {
     pub setting_type: String, // "boolean", "select", "color", "number", "text"
     pub default: serde_json::Value,
     #[serde(default)]
+    pub category: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
     pub options: Option<Vec<String>>,
     #[serde(default)]
     pub min: Option<f64>,
@@ -63,73 +67,40 @@ pub fn seed_default_theme() -> Result<(), String> {
     fs::create_dir_all(&default_dir).map_err(|e| e.to_string())?;
 
     let manifest_path = default_dir.join("theme.json");
-    if !manifest_path.exists() {
-        let manifest = r##"{
+    let manifest = r##"{
   "id": "default",
   "name": "OpenPlay Default",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "OpenPlay Developers",
   "description": "The official dark glassmorphic baseline theme for OpenPlay.",
   "icon": "icon.svg",
   "screenshots": [
-    "screenshot_1.gif",
-    "screenshot_2.jpg",
-    "screenshot_3.png"
+    "screenshot_1.svg",
+    "screenshot_2.svg",
+    "screenshot_3.svg"
   ],
   "css": "theme.css",
   "colors": {
-    "accent": "#a855f7",
+    "accent": "#783efe",
     "panel_tint": "#0e0e11",
-    "background": "#090a0f"
+    "background": "#07080c"
   },
   "settings": [
     {
       "id": "accent_color",
       "label": "Theme Accent Color",
       "type": "color",
-      "default": "#a855f7"
+      "default": "#783efe",
+      "category": "Aesthetics & Colors",
+      "description": "Primary highlight color for active buttons, badges, rings, and focus outlines."
     },
     {
       "id": "panel_tint",
       "label": "Panel Tint & Windows Background",
       "type": "color",
-      "default": "#0e0e11"
-    },
-    {
-      "id": "view_mode",
-      "label": "Default View Mode",
-      "type": "select",
-      "options": ["Split View", "Full Grid", "Table List"],
-      "default": "Split View"
-    },
-    {
-      "id": "card_border_radius",
-      "label": "Game Card Corner Radius",
-      "type": "select",
-      "options": ["Sleek (8px)", "Rounded (16px)", "Ultra Rounded (24px)"],
-      "default": "Rounded (16px)"
-    },
-    {
-      "id": "enable_card_glow",
-      "label": "Card Hover Glow",
-      "type": "boolean",
-      "default": true
-    },
-    {
-      "id": "glass_intensity",
-      "label": "Glassmorphism Blur",
-      "type": "select",
-      "options": ["Subtle (12px)", "Standard (24px)", "Intense (48px)"],
-      "default": "Standard (24px)"
-    },
-    {
-      "id": "background_blur",
-      "label": "Dynamic Background Blur",
-      "type": "number",
-      "min": 0,
-      "max": 64,
-      "step": 4,
-      "default": 32
+      "default": "#0e0e11",
+      "category": "Aesthetics & Colors",
+      "description": "Smoked neutral tint for side drawers, modals, cards, and floating containers."
     },
     {
       "id": "background_opacity",
@@ -138,7 +109,86 @@ pub fn seed_default_theme() -> Result<(), String> {
       "min": 0.2,
       "max": 1.0,
       "step": 0.05,
-      "default": 0.75
+      "default": 0.75,
+      "category": "Aesthetics & Colors",
+      "description": "Opacity overlay for dynamic blurred game artwork in the application background."
+    },
+    {
+      "id": "background_blur",
+      "label": "Dynamic Background Blur",
+      "type": "number",
+      "min": 0,
+      "max": 64,
+      "step": 4,
+      "default": 32,
+      "category": "Aesthetics & Colors",
+      "description": "Blur radius (px) applied to the game background behind the workspace."
+    },
+    {
+      "id": "view_mode",
+      "label": "Default View Mode",
+      "type": "select",
+      "options": ["Split View", "Full Grid", "Table List"],
+      "default": "Split View",
+      "category": "Layout & Sizing",
+      "description": "Preferred default workspace layout on launch."
+    },
+    {
+      "id": "hero_aspect_ratio",
+      "label": "Hero Banner Aspect Ratio",
+      "type": "select",
+      "options": ["Panoramic (96:31)", "Widescreen (16:9)", "Ultrawide (21:9)", "Hidden"],
+      "default": "Panoramic (96:31)",
+      "category": "Layout & Sizing",
+      "description": "Proportions of the hero artwork banner in the game details view."
+    },
+    {
+      "id": "logo_max_width",
+      "label": "Hero Title Logo Max Width (%)",
+      "type": "number",
+      "min": 20,
+      "max": 100,
+      "step": 5,
+      "default": 50,
+      "category": "Layout & Sizing",
+      "description": "Maximum width constraint for the game logo relative to the hero banner."
+    },
+    {
+      "id": "logo_max_height",
+      "label": "Hero Title Logo Max Height (%)",
+      "type": "number",
+      "min": 20,
+      "max": 90,
+      "step": 5,
+      "default": 65,
+      "category": "Layout & Sizing",
+      "description": "Maximum height constraint for the game logo relative to the hero banner."
+    },
+    {
+      "id": "card_border_radius",
+      "label": "Game Card Corner Radius",
+      "type": "select",
+      "options": ["Sleek (8px)", "Rounded (16px)", "Ultra Rounded (24px)"],
+      "default": "Rounded (16px)",
+      "category": "Game Cards & Posters",
+      "description": "Corner roundness for game cover posters and thumbnails."
+    },
+    {
+      "id": "card_aspect_ratio",
+      "label": "Game Card Aspect Ratio",
+      "type": "select",
+      "options": ["Vertical Poster (2:3)", "Square Tile (1:1)", "Landscape Banner (16:9)"],
+      "default": "Vertical Poster (2:3)",
+      "category": "Game Cards & Posters",
+      "description": "Shape of game cover cards in the grid (e.g. Switch-style 1:1 square tiles vs 2:3 vertical posters)."
+    },
+    {
+      "id": "enable_card_glow",
+      "label": "Card Hover Glow",
+      "type": "boolean",
+      "default": true,
+      "category": "Game Cards & Posters",
+      "description": "Luminous accent-colored ambient glow around hovered cards."
     },
     {
       "id": "modal_backdrop_opacity",
@@ -147,7 +197,9 @@ pub fn seed_default_theme() -> Result<(), String> {
       "min": 0.2,
       "max": 0.9,
       "step": 0.05,
-      "default": 0.45
+      "default": 0.45,
+      "category": "Windows & Modals",
+      "description": "Darkening opacity for background behind open modal dialogs."
     },
     {
       "id": "modal_backdrop_blur",
@@ -156,34 +208,98 @@ pub fn seed_default_theme() -> Result<(), String> {
       "min": 0,
       "max": 32,
       "step": 2,
-      "default": 8
+      "default": 8,
+      "category": "Windows & Modals",
+      "description": "Backdrop blur intensity (px) for modal overlays."
+    },
+    {
+      "id": "glass_intensity",
+      "label": "Glassmorphism Blur",
+      "type": "select",
+      "options": ["Subtle (12px)", "Standard (24px)", "Intense (48px)"],
+      "default": "Standard (24px)",
+      "category": "Windows & Modals",
+      "description": "Backdrop blur strength for modal containers, flyouts, and drawers."
     }
   ]
 }"##;
-        fs::write(&manifest_path, manifest).map_err(|e| e.to_string())?;
-    }
+    fs::write(&manifest_path, manifest).map_err(|e| e.to_string())?;
 
     let css_path = default_dir.join("theme.css");
-    if !css_path.exists() {
-        let default_css = r##"/* OpenPlay Default Theme CSS */
+    let default_css = r##"/* OpenPlay Default Theme CSS
+ * High-performance dark glassmorphic styling
+ */
 :root {
   --openplay-theme-id: "default";
 }
 
-/* Default Theme Accent and Card Accents */
+/* 1. Theme-Specific Surface & Accent Tokens */
 [data-theme-id="default"] {
-  --theme-surface-glow: color-mix(in srgb, var(--app-accent-color, #a855f7) 20%, transparent);
+  --theme-surface-glow: color-mix(in srgb, var(--app-accent-color, #783efe) 20%, transparent);
+}
+
+/* 2. Game Grid & Card Styling */
+[data-theme-part="game-card"] {
+  border-radius: var(--theme-card-radius, 16px);
+  aspect-ratio: var(--theme-card-aspect, 2 / 3);
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s ease;
+}
+
+[data-theme-part="game-card"]:hover {
+  transform: translateY(-2px) scale(1.02);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.8), 0 0 20px color-mix(in srgb, var(--app-accent-color, #783efe) calc(var(--theme-card-glow, 1) * 35%), transparent);
+}
+
+/* 3. Navigation Bar Styling */
+[data-theme-part="top-nav"] {
+  background-color: color-mix(in srgb, #000000 35%, transparent);
+  backdrop-filter: blur(var(--theme-glass-blur, 24px));
+  -webkit-backdrop-filter: blur(var(--theme-glass-blur, 24px));
+  border-bottom: 1px solid var(--theme-border-color, rgba(255, 255, 255, 0.08));
+}
+
+/* 4. Hero Banner & Details Styling */
+[data-theme-part="hero-banner"] {
+  aspect-ratio: var(--theme-hero-aspect, 96 / 31);
+}
+
+[data-theme-part="hero-title-logo"] {
+  width: var(--theme-logo-max-w, 50%);
+  max-width: var(--theme-logo-max-w, 50%);
+  height: var(--theme-logo-max-h, 65%);
+  max-height: var(--theme-logo-max-h, 65%);
+}
+
+/* 5. Modals & Dialogs */
+[data-theme-part="modal-backdrop"] {
+  background-color: color-mix(in srgb, #000000 var(--modal-backdrop-opacity, 45%), transparent);
+  backdrop-filter: blur(var(--modal-backdrop-blur, 8px));
+  -webkit-backdrop-filter: blur(var(--modal-backdrop-blur, 8px));
+}
+
+[data-theme-part="modal-container"] {
+  background-color: color-mix(in srgb, var(--app-panel-tint, #0e0e11) 94%, transparent);
+  backdrop-filter: blur(var(--theme-glass-blur, 24px));
+  -webkit-backdrop-filter: blur(var(--theme-glass-blur, 24px));
+  border: 1px solid var(--theme-border-color, rgba(255, 255, 255, 0.1));
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.85);
+}
+
+[data-theme-part="drawer"] {
+  background-color: color-mix(in srgb, var(--app-panel-tint, #0e0e11) 92%, transparent);
+  backdrop-filter: blur(var(--theme-glass-blur, 24px));
+  -webkit-backdrop-filter: blur(var(--theme-glass-blur, 24px));
+  border-right: 1px solid var(--theme-border-color, rgba(255, 255, 255, 0.1));
 }
 "##;
-        fs::write(&css_path, default_css).map_err(|e| e.to_string())?;
-    }
+    fs::write(&css_path, default_css).map_err(|e| e.to_string())?;
 
     let icon_path = default_dir.join("icon.svg");
     if !icon_path.exists() {
         let icon_svg = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none">
   <defs>
     <linearGradient id="opDefaultGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#a855f7" />
+      <stop offset="0%" stop-color="#783efe" />
       <stop offset="100%" stop-color="#3b82f6" />
     </linearGradient>
   </defs>
@@ -195,48 +311,135 @@ pub fn seed_default_theme() -> Result<(), String> {
     }
 
     let screen1_path = default_dir.join("screenshot_1.svg");
-    if !screen1_path.exists() {
-        let s1 = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 675" fill="none">
+    let s1 = r##"<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="675" viewBox="0 0 1200 675" fill="none">
   <rect width="1200" height="675" fill="#090a0f"/>
-  <rect x="20" y="20" width="220" height="635" rx="16" fill="#12141c" stroke="#ffffff15"/>
-  <rect x="260" y="20" width="920" height="635" rx="16" fill="#12141c" stroke="#ffffff15"/>
-  <rect x="290" y="50" width="160" height="230" rx="12" fill="#a855f725" stroke="#a855f760"/>
-  <rect x="470" y="50" width="160" height="230" rx="12" fill="#3b82f625" stroke="#3b82f660"/>
-  <rect x="650" y="50" width="160" height="230" rx="12" fill="#10b98125" stroke="#10b98160"/>
-  <rect x="830" y="50" width="160" height="230" rx="12" fill="#f59e0b25" stroke="#f59e0b60"/>
-  <text x="600" y="420" font-family="sans-serif" font-size="28" font-weight="bold" fill="#ffffff" text-anchor="middle">OpenPlay — Unified Gaming Library</text>
-  <text x="600" y="460" font-family="sans-serif" font-size="16" fill="#a1a1aa" text-anchor="middle">Split View with Interactive Covers & Multi-Platform Merging</text>
+  <!-- Left Navigation Bar -->
+  <rect x="24" y="24" width="220" height="627" rx="16" fill="#12141c" stroke="#ffffff" stroke-opacity="0.1"/>
+  <rect x="44" y="50" width="180" height="36" rx="10" fill="#783efe" fill-opacity="0.2" stroke="#783efe" stroke-opacity="0.5"/>
+  <text x="90" y="73" font-family="Segoe UI, sans-serif" font-size="13" font-weight="bold" fill="#ffffff">All Games (128)</text>
+  <rect x="44" y="96" width="180" height="32" rx="8" fill="#ffffff" fill-opacity="0.04"/>
+  <text x="90" y="117" font-family="Segoe UI, sans-serif" font-size="12" fill="#a1a1aa">Steam (84)</text>
+  <rect x="44" y="136" width="180" height="32" rx="8" fill="#ffffff" fill-opacity="0.04"/>
+  <text x="90" y="157" font-family="Segoe UI, sans-serif" font-size="12" fill="#a1a1aa">Nintendo Switch (14)</text>
+  <rect x="44" y="176" width="180" height="32" rx="8" fill="#ffffff" fill-opacity="0.04"/>
+  <text x="90" y="197" font-family="Segoe UI, sans-serif" font-size="12" fill="#a1a1aa">Epic Games (18)</text>
+
+  <!-- Main Library Grid -->
+  <rect x="264" y="24" width="912" height="627" rx="16" fill="#12141c" stroke="#ffffff" stroke-opacity="0.1"/>
+  <!-- Header / Search -->
+  <rect x="288" y="46" width="340" height="38" rx="12" fill="#181b26" stroke="#ffffff" stroke-opacity="0.08"/>
+  <text x="324" y="70" font-family="Segoe UI, sans-serif" font-size="13" fill="#71717a">Search games, genres, developers...</text>
+  <rect x="1040" y="46" width="112" height="38" rx="12" fill="#783efe" stroke="#783efe"/>
+  <text x="1096" y="69" font-family="Segoe UI, sans-serif" font-size="12" font-weight="bold" fill="#ffffff" text-anchor="middle">Scan All</text>
+
+  <!-- Game Cards -->
+  <!-- Card 1 (Active / Hovered) -->
+  <rect x="288" y="108" width="160" height="240" rx="16" fill="#181b26" stroke="#783efe" stroke-width="2"/>
+  <rect x="300" y="120" width="136" height="180" rx="12" fill="#783efe" fill-opacity="0.25"/>
+  <text x="368" y="324" font-family="Segoe UI, sans-serif" font-size="12" font-weight="bold" fill="#ffffff" text-anchor="middle">Hades II</text>
+
+  <!-- Card 2 -->
+  <rect x="468" y="108" width="160" height="240" rx="16" fill="#181b26" stroke="#ffffff" stroke-opacity="0.08"/>
+  <rect x="480" y="120" width="136" height="180" rx="12" fill="#3b82f6" fill-opacity="0.2"/>
+  <text x="548" y="324" font-family="Segoe UI, sans-serif" font-size="12" font-weight="bold" fill="#ffffff" text-anchor="middle">Cyberpunk 2077</text>
+
+  <!-- Card 3 -->
+  <rect x="648" y="108" width="160" height="240" rx="16" fill="#181b26" stroke="#ffffff" stroke-opacity="0.08"/>
+  <rect x="660" y="120" width="136" height="180" rx="12" fill="#10b981" fill-opacity="0.2"/>
+  <text x="728" y="324" font-family="Segoe UI, sans-serif" font-size="12" font-weight="bold" fill="#ffffff" text-anchor="middle">Metroid Dread</text>
+
+  <!-- Card 4 -->
+  <rect x="828" y="108" width="160" height="240" rx="16" fill="#181b26" stroke="#ffffff" stroke-opacity="0.08"/>
+  <rect x="840" y="120" width="136" height="180" rx="12" fill="#f59e0b" fill-opacity="0.2"/>
+  <text x="908" y="324" font-family="Segoe UI, sans-serif" font-size="12" font-weight="bold" fill="#ffffff" text-anchor="middle">Elden Ring</text>
+
+  <!-- Card 5 -->
+  <rect x="1008" y="108" width="144" height="240" rx="16" fill="#181b26" stroke="#ffffff" stroke-opacity="0.08"/>
+  <rect x="1020" y="120" width="120" height="180" rx="12" fill="#ec4899" fill-opacity="0.2"/>
+  <text x="1080" y="324" font-family="Segoe UI, sans-serif" font-size="12" font-weight="bold" fill="#ffffff" text-anchor="middle">Chrono Trigger</text>
+
+  <!-- Banner label -->
+  <text x="720" y="480" font-family="Segoe UI, sans-serif" font-size="30" font-weight="bold" fill="#ffffff" text-anchor="middle">Unified Gaming Workspace</text>
+  <text x="720" y="520" font-family="Segoe UI, sans-serif" font-size="15" fill="#a1a1aa" text-anchor="middle">Multi-storefront merging, real-time sync, and fluid glassmorphic styling</text>
 </svg>"##;
-        fs::write(&screen1_path, s1).map_err(|e| e.to_string())?;
-    }
+    fs::write(&screen1_path, s1).map_err(|e| e.to_string())?;
 
     let screen2_path = default_dir.join("screenshot_2.svg");
-    if !screen2_path.exists() {
-        let s2 = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 675" fill="none">
+    let s2 = r##"<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="675" viewBox="0 0 1200 675" fill="none">
   <rect width="1200" height="675" fill="#090a0f"/>
-  <rect x="40" y="40" width="1120" height="595" rx="20" fill="#12141c" stroke="#ffffff15"/>
-  <rect x="80" y="80" width="280" height="400" rx="16" fill="#a855f720" stroke="#a855f750"/>
-  <text x="400" y="140" font-family="sans-serif" font-size="36" font-weight="bold" fill="#ffffff">Game Details & Achievement Showcase</text>
-  <rect x="400" y="180" width="700" height="80" rx="12" fill="#ffffff08"/>
-  <rect x="400" y="280" width="700" height="200" rx="12" fill="#ffffff08"/>
-  <text x="750" y="580" font-family="sans-serif" font-size="16" fill="#a1a1aa" text-anchor="middle">Rich Metadata, SteamGridDB Art, Trailers & Unlock Rarity</text>
+  <rect x="36" y="36" width="1128" height="603" rx="20" fill="#12141c" stroke="#ffffff" stroke-opacity="0.1"/>
+
+  <!-- Hero Panoramic Artwork -->
+  <rect x="56" y="56" width="1088" height="310" rx="16" fill="#1e2336" stroke="#ffffff" stroke-opacity="0.06"/>
+  <rect x="56" y="246" width="1088" height="120" rx="16" fill="#090a0f" fill-opacity="0.8"/>
+
+  <!-- Hero Logo & Launch Button -->
+  <text x="86" y="316" font-family="Segoe UI, sans-serif" font-size="38" font-weight="900" fill="#ffffff">SUPER MARIO BROS. WONDER</text>
+  <rect x="86" y="336" width="130" height="42" rx="12" fill="#783efe" stroke="#783efe"/>
+  <text x="151" y="362" font-family="Segoe UI, sans-serif" font-size="14" font-weight="bold" fill="#ffffff" text-anchor="middle">PLAY GAME</text>
+
+  <rect x="230" y="336" width="140" height="42" rx="12" fill="#ffffff" fill-opacity="0.06" stroke="#ffffff" stroke-opacity="0.1"/>
+  <text x="300" y="362" font-family="Segoe UI, sans-serif" font-size="12" font-weight="semibold" fill="#e4e4e7" text-anchor="middle">Nintendo Switch</text>
+
+  <rect x="382" y="336" width="120" height="42" rx="12" fill="#ffffff" fill-opacity="0.06" stroke="#ffffff" stroke-opacity="0.1"/>
+  <text x="442" y="362" font-family="Segoe UI, sans-serif" font-size="12" font-weight="semibold" fill="#a1a1aa" text-anchor="middle">24.5 hrs played</text>
+
+  <!-- Details Row & Achievements -->
+  <rect x="56" y="400" width="680" height="216" rx="16" fill="#181b26" stroke="#ffffff" stroke-opacity="0.08"/>
+  <text x="80" y="434" font-family="Segoe UI, sans-serif" font-size="16" font-weight="bold" fill="#ffffff">About this game</text>
+  <text x="80" y="466" font-family="Segoe UI, sans-serif" font-size="13" fill="#a1a1aa">Classic side-scrolling Mario gameplay is turned on its head with the addition of Wonder Flowers.</text>
+  <text x="80" y="490" font-family="Segoe UI, sans-serif" font-size="13" fill="#a1a1aa">These game-changing items trigger spectacular moments you have to see to believe.</text>
+
+  <!-- Achievement Strip -->
+  <rect x="756" y="400" width="388" height="216" rx="16" fill="#181b26" stroke="#ffffff" stroke-opacity="0.08"/>
+  <text x="780" y="434" font-family="Segoe UI, sans-serif" font-size="16" font-weight="bold" fill="#ffffff">Achievements</text>
+  <text x="1116" y="434" font-family="Segoe UI, sans-serif" font-size="13" font-weight="bold" fill="#783efe" text-anchor="end">85% Complete</text>
+
+  <rect x="780" y="456" width="340" height="40" rx="10" fill="#ffffff" fill-opacity="0.04"/>
+  <text x="830" y="481" font-family="Segoe UI, sans-serif" font-size="12" font-weight="bold" fill="#ffffff">Wonder Seed Collector</text>
+  <rect x="780" y="506" width="340" height="40" rx="10" fill="#ffffff" fill-opacity="0.04"/>
+  <text x="830" y="531" font-family="Segoe UI, sans-serif" font-size="12" font-weight="bold" fill="#ffffff">Castle Bowser Defeated</text>
 </svg>"##;
-        fs::write(&screen2_path, s2).map_err(|e| e.to_string())?;
-    }
+    fs::write(&screen2_path, s2).map_err(|e| e.to_string())?;
 
     let screen3_path = default_dir.join("screenshot_3.svg");
-    if !screen3_path.exists() {
-        let s3 = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 675" fill="none">
+    let s3 = r##"<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="675" viewBox="0 0 1200 675" fill="none">
   <rect width="1200" height="675" fill="#090a0f"/>
-  <rect x="80" y="50" width="1040" height="575" rx="24" fill="#141724" stroke="#a855f740"/>
-  <text x="600" y="140" font-family="sans-serif" font-size="32" font-weight="bold" fill="#ffffff" text-anchor="middle">Themes & Customization Hub</text>
-  <rect x="160" y="200" width="260" height="180" rx="16" fill="#ffffff08" stroke="#a855f7"/>
-  <rect x="470" y="200" width="260" height="180" rx="16" fill="#ffffff05"/>
-  <rect x="780" y="200" width="260" height="180" rx="16" fill="#ffffff05"/>
-  <text x="600" y="480" font-family="sans-serif" font-size="16" fill="#a1a1aa" text-anchor="middle">Instant Hot-Reloading, In-App Customization & Native .zip Import</text>
+  <rect x="60" y="40" width="1080" height="595" rx="24" fill="#12141c" stroke="#783efe" stroke-opacity="0.4"/>
+
+  <text x="600" y="110" font-family="Segoe UI, sans-serif" font-size="32" font-weight="bold" fill="#ffffff" text-anchor="middle">Themes &amp; Appearance Hub</text>
+  <text x="600" y="145" font-family="Segoe UI, sans-serif" font-size="15" fill="#a1a1aa" text-anchor="middle">Live theme hot-reloading, customizable colors, and modular CSS variables</text>
+
+  <!-- Theme Card 1 (Active) -->
+  <rect x="120" y="190" width="280" height="340" rx="20" fill="#181b26" stroke="#783efe" stroke-width="2"/>
+  <rect x="144" y="214" width="232" height="140" rx="14" fill="#783efe" fill-opacity="0.25"/>
+  <text x="144" y="386" font-family="Segoe UI, sans-serif" font-size="18" font-weight="bold" fill="#ffffff">OpenPlay Default</text>
+  <text x="144" y="412" font-family="Segoe UI, sans-serif" font-size="12" fill="#71717a">Official dark glassmorphic theme</text>
+  <rect x="144" y="440" width="110" height="28" rx="8" fill="#10b981" fill-opacity="0.2" stroke="#10b981" stroke-opacity="0.4"/>
+  <text x="199" y="458" font-family="Segoe UI, sans-serif" font-size="11" font-weight="bold" fill="#34d399" text-anchor="middle">CURRENTLY ACTIVE</text>
+
+  <!-- Theme Card 2 -->
+  <rect x="440" y="190" width="280" height="340" rx="20" fill="#181b26" stroke="#ffffff" stroke-opacity="0.08"/>
+  <rect x="464" y="214" width="232" height="140" rx="14" fill="#e11d48" fill-opacity="0.2"/>
+  <text x="464" y="386" font-family="Segoe UI, sans-serif" font-size="18" font-weight="bold" fill="#ffffff">Switch OLED Red</text>
+  <text x="464" y="412" font-family="Segoe UI, sans-serif" font-size="12" fill="#71717a">Joy-Con crimson red aesthetic</text>
+  <rect x="464" y="440" width="90" height="28" rx="8" fill="#ffffff" fill-opacity="0.06"/>
+  <text x="509" y="458" font-family="Segoe UI, sans-serif" font-size="11" font-weight="semibold" fill="#e4e4e7" text-anchor="middle">Apply Theme</text>
+
+  <!-- Theme Card 3 -->
+  <rect x="760" y="190" width="280" height="340" rx="20" fill="#181b26" stroke="#ffffff" stroke-opacity="0.08"/>
+  <rect x="784" y="214" width="232" height="140" rx="14" fill="#0284c7" fill-opacity="0.2"/>
+  <text x="784" y="386" font-family="Segoe UI, sans-serif" font-size="18" font-weight="bold" fill="#ffffff">PlayStation Slate</text>
+  <text x="784" y="412" font-family="Segoe UI, sans-serif" font-size="12" fill="#71717a">Clean console minimalism</text>
+  <rect x="784" y="440" width="90" height="28" rx="8" fill="#ffffff" fill-opacity="0.06"/>
+  <text x="829" y="458" font-family="Segoe UI, sans-serif" font-size="11" font-weight="semibold" fill="#e4e4e7" text-anchor="middle">Apply Theme</text>
+
+  <text x="600" y="580" font-family="Segoe UI, sans-serif" font-size="13" font-mono="true" fill="#783efe" text-anchor="middle">Instant CSS Hot-Reload &bull; JSON Schema Guided &bull; Native .zip Import</text>
 </svg>"##;
-        fs::write(&screen3_path, s3).map_err(|e| e.to_string())?;
-    }
+    fs::write(&screen3_path, s3).map_err(|e| e.to_string())?;
 
     Ok(())
 }

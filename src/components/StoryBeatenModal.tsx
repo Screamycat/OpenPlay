@@ -2,7 +2,8 @@ import React from "react";
 import { Game } from "../types/game";
 import { resolveGridCoverSrc, formatPlaytime } from "../utils/image";
 import { getNextBeatenPromptHours } from "../utils/completionStatus";
-import { ShieldCheck, Check, Clock, X, Sparkles, Gamepad2 } from "lucide-react";
+import { ShieldCheck, Check, Clock, X, Sparkles } from "lucide-react";
+import { PlatformIcon } from "./icons/PlatformIcons";
 
 interface StoryBeatenModalProps {
   game: Game;
@@ -43,7 +44,7 @@ export const StoryBeatenModal: React.FC<StoryBeatenModalProps> = ({
         <div className="absolute -top-24 -right-24 w-48 h-48 bg-emerald-500/15 rounded-full blur-3xl pointer-events-none" />
         <div
           className="absolute -bottom-24 -left-24 w-48 h-48 rounded-full blur-3xl pointer-events-none opacity-20"
-          style={{ backgroundColor: "var(--app-accent-color, #a855f7)" }}
+          style={{ backgroundColor: "var(--app-accent-color, #783efe)" }}
         />
 
         {/* Close Button */}
@@ -61,7 +62,7 @@ export const StoryBeatenModal: React.FC<StoryBeatenModalProps> = ({
             {coverSrc ? (
               <img src={coverSrc} alt={game.title} className="w-full h-full object-cover" />
             ) : (
-              <Gamepad2 className="w-6 h-6 text-zinc-500" />
+              <PlatformIcon platform={game.platforms?.[0] || game.source} className="w-6 h-6 text-zinc-500" />
             )}
           </div>
           <div className="min-w-0 pr-6">

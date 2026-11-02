@@ -186,7 +186,7 @@ export const TrailerModal: React.FC<TrailerModalProps> = ({
         className="theme-modal-container rounded-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]"
       >
         {/* Header */}
-        <div className="px-6 py-4 border-b border-[#202538] flex items-center justify-between">
+        <div className="px-6 py-4 theme-modal-header">
           <div className="flex items-center space-x-2.5">
             <div className="p-2 theme-accent-subtle-bg rounded-xl border theme-accent-subtle-border theme-accent-text">
               <Film className="w-5 h-5" />

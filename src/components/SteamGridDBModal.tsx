@@ -216,7 +216,7 @@ export const SteamGridDBModal: React.FC<SteamGridDBModalProps> = ({
         className="theme-modal-container rounded-2xl w-full max-w-5xl h-[720px] flex flex-col overflow-hidden"
       >
         {/* Modal Header */}
-        <div className="h-14 px-6 border-b border-white/10 flex items-center justify-between bg-white/[0.02] shrink-0">
+        <div className="h-14 px-6 theme-modal-header shrink-0">
           <div className="flex items-center space-x-2.5">
             <Sparkles className="w-5 h-5 theme-accent-text" />
             <div>

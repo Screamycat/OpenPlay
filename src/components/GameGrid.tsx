@@ -1,7 +1,8 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { Game } from "../types/game";
 import { resolveGridCoverSrc, isVideoSrc, getStaticFallbackCover } from "../utils/image";
-import { Star, Gamepad2, Cloud, Loader2 } from "lucide-react";
+import { Star, Cloud, Loader2 } from "lucide-react";
+import { PlatformIcon } from "./icons/PlatformIcons";
 import { GroupByOption } from "./TopNav";
 import { getEffectiveCompletionStatus } from "../utils/completionStatus";
 import { formatReleaseYear } from "../utils/date";
@@ -180,6 +181,7 @@ const GameCard = React.memo<GameCardProps>(
     return (
       <div
         ref={cardRef}
+        data-theme-part="game-card"
         onClick={() => onSelect(game)}
         onDoubleClick={() => onDoubleClick(game)}
         onContextMenu={(e) => {
@@ -192,10 +194,16 @@ const GameCard = React.memo<GameCardProps>(
             ? {
                 minHeight: `${cardHeight}px`,
                 containIntrinsicSize: `auto ${cardWidth}px auto ${cardHeight}px`,
+                borderRadius: "var(--theme-card-radius, 16px)",
+                aspectRatio: "var(--theme-card-aspect, 2 / 3)",
               }
-            : { minHeight: `${cardHeight}px` }
+            : {
+                minHeight: `${cardHeight}px`,
+                borderRadius: "var(--theme-card-radius, 16px)",
+                aspectRatio: "var(--theme-card-aspect, 2 / 3)",
+              }
         }
-        className={`group relative rounded-lg overflow-hidden cursor-pointer transition-[box-shadow,opacity,transform] duration-200 aspect-[2/3] bg-black/30 border-0 ${
+        className={`group relative overflow-hidden cursor-pointer transition-[box-shadow,opacity,transform] duration-200 bg-black/30 border-0 ${
           isBelowFold ? "game-card-deferred" : "game-card-isolated"
         } ${
           isLaunching
@@ -264,7 +272,7 @@ const GameCard = React.memo<GameCardProps>(
         ) : (
           /* Fallback only if no cover artwork */
           <div className="absolute inset-0 flex flex-col justify-center items-center text-center p-3 bg-gradient-to-t from-black/80 to-black/40">
-            <Gamepad2 className="w-8 h-8 text-zinc-500 mb-2" />
+            <PlatformIcon platform={game.platforms?.[0] || game.source} className="w-8 h-8 text-zinc-500 mb-2" />
             <span className="text-xs font-bold text-zinc-100 line-clamp-2 leading-tight">
               {game.title}
             </span>
@@ -463,6 +471,7 @@ export const GameGrid: React.FC<GameGridProps> = ({
     <div
       ref={scrollContainerRef}
       onScroll={handleScroll}
+      data-theme-part="game-grid-container"
       className="game-grid-scroll flex-1 overflow-y-auto p-3 bg-transparent select-none space-y-4"
     >
       {groups.map((group) => (
@@ -490,6 +499,7 @@ export const GameGrid: React.FC<GameGridProps> = ({
           )}
 
           <div
+            data-theme-part="game-grid"
             className="grid gap-2.5 justify-center"
             style={{
               gridTemplateColumns: `repeat(auto-fill, minmax(${cardWidth}px, 1fr))`,

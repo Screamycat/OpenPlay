@@ -1,4 +1,4 @@
-# 🎮 OpenPlay — Development Roadmap, Backlog & Bug Tracker
+﻿# 🎮 OpenPlay — Development Roadmap, Backlog & Bug Tracker
 Welcome to the central tracking document for **OpenPlay**. Use this document to easily add new feature ideas, plan architectural or design adjustments, log issues/bugs, and track completed milestones.
 
 ---
@@ -70,10 +70,10 @@ Welcome to the central tracking document for **OpenPlay**. Use this document to 
 - [x] **Accent not dominant**: There are still places in the ui where the accent color is not the dominant color. There should be no "magic" colors.
 - [x] **In game counter for all**: Make in game counter not fixed for only steam games, and open to all platforms.
 - [x] **Cover favorite icon**: The yellow star icon in the top right corner of game covers should be white instead of yellow.
-- [ ] **Platform Icons**: Xbox, Epic, GOG, Battle.net are in need of a upgraded, high res icon. Ubisoft, EA, Riot Games all says Local PC with defualt icon, they should recive similar treatment.
-- [ ] **Title image percentage**: Instead of the title image being confined  to pixels, it should be confiend to a max of 50% of the heros width and 65% of the heros height.
-- [ ] **Ontouched games in hub**: Untouched games in the achivement hub should not be in calcualtion for things like avarege completion and unlocked count etc.
-- [ ] **Sidebar version number** The version number in the bottom sidebar is not automatically synced.
+- [x] **Platform Icons**: Xbox, Epic, GOG, Battle.net are in need of a upgraded, high res icon. Ubisoft, EA, Riot Games all says Local PC with defualt icon, they should recive similar treatment.
+- [x] **Title image percentage**: Instead of the title image being confined  to pixels, it should be confiend to a max of 50% of the heros width and 65% of the heros height.
+- [x] **Ontouched games in hub**: Untouched games in the achivement hub should not be in calcualtion for things like avarege completion and unlocked count etc.
+- [x] **Sidebar version number** The version number in the bottom sidebar is not automatically synced.
 ---
 
 ## 🐛 Bug Tracker

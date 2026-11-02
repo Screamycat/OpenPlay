@@ -71,8 +71,32 @@ export function applyTheme(theme: ThemeInfo): void {
           } else {
             cssVars.push(`  --theme-card-radius: 16px;`);
           }
+        } else if (setting.id === "card_aspect_ratio") {
+          const str = String(val).toLowerCase();
+          if (str.includes("1:1") || str.includes("square")) {
+            cssVars.push(`  --theme-card-aspect: 1 / 1;`);
+          } else if (str.includes("16:9") || str.includes("landscape")) {
+            cssVars.push(`  --theme-card-aspect: 16 / 9;`);
+          } else {
+            cssVars.push(`  --theme-card-aspect: 2 / 3;`);
+          }
+        } else if (setting.id === "hero_aspect_ratio") {
+          const str = String(val).toLowerCase();
+          if (str.includes("16:9")) {
+            cssVars.push(`  --theme-hero-aspect: 16 / 9;`);
+          } else if (str.includes("21:9")) {
+            cssVars.push(`  --theme-hero-aspect: 21 / 9;`);
+          } else if (str.includes("hidden")) {
+            cssVars.push(`  --theme-hero-aspect: 0;`);
+          } else {
+            cssVars.push(`  --theme-hero-aspect: 96 / 31;`);
+          }
         } else if (setting.id === "enable_card_glow") {
           cssVars.push(`  --theme-card-glow: ${val ? "1" : "0"};`);
+        } else if (setting.id === "logo_max_width" && typeof val === "number") {
+          cssVars.push(`  --theme-logo-max-w: ${val}%;`);
+        } else if (setting.id === "logo_max_height" && typeof val === "number") {
+          cssVars.push(`  --theme-logo-max-h: ${val}%;`);
         } else if (setting.id === "glass_intensity") {
           const str = String(val);
           if (str.includes("12px")) {

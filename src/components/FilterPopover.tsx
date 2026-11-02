@@ -196,9 +196,9 @@ export const FilterPopover: React.FC<FilterPopoverProps> = ({
             style={
               showHiddenOnly
                 ? {
-                    backgroundColor: "color-mix(in srgb, var(--app-accent-color, #a855f7) 20%, transparent)",
-                    borderColor: "color-mix(in srgb, var(--app-accent-color, #a855f7) 45%, transparent)",
-                    color: "var(--app-accent-color, #a855f7)",
+                    backgroundColor: "color-mix(in srgb, var(--app-accent-color, #783efe) 20%, transparent)",
+                    borderColor: "color-mix(in srgb, var(--app-accent-color, #783efe) 45%, transparent)",
+                    color: "var(--app-accent-color, #783efe)",
                   }
                 : undefined
             }
@@ -213,8 +213,8 @@ export const FilterPopover: React.FC<FilterPopoverProps> = ({
                 style={
                   showHiddenOnly
                     ? {
-                        backgroundColor: "var(--app-accent-color, #a855f7)",
-                        borderColor: "var(--app-accent-color, #a855f7)",
+                        backgroundColor: "var(--app-accent-color, #783efe)",
+                        borderColor: "var(--app-accent-color, #783efe)",
                       }
                     : undefined
                 }
@@ -240,9 +240,9 @@ export const FilterPopover: React.FC<FilterPopoverProps> = ({
             style={
               showHiddenGames
                 ? {
-                    backgroundColor: "color-mix(in srgb, var(--app-accent-color, #a855f7) 14%, transparent)",
-                    borderColor: "color-mix(in srgb, var(--app-accent-color, #a855f7) 35%, transparent)",
-                    color: "var(--app-accent-color, #a855f7)",
+                    backgroundColor: "color-mix(in srgb, var(--app-accent-color, #783efe) 14%, transparent)",
+                    borderColor: "color-mix(in srgb, var(--app-accent-color, #783efe) 35%, transparent)",
+                    color: "var(--app-accent-color, #783efe)",
                   }
                 : undefined
             }
@@ -257,8 +257,8 @@ export const FilterPopover: React.FC<FilterPopoverProps> = ({
                 style={
                   showHiddenGames
                     ? {
-                        backgroundColor: "var(--app-accent-color, #a855f7)",
-                        borderColor: "var(--app-accent-color, #a855f7)",
+                        backgroundColor: "var(--app-accent-color, #783efe)",
+                        borderColor: "var(--app-accent-color, #783efe)",
                       }
                     : undefined
                 }
