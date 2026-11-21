@@ -418,9 +418,9 @@ impl EpicMetadataFetcher {
         });
 
         let mut post_step1 = client
-            .post("https://store.epicgames.com/graphql")
+            .post("https://launcher.store.epicgames.com/graphql")
             .header("Content-Type", "application/json")
-            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) EpicGamesLauncher")
+            .header("User-Agent", "EpicGamesLauncher/16.1.1-34676166+++Portal+Release-Live")
             .json(&store_payload);
 
         if let Some(token) = access_token.filter(|t| !t.trim().is_empty()) {
@@ -439,7 +439,7 @@ impl EpicMetadataFetcher {
                 let mut req_step1 = client
                     .get("https://launcher.store.epicgames.com/graphql")
                     .query(&[("query", store_query), ("variables", &vars_str)])
-                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) EpicGamesLauncher");
+                    .header("User-Agent", "EpicGamesLauncher/16.1.1-34676166+++Portal+Release-Live");
 
                 if let Some(token) = access_token.filter(|t| !t.trim().is_empty()) {
                     req_step1 = req_step1.header("Authorization", format!("Bearer {}", token));
@@ -509,9 +509,9 @@ impl EpicMetadataFetcher {
             });
 
             let mut req_builder = client
-                .post("https://store.epicgames.com/graphql")
+                .post("https://launcher.store.epicgames.com/graphql")
                 .header("Content-Type", "application/json")
-                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) EpicGamesLauncher");
+                .header("User-Agent", "EpicGamesLauncher/16.1.1-34676166+++Portal+Release-Live");
 
             if let Some(token) = access_token.filter(|t| !t.trim().is_empty()) {
                 req_builder = req_builder.header("Authorization", format!("Bearer {}", token));

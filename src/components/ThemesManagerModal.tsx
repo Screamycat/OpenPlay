@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import {
   X,
   Palette,
@@ -52,11 +53,16 @@ export const ThemesManagerModal: React.FC<ThemesManagerModalProps> = ({
   const [isSavingConfig, setIsSavingConfig] = useState(false);
 
   useEffect(() => {
-    if (isOpen) {
+    if (!isOpen) return;
+    loadThemes();
+    setErrorMessage(null);
+    setSuccessMessage(null);
+    const unlisten = listen("cloud-sync-completed", () => {
       loadThemes();
-      setErrorMessage(null);
-      setSuccessMessage(null);
-    }
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
   }, [isOpen]);
 
   const loadThemes = async () => {
@@ -124,9 +130,21 @@ export const ThemesManagerModal: React.FC<ThemesManagerModalProps> = ({
     if (!confirm) return;
 
     try {
+      const wasActive = theme.manifest.id === activeThemeId;
       await invoke("delete_theme", { themeId: theme.manifest.id });
       setSuccessMessage(`Theme "${theme.manifest.name}" deleted.`);
-      await loadThemes();
+      const updatedList = await invoke<ThemeInfo[]>("get_installed_themes");
+      const currentActiveId = await invoke<string>("get_active_theme_id");
+      setThemes(updatedList);
+      setActiveThemeId(currentActiveId);
+      const fallback =
+        updatedList.find((t) => t.manifest.id === currentActiveId) || updatedList[0] || null;
+      setSelectedTheme(fallback);
+      setActiveSlideIndex(0);
+      if (wasActive && fallback) {
+        applyTheme(fallback);
+        if (onThemeChanged) onThemeChanged(fallback);
+      }
     } catch (err: any) {
       setErrorMessage(typeof err === "string" ? err : "Failed to delete theme.");
     }
@@ -202,14 +220,16 @@ export const ThemesManagerModal: React.FC<ThemesManagerModalProps> = ({
 
   return (
     <div
+      id="openplay-themes-modal"
       onClick={onClose}
       data-theme-part="themes-modal"
-      className="fixed inset-0 z-50 theme-modal-backdrop flex items-center justify-center p-4 sm:p-6 md:p-8 select-none animate-in fade-in duration-150"
+      className="openplay-system-modal fixed inset-0 z-50 theme-modal-backdrop flex items-center justify-center p-4 sm:p-6 md:p-8 select-none animate-in fade-in duration-150"
     >
       {/* Main Container */}
       <div
         onClick={(e) => e.stopPropagation()}
         data-theme-part="modal-container"
+        data-gamepad-zone="modal"
         className="theme-modal-container rounded-2xl w-full max-w-6xl h-[90vh] flex flex-col overflow-hidden text-zinc-100 z-10"
       >
         {/* Top Header */}
@@ -270,6 +290,7 @@ export const ThemesManagerModal: React.FC<ThemesManagerModalProps> = ({
             {/* Close */}
             <button
               onClick={onClose}
+              data-gamepad-close="true"
               className="w-8 h-8 rounded-xl bg-white/5 hover:bg-white/15 text-zinc-400 hover:text-white flex items-center justify-center transition-colors cursor-pointer border border-white/10"
             >
               <X className="w-4 h-4" />

@@ -1,6 +1,6 @@
 use crate::models::{
-    Achievement, AppConfig, BackupInfo, ConfiguredConsole, EmulatorProfile, Game, GameAchievementSummary, GameLink, GameTrailer, HunterProfile,
-    LibraryIntegration, TombstoneRecord,
+    Achievement, AppConfig, BackupInfo, ConfiguredConsole, EmulatorProfile, Game, GameAchievementSummary, GameLink, GameSaveConfig, GameTrailer, HunterProfile,
+    LibraryIntegration, SaveLocationCacheEntry, SaveLocationRule, TombstoneRecord,
 };
 use rusqlite::{params, Connection, Result};
 use std::fs;
@@ -13,14 +13,24 @@ pub struct Database {
 
 impl Database {
     pub fn new() -> Result<Self, String> {
+        if let Ok(path) = std::env::var("OPENPLAY_DB_PATH") {
+            return Self::new_at_path(Path::new(&path));
+        }
+
         let db_dir = dirs::data_dir()
             .unwrap_or_else(|| PathBuf::from("."))
             .join("OpenPlay");
 
         fs::create_dir_all(&db_dir).map_err(|e| e.to_string())?;
         let db_path = db_dir.join("openplay.db");
+        Self::new_at_path(&db_path)
+    }
 
-        let conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
+    pub fn new_at_path(db_path: &Path) -> Result<Self, String> {
+        if let Some(parent) = db_path.parent() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        let conn = Connection::open(db_path).map_err(|e| e.to_string())?;
         let db = Database {
             conn: Mutex::new(conn),
         };
@@ -95,6 +105,9 @@ impl Database {
         let _ = conn.execute("ALTER TABLE games ADD COLUMN auto_beaten INTEGER NOT NULL DEFAULT 0", []);
         let _ = conn.execute("ALTER TABLE games ADD COLUMN beaten_prompt_playtime INTEGER", []);
         let _ = conn.execute("ALTER TABLE games ADD COLUMN emulator_id TEXT", []);
+        let _ = conn.execute("ALTER TABLE games ADD COLUMN cloud_save_enabled INTEGER NOT NULL DEFAULT 0", []);
+        let _ = conn.execute("ALTER TABLE games ADD COLUMN cloud_save_retention_override INTEGER", []);
+        let _ = conn.execute("ALTER TABLE games ADD COLUMN last_played_device_id TEXT", []);
 
         // Normalize date_added formats to clean YYYY-MM-DD and strip broken replacement chars in titles
         let _ = conn.execute("UPDATE games SET date_added = SUBSTR(date_added, 1, 10) WHERE date_added LIKE '%T%'", []);
@@ -165,6 +178,47 @@ impl Database {
             }
 
             let _ = conn.execute("PRAGMA user_version = 3", []);
+        }
+
+        if user_version < 4 {
+            // Reset purely auto-scanned rows to epoch baseline so fresh scans never clobber curated peer edits,
+            // while stamping now_utc on games with user-curated state (Beaten, auto_beaten, ratings, favorites, hidden, notes).
+            let _ = conn.execute(
+                "UPDATE games SET updated_at = '1970-01-01T00:00:00Z' WHERE
+                    auto_beaten = 0
+                    AND (completion_status IS NULL OR completion_status IN ('Auto', 'Not Played', 'Played', 'Playing'))
+                    AND is_favorite = 0
+                    AND is_hidden = 0
+                    AND user_rating IS NULL
+                    AND (notes IS NULL OR TRIM(notes) = '')
+                    AND (cover_image IS NULL OR cover_image NOT LIKE '%custom_artwork%')
+                    AND (background_image IS NULL OR background_image NOT LIKE '%custom_artwork%')
+                    AND (logo_image IS NULL OR logo_image NOT LIKE '%custom_artwork%')",
+                [],
+            );
+            let now_utc = chrono::Utc::now().to_rfc3339();
+            let _ = conn.execute(
+                "UPDATE games SET updated_at = ?1 WHERE
+                    auto_beaten = 1
+                    OR (completion_status IS NOT NULL AND completion_status NOT IN ('Auto', 'Not Played', 'Played', 'Playing'))
+                    OR is_favorite = 1
+                    OR is_hidden = 1
+                    OR user_rating IS NOT NULL
+                    OR (notes IS NOT NULL AND TRIM(notes) != '')",
+                params![&now_utc],
+            );
+            let _ = conn.execute("PRAGMA user_version = 4", []);
+        }
+
+        if user_version < 5 {
+            let _ = conn.execute("ALTER TABLE games ADD COLUMN cloud_save_enabled INTEGER NOT NULL DEFAULT 0", []);
+            let _ = conn.execute("ALTER TABLE games ADD COLUMN cloud_save_retention_override INTEGER", []);
+            let _ = conn.execute("PRAGMA user_version = 5", []);
+        }
+
+        if user_version < 6 {
+            let _ = conn.execute("ALTER TABLE games ADD COLUMN last_played_device_id TEXT", []);
+            let _ = conn.execute("PRAGMA user_version = 6", []);
         }
 
         conn.execute(
@@ -249,113 +303,190 @@ impl Database {
             [],
         )?;
 
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS game_save_configs (
+                game_id TEXT PRIMARY KEY,
+                custom_save_paths TEXT NOT NULL DEFAULT '[]',
+                custom_config_paths TEXT NOT NULL DEFAULT '[]',
+                last_synced_save_hash TEXT,
+                last_synced_snapshot_id TEXT,
+                last_synced_at TEXT,
+                updated_at TEXT NOT NULL
+            )",
+            [],
+        )?;
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS save_location_cache (
+                cache_key TEXT PRIMARY KEY,
+                pcgw_page TEXT,
+                raw_rules_json TEXT NOT NULL,
+                fetched_at TEXT NOT NULL
+            )",
+            [],
+        )?;
+
+        if user_version < 6 {
+            let _ = conn.execute("DELETE FROM save_location_cache", []);
+            let _ = conn.execute("PRAGMA user_version = 6", []);
+        }
+
+        if user_version < 7 {
+            let _ = conn.execute(
+                "DELETE FROM save_location_cache WHERE raw_rules_json = '[]' OR pcgw_page LIKE '%Sun Wukong%'",
+                [],
+            );
+            let _ = conn.execute("PRAGMA user_version = 7", []);
+        }
+
         Ok(())
+    }
+
+    fn row_to_game(row: &rusqlite::Row<'_>) -> Result<Game> {
+        let genres_json: String = row.get(17).unwrap_or_else(|_| "[]".to_string());
+        let features_json: String = row.get(18).unwrap_or_else(|_| "[]".to_string());
+        let platforms_json: String = row.get(19).unwrap_or_else(|_| "[]".to_string());
+        let links_json: String = row.get(28).unwrap_or_else(|_| "[]".to_string());
+        let screenshots_json: String = row.get(29).unwrap_or_else(|_| "[]".to_string());
+        let trailers_json: String = row.get(31).unwrap_or_else(|_| "[]".to_string());
+        let tags_json: String = row.get(38).unwrap_or_else(|_| "[]".to_string());
+        let categories_json: String = row.get(39).unwrap_or_else(|_| "[]".to_string());
+        let play_actions_json: String = row.get(43).unwrap_or_else(|_| "[]".to_string());
+
+        let genres: Vec<String> = serde_json::from_str(&genres_json).unwrap_or_default();
+        let features: Vec<String> = serde_json::from_str(&features_json).unwrap_or_default();
+        let platforms: Vec<String> = serde_json::from_str(&platforms_json).unwrap_or_default();
+        let links: Vec<GameLink> = serde_json::from_str(&links_json).unwrap_or_default();
+        let screenshots: Vec<String> = serde_json::from_str(&screenshots_json).unwrap_or_default();
+        let trailers: Vec<GameTrailer> = serde_json::from_str(&trailers_json).unwrap_or_default();
+        let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
+        let categories: Vec<String> = serde_json::from_str(&categories_json).unwrap_or_default();
+        let play_actions: Vec<crate::models::GameAction> = serde_json::from_str(&play_actions_json).unwrap_or_default();
+
+        let is_installed_int: i32 = row.get(8)?;
+        let is_favorite_int: i32 = row.get(9)?;
+        let is_hidden_int: i32 = row.get(42).unwrap_or(0);
+        let auto_beaten_int: i32 = row.get(44).unwrap_or(0);
+        let beaten_prompt_playtime: Option<u64> = row.get::<_, Option<i64>>(45).unwrap_or(None).map(|v| v as u64);
+
+        Ok(Game {
+            id: row.get(0)?,
+            title: row.get(1)?,
+            sorting_title: row.get(2)?,
+            source: row.get(3)?,
+            source_id: row.get(4)?,
+            install_directory: row.get(5)?,
+            executable_path: row.get(6)?,
+            launch_arguments: row.get(7)?,
+            is_installed: is_installed_int != 0,
+            is_favorite: is_favorite_int != 0,
+            cover_image: row.get(10)?,
+            background_image: row.get(11)?,
+            logo_image: row.get(12)?,
+            icon_image: row.get(13)?,
+            developer: row.get(14)?,
+            publisher: row.get(15)?,
+            release_date: row.get(16)?,
+            genres,
+            features,
+            platforms,
+            community_score: row.get(20)?,
+            user_rating: row.get(21)?,
+            playtime_seconds: row.get::<_, i64>(22)? as u64,
+            last_played: row.get(23)?,
+            date_added: row.get(24)?,
+            completion_status: row.get(25)?,
+            description: row.get(26)?,
+            notes: row.get(27)?,
+            links,
+            screenshots,
+            size_on_disk: row.get::<_, Option<i64>>(30)?.map(|v| v as u64),
+            trailers,
+            age_rating: row.get(32)?,
+            critic_score: row.get(33)?,
+            series: row.get(34)?,
+            hltb_main: row.get(35)?,
+            hltb_extra: row.get(36)?,
+            hltb_completionist: row.get(37)?,
+            tags,
+            categories,
+            region: row.get(40)?,
+            play_count: row.get(41)?,
+            is_hidden: is_hidden_int != 0,
+            play_actions,
+            auto_beaten: auto_beaten_int != 0,
+            beaten_prompt_playtime,
+            emulator_id: row.get(46)?,
+            updated_at: row.get(47)?,
+            playtime_by_device: row.get(48)?,
+            cloud_save_enabled: row.get::<_, i32>(49).unwrap_or(0) != 0,
+            cloud_save_retention_override: row.get::<_, Option<i64>>(50).unwrap_or(None).map(|v| v as u32),
+            last_played_device_id: row.get(51).unwrap_or(None),
+            played_on_other_device: false,
+        })
+    }
+
+    const GAME_SELECT_COLUMNS: &'static str = "
+        id, title, sorting_title, source, source_id, install_directory, executable_path,
+        launch_arguments, is_installed, is_favorite, cover_image, background_image,
+        logo_image, icon_image, developer, publisher, release_date, genres, features,
+        platforms, community_score, user_rating, playtime_seconds, last_played,
+        date_added, completion_status, description, notes, links, screenshots, size_on_disk,
+        trailers, age_rating, critic_score, series, hltb_main, hltb_extra, hltb_completionist,
+        tags, categories, region, play_count, is_hidden, play_actions,
+        auto_beaten, beaten_prompt_playtime, emulator_id, updated_at, playtime_by_device,
+        cloud_save_enabled, cloud_save_retention_override, last_played_device_id";
+
+    pub fn is_other_device_id(last_played_device_id: Option<&str>, current_device_id: &str) -> bool {
+        match last_played_device_id.map(str::trim).filter(|s| !s.is_empty()) {
+            Some("external") => true,
+            Some(dev_id) => dev_id != current_device_id,
+            None => false,
+        }
+    }
+
+    pub fn populate_other_device_flag(&self, game: &mut Game) {
+        if let Ok(current_device_id) = self.get_or_create_device_id() {
+            game.played_on_other_device =
+                Self::is_other_device_id(game.last_played_device_id.as_deref(), &current_device_id);
+        }
     }
 
     pub fn get_all_games(&self) -> Result<Vec<Game>, String> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn
-            .prepare("SELECT 
-                id, title, sorting_title, source, source_id, install_directory, executable_path,
-                launch_arguments, is_installed, is_favorite, cover_image, background_image,
-                logo_image, icon_image, developer, publisher, release_date, genres, features,
-                platforms, community_score, user_rating, playtime_seconds, last_played,
-                date_added, completion_status, description, notes, links, screenshots, size_on_disk,
-                trailers, age_rating, critic_score, series, hltb_main, hltb_extra, hltb_completionist,
-                tags, categories, region, play_count, is_hidden, play_actions,
-                auto_beaten, beaten_prompt_playtime, emulator_id, updated_at, playtime_by_device
-            FROM games ORDER BY title ASC")
-            .map_err(|e| e.to_string())?;
+        let current_device_id = Self::get_or_create_device_id_conn(&conn)?;
+        let sql = format!("SELECT {} FROM games ORDER BY title ASC", Self::GAME_SELECT_COLUMNS);
+        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
 
         let rows = stmt
-            .query_map([], |row| {
-                let genres_json: String = row.get(17).unwrap_or_else(|_| "[]".to_string());
-                let features_json: String = row.get(18).unwrap_or_else(|_| "[]".to_string());
-                let platforms_json: String = row.get(19).unwrap_or_else(|_| "[]".to_string());
-                let links_json: String = row.get(28).unwrap_or_else(|_| "[]".to_string());
-                let screenshots_json: String = row.get(29).unwrap_or_else(|_| "[]".to_string());
-                let trailers_json: String = row.get(31).unwrap_or_else(|_| "[]".to_string());
-                let tags_json: String = row.get(38).unwrap_or_else(|_| "[]".to_string());
-                let categories_json: String = row.get(39).unwrap_or_else(|_| "[]".to_string());
-                let play_actions_json: String = row.get(43).unwrap_or_else(|_| "[]".to_string());
-
-                let genres: Vec<String> = serde_json::from_str(&genres_json).unwrap_or_default();
-                let features: Vec<String> = serde_json::from_str(&features_json).unwrap_or_default();
-                let platforms: Vec<String> = serde_json::from_str(&platforms_json).unwrap_or_default();
-                let links: Vec<GameLink> = serde_json::from_str(&links_json).unwrap_or_default();
-                let screenshots: Vec<String> = serde_json::from_str(&screenshots_json).unwrap_or_default();
-                let trailers: Vec<GameTrailer> = serde_json::from_str(&trailers_json).unwrap_or_default();
-                let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
-                let categories: Vec<String> = serde_json::from_str(&categories_json).unwrap_or_default();
-                let play_actions: Vec<crate::models::GameAction> = serde_json::from_str(&play_actions_json).unwrap_or_default();
-
-                let is_installed_int: i32 = row.get(8)?;
-                let is_favorite_int: i32 = row.get(9)?;
-                let is_hidden_int: i32 = row.get(42).unwrap_or(0);
-                let auto_beaten_int: i32 = row.get(44).unwrap_or(0);
-                let beaten_prompt_playtime: Option<u64> = row.get::<_, Option<i64>>(45).unwrap_or(None).map(|v| v as u64);
-
-                Ok(Game {
-                    id: row.get(0)?,
-                    title: row.get(1)?,
-                    sorting_title: row.get(2)?,
-                    source: row.get(3)?,
-                    source_id: row.get(4)?,
-                    install_directory: row.get(5)?,
-                    executable_path: row.get(6)?,
-                    launch_arguments: row.get(7)?,
-                    is_installed: is_installed_int != 0,
-                    is_favorite: is_favorite_int != 0,
-                    cover_image: row.get(10)?,
-                    background_image: row.get(11)?,
-                    logo_image: row.get(12)?,
-                    icon_image: row.get(13)?,
-                    developer: row.get(14)?,
-                    publisher: row.get(15)?,
-                    release_date: row.get(16)?,
-                    genres,
-                    features,
-                    platforms,
-                    community_score: row.get(20)?,
-                    user_rating: row.get(21)?,
-                    playtime_seconds: row.get::<_, i64>(22)? as u64,
-                    last_played: row.get(23)?,
-                    date_added: row.get(24)?,
-                    completion_status: row.get(25)?,
-                    description: row.get(26)?,
-                    notes: row.get(27)?,
-                    links,
-                    screenshots,
-                    size_on_disk: row.get::<_, Option<i64>>(30)?.map(|v| v as u64),
-                    trailers,
-                    age_rating: row.get(32)?,
-                    critic_score: row.get(33)?,
-                    series: row.get(34)?,
-                    hltb_main: row.get(35)?,
-                    hltb_extra: row.get(36)?,
-                    hltb_completionist: row.get(37)?,
-                    tags,
-                    categories,
-                    region: row.get(40)?,
-                    play_count: row.get(41)?,
-                    is_hidden: is_hidden_int != 0,
-                    play_actions,
-                    auto_beaten: auto_beaten_int != 0,
-                    beaten_prompt_playtime,
-                    emulator_id: row.get(46)?,
-                    updated_at: row.get(47)?,
-                    playtime_by_device: row.get(48)?,
-                })
-            })
+            .query_map([], Self::row_to_game)
             .map_err(|e| e.to_string())?;
 
         let mut games = Vec::new();
         for r in rows {
-            if let Ok(g) = r {
+            if let Ok(mut g) = r {
+                g.played_on_other_device =
+                    Self::is_other_device_id(g.last_played_device_id.as_deref(), &current_device_id);
                 games.push(g);
             }
         }
         Ok(games)
+    }
+
+    pub fn get_game_by_id(&self, game_id: &str) -> Result<Option<Game>, String> {
+        let conn = self.conn.lock().unwrap();
+        let current_device_id = Self::get_or_create_device_id_conn(&conn)?;
+        let sql = format!("SELECT {} FROM games WHERE id = ?1", Self::GAME_SELECT_COLUMNS);
+        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+        match stmt.query_row(params![game_id], Self::row_to_game) {
+            Ok(mut g) => {
+                g.played_on_other_device =
+                    Self::is_other_device_id(g.last_played_device_id.as_deref(), &current_device_id);
+                Ok(Some(g))
+            }
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.to_string()),
+        }
     }
 
     pub fn upsert_game(&self, game: &Game) -> Result<(), String> {
@@ -380,12 +511,13 @@ impl Database {
                 date_added, completion_status, description, notes, links, screenshots, size_on_disk,
                 trailers, age_rating, critic_score, series, hltb_main, hltb_extra, hltb_completionist,
                 tags, categories, region, play_count, is_hidden, play_actions,
-                auto_beaten, beaten_prompt_playtime, emulator_id, updated_at, playtime_by_device
+                auto_beaten, beaten_prompt_playtime, emulator_id, updated_at, playtime_by_device,
+                cloud_save_enabled, cloud_save_retention_override, last_played_device_id
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
                 ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31,
                 ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44, ?45, ?46, ?47,
-                ?48, ?49
+                ?48, ?49, ?50, ?51, ?52
             ) ON CONFLICT(id) DO UPDATE SET
                 title = excluded.title,
                 sorting_title = COALESCE(excluded.sorting_title, games.sorting_title),
@@ -452,7 +584,8 @@ impl Database {
                 beaten_prompt_playtime = games.beaten_prompt_playtime,
                 emulator_id = COALESCE(excluded.emulator_id, games.emulator_id),
                 updated_at = COALESCE(games.updated_at, excluded.updated_at),
-                playtime_by_device = COALESCE(games.playtime_by_device, excluded.playtime_by_device)",
+                playtime_by_device = COALESCE(games.playtime_by_device, excluded.playtime_by_device),
+                last_played_device_id = COALESCE(excluded.last_played_device_id, games.last_played_device_id)",
             params![
                 game.id,
                 game.title,
@@ -501,8 +634,26 @@ impl Database {
                 if game.auto_beaten { 1 } else { 0 },
                 game.beaten_prompt_playtime.map(|v| v as i64),
                 game.emulator_id,
-                game.updated_at.as_deref().unwrap_or(&now_utc),
+                game.updated_at.as_deref().unwrap_or_else(|| {
+                    let is_curated = game.auto_beaten
+                        || game.is_favorite
+                        || game.is_hidden
+                        || game.user_rating.is_some()
+                        || !game.notes.as_deref().unwrap_or("").trim().is_empty()
+                        || matches!(
+                            game.completion_status.as_deref().map(|s| s.trim()),
+                            Some(s) if !s.is_empty() && !matches!(s, "Auto" | "Not Played" | "Played" | "Playing")
+                        );
+                    if is_curated {
+                        now_utc.as_str()
+                    } else {
+                        "1970-01-01T00:00:00Z"
+                    }
+                }),
                 game.playtime_by_device,
+                if game.cloud_save_enabled { 1 } else { 0 },
+                game.cloud_save_retention_override.map(|v| v as i64),
+                game.last_played_device_id,
             ],
         ).map_err(|e| e.to_string())?;
 
@@ -573,8 +724,11 @@ impl Database {
                 beaten_prompt_playtime = ?45,
                 emulator_id = ?46,
                 updated_at = ?47,
-                playtime_by_device = ?48
-            WHERE id = ?49",
+                playtime_by_device = ?48,
+                cloud_save_enabled = ?49,
+                cloud_save_retention_override = ?50,
+                last_played_device_id = ?51
+            WHERE id = ?52",
             params![
                 game.title,
                 game.sorting_title,
@@ -624,6 +778,9 @@ impl Database {
                 game.emulator_id,
                 updated_at_val,
                 game.playtime_by_device,
+                if game.cloud_save_enabled { 1 } else { 0 },
+                game.cloud_save_retention_override.map(|v| v as i64),
+                game.last_played_device_id,
                 game.id,
             ],
         ).map_err(|e| e.to_string())?;
@@ -718,7 +875,7 @@ impl Database {
             .and_then(|s| serde_json::from_str(s).ok())
             .unwrap_or_default();
 
-        let entry = pt_map.entry(device_id).or_insert(0);
+        let entry = pt_map.entry(device_id.clone()).or_insert(0);
         *entry += add_seconds;
 
         let sum_map: u64 = pt_map.values().sum();
@@ -726,8 +883,8 @@ impl Database {
         let map_json = serde_json::to_string(&pt_map).unwrap_or_else(|_| "{}".to_string());
 
         conn.execute(
-            "UPDATE games SET playtime_seconds = ?1, playtime_by_device = ?2, last_played = ?3 WHERE id = ?4",
-            params![new_total as i64, map_json, last_played_iso, id],
+            "UPDATE games SET playtime_seconds = ?1, playtime_by_device = ?2, last_played = ?3, last_played_device_id = ?4 WHERE id = ?5",
+            params![new_total as i64, map_json, last_played_iso, &device_id, id],
         )
         .map_err(|e| e.to_string())?;
         Ok(())
@@ -971,17 +1128,134 @@ impl Database {
         Ok(())
     }
 
+    pub fn get_settings_by_prefix(&self, prefix: &str) -> Result<std::collections::HashMap<String, String>, String> {
+        let conn = self.conn.lock().unwrap();
+        let pattern = format!("{}%", prefix);
+        let mut stmt = conn
+            .prepare("SELECT key, value FROM settings WHERE key LIKE ?1")
+            .map_err(|e| e.to_string())?;
+
+        let rows = stmt
+            .query_map(params![pattern], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|e| e.to_string())?;
+
+        let mut map = std::collections::HashMap::new();
+        for item in rows.flatten() {
+            map.insert(item.0, item.1);
+        }
+        Ok(map)
+    }
+
+    pub fn has_portable_config_diff(a: &AppConfig, b: &AppConfig) -> bool {
+        let f64_diff = |x: Option<f64>, y: Option<f64>| -> bool {
+            match (x, y) {
+                (Some(vx), Some(vy)) => (vx - vy).abs() > 1e-6,
+                (None, None) => false,
+                _ => true,
+            }
+        };
+        let str_eq = |x: &Option<String>, y: &Option<String>| -> bool {
+            let sx = x.as_deref().map(|s| s.trim()).unwrap_or("");
+            let sy = y.as_deref().map(|s| s.trim()).unwrap_or("");
+            sx == sy
+        };
+        let theme_id_eq = |x: &Option<String>, y: &Option<String>| -> bool {
+            let sx = x.as_deref().map(|s| s.trim()).filter(|s| !s.is_empty()).unwrap_or("default");
+            let sy = y.as_deref().map(|s| s.trim()).filter(|s| !s.is_empty()).unwrap_or("default");
+            sx == sy
+        };
+        let vec_eq = |x: &Option<Vec<String>>, y: &Option<Vec<String>>| -> bool {
+            let vx = x.as_deref().unwrap_or(&[]);
+            let vy = y.as_deref().unwrap_or(&[]);
+            vx == vy
+        };
+
+        !str_eq(&a.view_mode, &b.view_mode)
+            || f64_diff(a.card_width, b.card_width)
+            || f64_diff(a.grid_width_percent, b.grid_width_percent)
+            || !str_eq(&a.status_filter, &b.status_filter)
+            || !str_eq(&a.sort_by, &b.sort_by)
+            || !str_eq(&a.sort_direction, &b.sort_direction)
+            || !str_eq(&a.group_by, &b.group_by)
+            || a.show_favorites_only != b.show_favorites_only
+            || a.auto_scan_on_startup != b.auto_scan_on_startup
+            || a.minimize_on_game_launch != b.minimize_on_game_launch
+            || a.close_to_tray != b.close_to_tray
+            || !str_eq(&a.last_played_date_format, &b.last_played_date_format)
+            || !theme_id_eq(&a.active_theme_id, &b.active_theme_id)
+            || !str_eq(&a.theme, &b.theme)
+            || a.background_blur != b.background_blur
+            || f64_diff(a.background_opacity, b.background_opacity)
+            || f64_diff(a.modal_backdrop_opacity, b.modal_backdrop_opacity)
+            || a.modal_backdrop_blur != b.modal_backdrop_blur
+            || !str_eq(&a.card_border_radius, &b.card_border_radius)
+            || a.enable_card_glow != b.enable_card_glow
+            || !str_eq(&a.glass_intensity, &b.glass_intensity)
+            || !str_eq(&a.accent_color, &b.accent_color)
+            || !str_eq(&a.panel_tint, &b.panel_tint)
+            || a.trailer_autoplay != b.trailer_autoplay
+            || a.trailer_muted != b.trailer_muted
+            || !str_eq(&a.steamgriddb_api_key, &b.steamgriddb_api_key)
+            || a.steamgriddb_nsfw != b.steamgriddb_nsfw
+            || !str_eq(&a.retroachievements_username, &b.retroachievements_username)
+            || !str_eq(&a.retroachievements_api_key, &b.retroachievements_api_key)
+            || !str_eq(&a.igdb_client_id, &b.igdb_client_id)
+            || !str_eq(&a.igdb_client_secret, &b.igdb_client_secret)
+            || a.merge_duplicates != b.merge_duplicates
+            || !vec_eq(&a.unmerged_game_ids, &b.unmerged_game_ids)
+            || a.sync_on_startup != b.sync_on_startup
+            || a.periodic_playtime_sync_hours != b.periodic_playtime_sync_hours
+            || !str_eq(&a.backup_frequency, &b.backup_frequency)
+            || a.backup_retention_count != b.backup_retention_count
+            || a.cloud_sync_interval_minutes != b.cloud_sync_interval_minutes
+            || a.cloud_sync_on_startup != b.cloud_sync_on_startup
+            || a.cloud_sync_on_game_exit != b.cloud_sync_on_game_exit
+            || a.cloud_save_retention_count != b.cloud_save_retention_count
+            || a.controller_enabled != b.controller_enabled
+            || !str_eq(&a.controller_glyph_style, &b.controller_glyph_style)
+            || a.controller_nintendo_swap != b.controller_nintendo_swap
+            || f64_diff(a.controller_deadzone, b.controller_deadzone)
+            || a.controller_suspend_in_game != b.controller_suspend_in_game
+            || a.controller_bindings != b.controller_bindings
+    }
+
     pub fn get_app_config(&self) -> Result<AppConfig, String> {
         let raw = self.get_setting("app_config")?;
         let mut cfg: AppConfig = match raw {
             Some(json) => serde_json::from_str(&json).unwrap_or_default(),
-            None => {
-                let sgdb_key = self.get_setting("steamgriddb_key")?;
-                let mut c = AppConfig::default();
-                c.steamgriddb_api_key = sgdb_key;
-                c
-            }
+            None => AppConfig::default(),
         };
+
+        if cfg.steamgriddb_api_key.as_deref().unwrap_or("").trim().is_empty() {
+            if let Ok(Some(k)) = self.get_setting("steamgriddb_key") {
+                if !k.trim().is_empty() {
+                    cfg.steamgriddb_api_key = Some(k);
+                }
+            }
+        }
+        if cfg.igdb_client_id.as_deref().unwrap_or("").trim().is_empty() {
+            if let Ok(Some(cid)) = self.get_setting("igdb_client_id") {
+                if !cid.trim().is_empty() {
+                    cfg.igdb_client_id = Some(cid);
+                }
+            }
+        }
+        if cfg.igdb_client_secret.as_deref().unwrap_or("").trim().is_empty() {
+            if let Ok(Some(csec)) = self.get_setting("igdb_client_secret") {
+                if !csec.trim().is_empty() {
+                    cfg.igdb_client_secret = Some(csec);
+                }
+            }
+        }
+        if cfg.active_theme_id.as_deref().unwrap_or("").trim().is_empty() {
+            if let Ok(Some(tid)) = self.get_setting("active_theme_id") {
+                if !tid.trim().is_empty() {
+                    cfg.active_theme_id = Some(tid);
+                }
+            }
+        }
 
         // Ensure user defaults are set if missing
         if cfg.auto_scan_on_startup.is_none() {
@@ -1005,15 +1279,71 @@ impl Database {
         if cfg.periodic_playtime_sync_hours.is_none() {
             cfg.periodic_playtime_sync_hours = Some(0);
         }
+        if cfg.cloud_save_retention_count.is_none() {
+            cfg.cloud_save_retention_count = Some(5);
+        }
+        if cfg.controller_enabled.is_none() {
+            cfg.controller_enabled = Some(true);
+        }
+        if cfg.controller_glyph_style.is_none() {
+            cfg.controller_glyph_style = Some("auto".to_string());
+        }
+        if cfg.controller_nintendo_swap.is_none() {
+            cfg.controller_nintendo_swap = Some(false);
+        }
+        if cfg.controller_deadzone.is_none() {
+            cfg.controller_deadzone = Some(0.18);
+        }
+        if cfg.controller_suspend_in_game.is_none() {
+            cfg.controller_suspend_in_game = Some(true);
+        }
 
         Ok(cfg)
     }
 
     pub fn save_app_config(&self, config: &AppConfig) -> Result<(), String> {
+        let baseline = self.get_app_config().unwrap_or_default();
+        let portable_changed = Self::has_portable_config_diff(&baseline, config);
+
         let json = serde_json::to_string(config).map_err(|e| e.to_string())?;
         self.set_setting("app_config", &json)?;
         if let Some(ref key) = config.steamgriddb_api_key {
             let _ = self.set_setting("steamgriddb_key", key);
+        }
+        if let Some(ref cid) = config.igdb_client_id {
+            let _ = self.set_setting("igdb_client_id", cid);
+        }
+        if let Some(ref csec) = config.igdb_client_secret {
+            let _ = self.set_setting("igdb_client_secret", csec);
+        }
+
+        if portable_changed {
+            let now_utc = chrono::Utc::now().to_rfc3339();
+            let _ = self.set_setting("ui_updated_at", &now_utc);
+        }
+        Ok(())
+    }
+
+    pub fn save_app_config_from_sync(&self, config: &AppConfig, ui_updated_at: &str) -> Result<(), String> {
+        let json = serde_json::to_string(config).map_err(|e| e.to_string())?;
+        self.set_setting("app_config", &json)?;
+        if let Some(ref key) = config.steamgriddb_api_key {
+            if !key.trim().is_empty() {
+                let _ = self.set_setting("steamgriddb_key", key);
+            }
+        }
+        if let Some(ref cid) = config.igdb_client_id {
+            if !cid.trim().is_empty() {
+                let _ = self.set_setting("igdb_client_id", cid);
+            }
+        }
+        if let Some(ref csec) = config.igdb_client_secret {
+            if !csec.trim().is_empty() {
+                let _ = self.set_setting("igdb_client_secret", csec);
+            }
+        }
+        if !ui_updated_at.is_empty() {
+            let _ = self.set_setting("ui_updated_at", ui_updated_at);
         }
         Ok(())
     }
@@ -1160,6 +1490,12 @@ impl Database {
     }
 
     pub fn get_hunter_profile(&self, all_games: &[Game]) -> Result<HunterProfile, String> {
+        let all_achs = self.get_all_achievements()?;
+        let mut ach_map: std::collections::HashMap<String, Vec<Achievement>> = std::collections::HashMap::new();
+        for ach in all_achs {
+            ach_map.entry(ach.game_id.clone()).or_default().push(ach);
+        }
+
         let mut total_score: u64 = 0;
         let mut total_achievements_count: usize = 0;
         let mut unlocked_achievements_count: usize = 0;
@@ -1170,44 +1506,72 @@ impl Database {
         let mut total_completion_sum: f64 = 0.0;
 
         for game in all_games {
-            let summary = self.get_game_achievement_summary(game)?;
-            if summary.total_achievements > 0 {
-                // Untouched games (0 unlocked achievements) are excluded from average completion
-                // and unlocked trophies calculations, so unplayed library backlog doesn't skew stats.
-                let is_untouched = summary.unlocked_achievements == 0;
+            let Some(achievements) = ach_map.remove(&game.id) else {
+                continue;
+            };
+            let total = achievements.len();
+            if total == 0 {
+                continue;
+            }
 
-                if !is_untouched {
-                    games_with_achievements_count += 1;
-                    total_completion_sum += summary.completion_percentage;
-                    total_achievements_count += summary.total_achievements;
-                    unlocked_achievements_count += summary.unlocked_achievements;
+            let mut unlocked_list: Vec<Achievement> = achievements.iter().filter(|a| a.is_unlocked).cloned().collect();
+            let unlocked = unlocked_list.len();
+            let completion_percentage = (unlocked as f64 / total as f64) * 100.0;
+            let is_perfect = unlocked == total;
 
-                    if summary.is_perfect {
-                        perfect_games_count += 1;
-                        total_score += 250; // Perfect game bonus!
-                    }
+            unlocked_list.sort_by(|a, b| b.unlock_time.cmp(&a.unlock_time));
+            let latest_unlocked = unlocked_list.first().cloned();
+            let recent_unlocked = if unlocked_list.len() > 1 {
+                unlocked_list.iter().skip(1).take(4).cloned().collect()
+            } else {
+                Vec::new()
+            };
 
-                    // Add points for each unlocked achievement based on rarity
-                    let achs = self.get_game_achievements(&game.id)?;
-                    for ach in achs {
-                        if ach.is_unlocked {
-                            let pts = if ach.rarity_percentage > 0.0 && ach.rarity_percentage < 10.0 {
-                                100 // Ultra Rare (< 10%)
-                            } else if ach.rarity_percentage >= 10.0 && ach.rarity_percentage < 20.0 {
-                                50  // Rare (10% - 20%)
-                            } else if ach.rarity_percentage >= 20.0 && ach.rarity_percentage < 50.0 {
-                                25  // Uncommon (20% - 50%)
-                            } else {
-                                10  // Common (>= 50% or unrated)
-                            };
-                            total_score += pts;
-                            all_unlocked_achievements.push(ach);
-                        }
-                    }
+            let mut locked_list: Vec<Achievement> = achievements.iter().filter(|a| !a.is_unlocked).cloned().collect();
+            locked_list.sort_by(|a, b| b.rarity_percentage.partial_cmp(&a.rarity_percentage).unwrap_or(std::cmp::Ordering::Equal));
+            let upcoming_locked = locked_list.into_iter().take(5).collect();
+
+            let summary = GameAchievementSummary {
+                game_id: game.id.clone(),
+                game_title: game.title.clone(),
+                cover_image: game.cover_image.clone(),
+                total_achievements: total,
+                unlocked_achievements: unlocked,
+                completion_percentage,
+                is_perfect,
+                latest_unlocked,
+                recent_unlocked,
+                upcoming_locked,
+            };
+
+            let is_untouched = unlocked == 0;
+            if !is_untouched {
+                games_with_achievements_count += 1;
+                total_completion_sum += completion_percentage;
+                total_achievements_count += total;
+                unlocked_achievements_count += unlocked;
+
+                if is_perfect {
+                    perfect_games_count += 1;
+                    total_score += 250;
                 }
 
-                games_summaries.push(summary);
+                for ach in unlocked_list {
+                    let pts = if ach.rarity_percentage > 0.0 && ach.rarity_percentage < 10.0 {
+                        100
+                    } else if ach.rarity_percentage >= 10.0 && ach.rarity_percentage < 20.0 {
+                        50
+                    } else if ach.rarity_percentage >= 20.0 && ach.rarity_percentage < 50.0 {
+                        25
+                    } else {
+                        10
+                    };
+                    total_score += pts;
+                    all_unlocked_achievements.push(ach);
+                }
             }
+
+            games_summaries.push(summary);
         }
 
         // Sort unlocked achievements by global rarity percentage (rarest first).
@@ -1712,6 +2076,153 @@ impl Database {
         // Apply any migrations
         self.init_tables().map_err(|e| format!("Post-restore migration check failed: {}", e))?;
 
+        Ok(())
+    }
+
+    // --- Game Save Locations & Cloud Save State (Device-Local Config + Rule Cache) ---
+
+    pub fn get_game_save_config(&self, game_id: &str) -> Result<GameSaveConfig, String> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare(
+                "SELECT game_id, custom_save_paths, custom_config_paths, last_synced_save_hash,
+                        last_synced_snapshot_id, last_synced_at, updated_at
+                 FROM game_save_configs WHERE game_id = ?1",
+            )
+            .map_err(|e| e.to_string())?;
+
+        match stmt.query_row(params![game_id], |row| {
+            let save_json: String = row.get(1)?;
+            let cfg_json: String = row.get(2)?;
+            Ok(GameSaveConfig {
+                game_id: row.get(0)?,
+                custom_save_paths: serde_json::from_str(&save_json).unwrap_or_default(),
+                custom_config_paths: serde_json::from_str(&cfg_json).unwrap_or_default(),
+                last_synced_save_hash: row.get(3)?,
+                last_synced_snapshot_id: row.get(4)?,
+                last_synced_at: row.get(5)?,
+                updated_at: row.get(6)?,
+            })
+        }) {
+            Ok(cfg) => Ok(cfg),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(GameSaveConfig {
+                game_id: game_id.to_string(),
+                ..Default::default()
+            }),
+            Err(e) => Err(e.to_string()),
+        }
+    }
+
+    pub fn save_game_save_config(&self, cfg: &GameSaveConfig) -> Result<(), String> {
+        let conn = self.conn.lock().unwrap();
+        let save_json = serde_json::to_string(&cfg.custom_save_paths).unwrap_or_else(|_| "[]".to_string());
+        let cfg_json = serde_json::to_string(&cfg.custom_config_paths).unwrap_or_else(|_| "[]".to_string());
+        let now_utc = chrono::Utc::now().to_rfc3339();
+        let updated = if cfg.updated_at.trim().is_empty() {
+            now_utc
+        } else {
+            cfg.updated_at.clone()
+        };
+
+        conn.execute(
+            "INSERT INTO game_save_configs (
+                game_id, custom_save_paths, custom_config_paths, last_synced_save_hash,
+                last_synced_snapshot_id, last_synced_at, updated_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            ON CONFLICT(game_id) DO UPDATE SET
+                custom_save_paths = excluded.custom_save_paths,
+                custom_config_paths = excluded.custom_config_paths,
+                last_synced_save_hash = excluded.last_synced_save_hash,
+                last_synced_snapshot_id = excluded.last_synced_snapshot_id,
+                last_synced_at = excluded.last_synced_at,
+                updated_at = excluded.updated_at",
+            params![
+                cfg.game_id,
+                save_json,
+                cfg_json,
+                cfg.last_synced_save_hash,
+                cfg.last_synced_snapshot_id,
+                cfg.last_synced_at,
+                updated,
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub fn update_game_cloud_save_settings(
+        &self,
+        game_id: &str,
+        enabled: bool,
+        retention_override: Option<u32>,
+    ) -> Result<(), String> {
+        let conn = self.conn.lock().unwrap();
+        let now_utc = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "UPDATE games
+             SET cloud_save_enabled = ?1, cloud_save_retention_override = ?2, updated_at = ?3
+             WHERE id = ?4",
+            params![
+                if enabled { 1 } else { 0 },
+                retention_override.map(|v| v as i64),
+                &now_utc,
+                game_id,
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub fn update_game_last_synced_save(
+        &self,
+        game_id: &str,
+        save_hash: &str,
+        snapshot_id: &str,
+    ) -> Result<(), String> {
+        let mut cfg = self.get_game_save_config(game_id)?;
+        let now_utc = chrono::Utc::now().to_rfc3339();
+        cfg.last_synced_save_hash = Some(save_hash.to_string());
+        cfg.last_synced_snapshot_id = Some(snapshot_id.to_string());
+        cfg.last_synced_at = Some(now_utc.clone());
+        cfg.updated_at = now_utc;
+        self.save_game_save_config(&cfg)
+    }
+
+    pub fn get_save_location_cache(&self, cache_key: &str) -> Result<Option<SaveLocationCacheEntry>, String> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare("SELECT cache_key, pcgw_page, raw_rules_json, fetched_at FROM save_location_cache WHERE cache_key = ?1")
+            .map_err(|e| e.to_string())?;
+
+        match stmt.query_row(params![cache_key], |row| {
+            let raw_json: String = row.get(2)?;
+            let rules: Vec<SaveLocationRule> = serde_json::from_str(&raw_json).unwrap_or_default();
+            Ok(SaveLocationCacheEntry {
+                cache_key: row.get(0)?,
+                pcgw_page: row.get(1)?,
+                rules,
+                fetched_at: row.get(3)?,
+            })
+        }) {
+            Ok(entry) => Ok(Some(entry)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.to_string()),
+        }
+    }
+
+    pub fn upsert_save_location_cache(&self, entry: &SaveLocationCacheEntry) -> Result<(), String> {
+        let conn = self.conn.lock().unwrap();
+        let raw_json = serde_json::to_string(&entry.rules).unwrap_or_else(|_| "[]".to_string());
+        conn.execute(
+            "INSERT INTO save_location_cache (cache_key, pcgw_page, raw_rules_json, fetched_at)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(cache_key) DO UPDATE SET
+                 pcgw_page = excluded.pcgw_page,
+                 raw_rules_json = excluded.raw_rules_json,
+                 fetched_at = excluded.fetched_at",
+            params![entry.cache_key, entry.pcgw_page, raw_json, entry.fetched_at],
+        )
+        .map_err(|e| e.to_string())?;
         Ok(())
     }
 }

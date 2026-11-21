@@ -68,5 +68,9 @@ export interface Game {
   emulator_id?: string;
   updated_at?: string;
   playtime_by_device?: string;
+  cloud_save_enabled?: boolean;
+  cloud_save_retention_override?: number | null;
+  last_played_device_id?: string;
+  played_on_other_device?: boolean;
   sibling_games?: Game[];
 }

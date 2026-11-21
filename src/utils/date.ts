@@ -139,3 +139,19 @@ export function formatLastPlayed(
   return s;
 }
 
+/**
+ * Parses a `last_played` timestamp string into epoch milliseconds (0 if missing/invalid)
+ * so mixed formats (RFC3339, "YYYY-MM-DD HH:mm", "YYYY-MM-DD", epoch) compare accurately.
+ */
+export function parseLastPlayedMs(raw?: string | null): number {
+  if (!raw || !raw.trim()) return 0;
+  const s = raw.trim();
+  if (/^\d{9,13}$/.test(s)) {
+    const num = parseInt(s, 10);
+    return num < 1e11 ? num * 1000 : num;
+  }
+  const normalized = /^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}/.test(s) ? s.replace(" ", "T") : s;
+  const parsed = Date.parse(normalized);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+

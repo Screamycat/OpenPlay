@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { Game } from "../types/game";
-import { resolveImageSrc, resolveGridCoverSrc, getStaticFallbackCover, formatPlaytime, formatFileSize } from "../utils/image";
+import { GameSaveState } from "../types/saves";
+import { resolveImageSrc, resolveGridCoverSrc, getStaticFallbackCover, formatPlaytime, formatFileSize, isVideoSrc } from "../utils/image";
 import { SteamDescription } from "./SteamDescription";
 import { HowLongToBeatWidget } from "./HowLongToBeatWidget";
 import { SteamGridDBModal } from "./SteamGridDBModal";
@@ -46,6 +48,8 @@ import { getEffectiveCompletionStatus, shouldPromptBeatenModal } from "../utils/
 import { formatReleaseYear, formatLastPlayed } from "../utils/date";
 import { StoryBeatenModal } from "./StoryBeatenModal";
 import { PlatformIcon } from "./icons/PlatformIcons";
+import { useGamepad } from "../contexts/GamepadContext";
+import { ControllerGlyph } from "./gamepad/ControllerGlyph";
 
 export interface GamePlatformBadge {
   id: string;
@@ -574,6 +578,7 @@ function renderScoreStars(score?: number) {
 interface GameDetailsProps {
   game: Game;
   onLaunch: (game: Game, actionId?: string) => void;
+  onInstall?: (game: Game) => void;
   onStop?: (game: Game) => void;
   onToggleFavorite: (id: string) => void;
   onOpenEdit: (game: Game) => void;
@@ -589,12 +594,15 @@ interface GameDetailsProps {
   onOpenContextMenu?: (game: Game, x: number, y: number) => void;
   onOpenSteamGridDB?: (game: Game) => void;
   onOpenTrailers?: (game: Game) => void;
+  onOpenSaveManager?: (game: Game) => void;
+  saveRefreshNonce?: number;
   selectedGenres?: string[];
   onToggleGenre?: (genre: string) => void;
   selectedDevelopers?: string[];
   onToggleDeveloper?: (dev: string) => void;
   selectedSources?: string[];
   onToggleSource?: (source: string) => void;
+  statusFilter?: "all" | "installed" | "uninstalled";
   trailerAutoplay?: boolean;
   trailerMuted?: boolean;
   lastPlayedDateFormat?: "date_and_time" | "date_only";
@@ -603,6 +611,7 @@ interface GameDetailsProps {
 export const GameDetails: React.FC<GameDetailsProps> = ({
   game,
   onLaunch,
+  onInstall,
   onStop,
   onToggleFavorite,
   onOpenEdit,
@@ -617,18 +626,28 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
   onOpenContextMenu,
   onOpenSteamGridDB,
   onOpenTrailers,
+  onOpenSaveManager,
+  saveRefreshNonce = 0,
   selectedGenres,
   onToggleGenre,
   selectedDevelopers,
   onToggleDeveloper,
   selectedSources,
   onToggleSource,
+  statusFilter = "all",
   trailerAutoplay = true,
   trailerMuted = true,
   lastPlayedDateFormat = "date_and_time",
 }) => {
   const [activeTab, setActiveTab] = useState<"overview" | "achievements" | "news">("overview");
   const [isExitModalOpen, setIsExitModalOpen] = useState(false);
+  const {
+    isControllerActive,
+    glyphProfile,
+    customBindings,
+    nintendoSwap,
+    activeZone,
+  } = useGamepad();
 
   // Live in-game player count
   const [playerCount, setPlayerCount] = useState<number | null>(null);
@@ -672,55 +691,64 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
   const coverSrc = resolveGridCoverSrc(game.cover_image, 720);
   const iconSrc = resolveImageSrc(game.icon_image);
 
-  // Smooth Morphing Hero Crossfade
+  // Smooth Hero Art Transition without Black Flash
   const targetHero = heroSrc ?? null;
-  const [currentHero, setCurrentHero] = useState<string | null>(targetHero);
-  const [prevHero, setPrevHero] = useState<string | null>(null);
-  const [isHeroFading, setIsHeroFading] = useState(false);
-  const settledHeroRef = useRef<string | null>(targetHero);
-  const heroTimeoutRef = useRef<number | null>(null);
+  const [activeHero, setActiveHero] = useState<string | null>(targetHero);
+  const [incomingHero, setIncomingHero] = useState<string | null>(null);
+  const [isHeroCrossfading, setIsHeroCrossfading] = useState(false);
+  const activeHeroRef = useRef<string | null>(activeHero);
+  activeHeroRef.current = activeHero;
 
   useEffect(() => {
-    if (targetHero === settledHeroRef.current) return;
-
-    const outgoing = settledHeroRef.current;
-    settledHeroRef.current = targetHero;
-
     if (!targetHero) {
-      setPrevHero(outgoing);
-      setCurrentHero(null);
-      setIsHeroFading(true);
-    } else {
-      setPrevHero(outgoing);
-      setCurrentHero(targetHero);
-      setIsHeroFading(false);
-
-      const isVideo = targetHero.endsWith(".webm") || targetHero.endsWith(".mp4");
-      if (!isVideo) {
-        const img = new Image();
-        img.src = targetHero;
-        const start = () => {
-          requestAnimationFrame(() => setIsHeroFading(true));
-        };
-        if (img.complete) {
-          start();
-        } else {
-          img.onload = start;
-          img.onerror = start;
-        }
-      } else {
-        requestAnimationFrame(() => setIsHeroFading(true));
-      }
+      setActiveHero(null);
+      setIncomingHero(null);
+      setIsHeroCrossfading(false);
+      return;
     }
 
-    if (heroTimeoutRef.current) clearTimeout(heroTimeoutRef.current);
-    heroTimeoutRef.current = window.setTimeout(() => {
-      setPrevHero(null);
-      setIsHeroFading(false);
-    }, 800);
+    if (targetHero === activeHeroRef.current) return;
+
+    if (isVideoSrc(targetHero)) {
+      setIncomingHero(targetHero);
+      setIsHeroCrossfading(true);
+      const timer = window.setTimeout(() => {
+        setActiveHero(targetHero);
+        setIncomingHero(null);
+        setIsHeroCrossfading(false);
+      }, 350);
+      return () => window.clearTimeout(timer);
+    }
+
+    let cancelled = false;
+    const img = new Image();
+    img.decoding = "async";
+    img.src = targetHero;
+
+    const start = () => {
+      if (cancelled) return;
+      setIncomingHero(targetHero);
+      requestAnimationFrame(() => {
+        if (cancelled) return;
+        setIsHeroCrossfading(true);
+      });
+      window.setTimeout(() => {
+        if (cancelled) return;
+        setActiveHero(targetHero);
+        setIncomingHero(null);
+        setIsHeroCrossfading(false);
+      }, 350);
+    };
+
+    if (img.complete && img.naturalWidth > 0) {
+      start();
+    } else {
+      img.onload = start;
+      img.onerror = start;
+    }
 
     return () => {
-      if (heroTimeoutRef.current) clearTimeout(heroTimeoutRef.current);
+      cancelled = true;
     };
   }, [targetHero]);
 
@@ -808,16 +836,32 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
   const [selectedBadgeKey, setSelectedBadgeKey] = useState<string>("");
 
   useEffect(() => {
-    // When game changes, pick installed badge first, or primary/first badge
-    const installedBadge = platformBadges.find((b) => b.isInstalled);
-    const primaryBadge = platformBadges[0];
-    const initial = installedBadge
-      ? installedBadge.id + "_" + installedBadge.gameId
-      : primaryBadge
-      ? primaryBadge.id + "_" + primaryBadge.gameId
+    // When game changes, pick default badge context-aware:
+    // 1. If a specific source filter is active and matches one of our badges, prefer it:
+    let candidateBadge: GamePlatformBadge | undefined;
+
+    if (selectedSources && selectedSources.length > 0) {
+      candidateBadge = platformBadges.find((b) => {
+        const src = (b.gameInstance?.source || b.id || "").toLowerCase();
+        return selectedSources.some((s) => s.toLowerCase() === src);
+      });
+    }
+
+    // 2. If filtering by uninstalled, default to an uninstalled badge
+    if (!candidateBadge && statusFilter === "uninstalled") {
+      candidateBadge = platformBadges.find((b) => !b.isInstalled);
+    }
+
+    // 3. If filtering by installed or all, prefer installed badge, or first
+    if (!candidateBadge) {
+      candidateBadge = platformBadges.find((b) => b.isInstalled) || platformBadges[0];
+    }
+
+    const initial = candidateBadge
+      ? candidateBadge.id + "_" + candidateBadge.gameId
       : "";
     setSelectedBadgeKey(initial);
-  }, [game.id, platformBadges]);
+  }, [game.id, platformBadges, statusFilter, selectedSources]);
 
   const activeBadge = useMemo(() => {
     if (!platformBadges || platformBadges.length === 0) return null;
@@ -863,6 +907,43 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
       active = false;
     };
   }, [activeGame.id]);
+
+  // Save & Config Location state for currently selected platform copy
+  const [saveState, setSaveState] = useState<GameSaveState | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    const fetchSaveState = () => {
+      invoke<GameSaveState>("get_game_save_state", {
+        gameId: activeGame.id,
+        forceRefreshDetection: false,
+      })
+        .then((res) => {
+          if (active && res) setSaveState(res);
+        })
+        .catch(() => {
+          if (active) setSaveState(null);
+        });
+    };
+
+    fetchSaveState();
+    const unlistenBackup = listen<any>("save-backup-completed", (ev) => {
+      if (ev.payload?.game_id === activeGame.id) {
+        fetchSaveState();
+      }
+    });
+    const unlistenWarmed = listen<any>("save-locations-warmed", (ev) => {
+      if (ev.payload?.game_id === activeGame.id) {
+        fetchSaveState();
+      }
+    });
+
+    return () => {
+      active = false;
+      unlistenBackup.then((fn) => fn());
+      unlistenWarmed.then((fn) => fn());
+    };
+  }, [activeGame.id, saveRefreshNonce]);
 
   const effectiveStatus = getEffectiveCompletionStatus(activeGame, achSummary);
 
@@ -1004,6 +1085,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
   return (
     <div
       data-theme-part="game-details"
+      data-gamepad-zone="game-details"
       className="relative flex-1 w-full h-full bg-transparent overflow-hidden select-text font-sans"
     >
       {/* Static bottom-fade mask wrapper (kept off the scrolling element so GPU tiled scroll compositing stays fast) */}
@@ -1019,6 +1101,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
         {/* Scrollable details container stopping above bottom bar, matching Playnite FusionX's Margin="0,0,0,64" */}
         <div
           ref={scrollContainerRef}
+          data-gamepad-scroll="game-details"
           className="w-full h-full overflow-y-auto pb-10"
         >
         {/* Top Hero Header - Strictly 96/31 Aspect Ratio & 50% Opacity Mask Fading */}
@@ -1027,8 +1110,8 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
           style={{ aspectRatio: "var(--theme-hero-aspect, 96 / 31)" }}
           className="relative w-full select-none mb-[100px]"
         >
-          {/* Background Hero Art with Pure Alpha Mask Fading & Seamless Dual-Layer Morphing */}
-          {(currentHero || prevHero) ? (
+          {/* Background Hero Art with Pure Alpha Mask Fading & Seamless Morphing */}
+          {(activeHero || incomingHero) ? (
             <div
               data-theme-part="hero-backdrop"
               className="absolute inset-0 translate-y-[10px] pointer-events-none overflow-hidden"
@@ -1048,16 +1131,20 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                     "linear-gradient(to bottom, transparent 0px, rgba(0,0,0,0.05) 8px, rgba(0,0,0,0.2) 18px, rgba(0,0,0,0.5) 28px, rgba(0,0,0,0.8) 40px, black 50px, black calc(100% - 100px), rgba(0,0,0,0.8) calc(100% - 80px), rgba(0,0,0,0.5) calc(100% - 55px), rgba(0,0,0,0.2) calc(100% - 35px), rgba(0,0,0,0.05) calc(100% - 15px), transparent 100%)",
                 }}
               >
-                {/* Secondary (Previous Hero Image) underneath - Fades out completely to 0 */}
-                {prevHero && (
-                  <div
-                    className={`absolute inset-0 transition-opacity duration-700 ease-out pointer-events-none ${
-                      isHeroFading ? "opacity-0" : "opacity-100"
-                    }`}
-                  >
-                    {prevHero.endsWith(".webm") || prevHero.endsWith(".mp4") ? (
+                {/* 1. Underlying Base Hero */}
+                {activeHero && (
+                  <div className="absolute inset-0 pointer-events-none">
+                    {isVideoSrc(activeHero) ? (
                       <video
-                        src={prevHero}
+                        ref={(el) => {
+                          if (el) {
+                            el.defaultMuted = true;
+                            el.muted = true;
+                            if (el.paused) el.play().catch(() => {});
+                          }
+                        }}
+                        src={activeHero}
+                        poster={getStaticFallbackCover(activeHero)}
                         autoPlay
                         loop
                         muted
@@ -1066,25 +1153,39 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                       />
                     ) : (
                       <img
-                        src={prevHero}
+                        src={activeHero}
                         alt=""
                         decoding="async"
                         className="w-full h-full object-cover opacity-50"
+                        onError={(e) => {
+                          const target = e.currentTarget;
+                          if (target.src.includes(".webp")) {
+                            target.src = target.src.replace(/\.webp$/i, ".png");
+                          }
+                        }}
                       />
                     )}
                   </div>
                 )}
 
-                {/* Primary (Incoming Hero Image) morphs in on top */}
-                {currentHero && (
+                {/* 2. Smooth Incoming Hero Overlay */}
+                {incomingHero && (
                   <div
-                    className={`absolute inset-0 transition-opacity duration-700 ease-out pointer-events-none ${
-                      prevHero ? (isHeroFading ? "opacity-100" : "opacity-0") : "opacity-100"
+                    className={`absolute inset-0 transition-opacity duration-350 ease-out pointer-events-none ${
+                      isHeroCrossfading ? "opacity-100" : "opacity-0"
                     }`}
                   >
-                    {currentHero.endsWith(".webm") || currentHero.endsWith(".mp4") ? (
+                    {isVideoSrc(incomingHero) ? (
                       <video
-                        src={currentHero}
+                        ref={(el) => {
+                          if (el) {
+                            el.defaultMuted = true;
+                            el.muted = true;
+                            if (el.paused) el.play().catch(() => {});
+                          }
+                        }}
+                        src={incomingHero}
+                        poster={getStaticFallbackCover(incomingHero)}
                         autoPlay
                         loop
                         muted
@@ -1093,11 +1194,17 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                       />
                     ) : (
                       <img
-                        src={currentHero}
+                        src={incomingHero}
                         alt={game.title}
                         fetchPriority="high"
                         decoding="async"
                         className="w-full h-full object-cover opacity-50"
+                        onError={(e) => {
+                          const target = e.currentTarget;
+                          if (target.src.includes(".webp")) {
+                            target.src = target.src.replace(/\.webp$/i, ".png");
+                          }
+                        }}
                       />
                     )}
                   </div>
@@ -1119,13 +1226,27 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                 maxHeight: "var(--theme-logo-max-h, 65%)",
               }}
             >
-              {logoSrc.endsWith(".webm") || logoSrc.endsWith(".mp4") ? (
+              {isVideoSrc(logoSrc) ? (
                 <video
+                  ref={(el) => {
+                    if (el) {
+                      el.defaultMuted = true;
+                      el.muted = true;
+                      if (el.paused) el.play().catch(() => {});
+                    }
+                  }}
                   src={logoSrc}
+                  poster={getStaticFallbackCover(logoSrc)}
                   autoPlay
                   loop
                   muted
                   playsInline
+                  onLoadedData={(e) => {
+                    const el = e.currentTarget;
+                    el.defaultMuted = true;
+                    el.muted = true;
+                    if (el.paused) el.play().catch(() => {});
+                  }}
                   className="w-full h-full max-w-full max-h-full object-contain object-left-top drop-shadow-[0_6px_24px_rgba(0,0,0,0.95)]"
                 />
               ) : (
@@ -1135,7 +1256,12 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                   decoding="async"
                   className="w-full h-full max-w-full max-h-full object-contain object-left-top drop-shadow-[0_6px_24px_rgba(0,0,0,0.95)]"
                   onError={(e) => {
-                    (e.target as HTMLElement).style.display = "none";
+                    const target = e.currentTarget;
+                    if (target.src.includes(".webp")) {
+                      target.src = target.src.replace(/\.webp$/i, ".png");
+                    } else {
+                      target.style.display = "none";
+                    }
                   }}
                 />
               )}
@@ -1177,7 +1303,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                 {/* User Score / Personal Rating */}
                 {game.user_rating ? (
                   <div
-                    onClick={() => onOpenEdit(game)}
+                    onClick={() => onOpenEdit(activeGame)}
                     className="flex items-center space-x-1 text-white cursor-pointer hover:opacity-80 transition-opacity"
                     title={`User Score: ${game.user_rating} (Click to edit)`}
                   >
@@ -1323,9 +1449,11 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
 
               {/* Anchored Vertical Cover Poster - 200px wide, no line border */}
               <div
+                role="button"
+                data-gamepad-atomic="true"
                 onClick={() => {
                   if (onOpenSteamGridDB) {
-                    onOpenSteamGridDB(game);
+                    onOpenSteamGridDB(activeGame);
                   } else {
                     setIsSteamGridDBOpen(true);
                   }
@@ -1334,7 +1462,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                   e.preventDefault();
                   e.stopPropagation();
                   if (onOpenContextMenu) {
-                    onOpenContextMenu(game, e.clientX, e.clientY);
+                    onOpenContextMenu(activeGame, e.clientX, e.clientY);
                   } else {
                     setIsActionMenuOpen(true);
                   }
@@ -1348,14 +1476,27 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                 </div>
 
                 {coverSrc ? (
-                  coverSrc.endsWith(".webm") || coverSrc.endsWith(".mp4") ? (
+                  isVideoSrc(coverSrc) ? (
                     <video
+                      ref={(el) => {
+                        if (el) {
+                          el.defaultMuted = true;
+                          el.muted = true;
+                          if (el.paused) el.play().catch(() => {});
+                        }
+                      }}
                       src={coverSrc}
                       poster={getStaticFallbackCover(coverSrc)}
                       autoPlay
                       loop
                       muted
                       playsInline
+                      onLoadedData={(e) => {
+                        const el = e.currentTarget;
+                        el.defaultMuted = true;
+                        el.muted = true;
+                        if (el.paused) el.play().catch(() => {});
+                      }}
                       width={400}
                       height={600}
                       className="w-full h-full object-cover pointer-events-none"
@@ -1368,6 +1509,12 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                       height={600}
                       decoding="async"
                       className="w-full h-full object-cover"
+                      onError={(e) => {
+                        const target = e.currentTarget;
+                        if (target.src.includes(".webp")) {
+                          target.src = target.src.replace(/\.webp$/i, ".png");
+                        }
+                      }}
                     />
                   )
                 ) : (
@@ -1482,9 +1629,14 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
             )}
 
             {/* Content Tabs Navigation: Clean Playnite Style with White Underline */}
-            <div data-theme-part="details-tabs" className="border-b border-white/10 flex items-center space-x-8 select-none pt-2">
+            <div
+              data-theme-part="details-tabs"
+              data-gamepad-tabs="true"
+              className="border-b border-white/10 flex items-center space-x-8 select-none pt-2"
+            >
               <button
                 onClick={() => setActiveTab("overview")}
+                data-gamepad-tab-active={activeTab === "overview" ? "true" : undefined}
                 className={`pb-3 text-xs font-bold uppercase tracking-wider transition-all cursor-pointer relative ${
                   activeTab === "overview"
                     ? "text-white"
@@ -1502,6 +1654,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
 
               <button
                 onClick={() => setActiveTab("achievements")}
+                data-gamepad-tab-active={activeTab === "achievements" ? "true" : undefined}
                 className={`pb-3 text-xs font-bold uppercase tracking-wider transition-all cursor-pointer relative ${
                   activeTab === "achievements"
                     ? "text-white"
@@ -1519,6 +1672,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
 
               <button
                 onClick={() => setActiveTab("news")}
+                data-gamepad-tab-active={activeTab === "news" ? "true" : undefined}
                 className={`pb-3 text-xs font-bold uppercase tracking-wider transition-all cursor-pointer relative flex items-center space-x-2 ${
                   activeTab === "news"
                     ? "text-white"
@@ -1591,6 +1745,8 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                         const bannerImg = featured.image_url || featured.banner_image;
                         return (
                           <div
+                            role="button"
+                            data-gamepad-atomic="true"
                             onClick={() => setSelectedArticle(featured)}
                             className="isolated-widget group relative rounded-2xl overflow-hidden border border-white/10 bg-black/45 hover:border-white/25 shadow-2xl transition-colors cursor-pointer"
                           >
@@ -1684,6 +1840,8 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                               return (
                                 <div
                                   key={item.gid}
+                                  role="button"
+                                  data-gamepad-atomic="true"
                                   onClick={() => setSelectedArticle(item)}
                                   className="isolated-widget group p-4 bg-black/40 border border-white/10 hover:border-white/20 rounded-2xl space-y-2.5 transition-colors shadow-md cursor-pointer hover:bg-black/55 flex flex-col justify-between"
                                 >
@@ -1976,6 +2134,113 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                     </button>
                   </div>
                 )}
+
+                {/* Save Location & Cloud Saves */}
+                <div className="pt-2 border-t border-white/10 space-y-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-slate-400 text-[10px] flex items-center space-x-1">
+                      <Cloud className="w-3 h-3 text-slate-400" />
+                      <span>Save Location</span>
+                    </span>
+                    {onOpenSaveManager && (
+                      <button
+                        type="button"
+                        onClick={() => onOpenSaveManager(activeGame)}
+                        title="Manage Save Locations & Cloud Saves"
+                        className="text-[10px] text-slate-300 hover:text-white flex items-center space-x-1 transition-colors cursor-pointer"
+                      >
+                        {saveState?.sync_status === "peer_ahead" ? (
+                          <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                        ) : saveState?.cloud_save_enabled ? (
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                        ) : null}
+                        <span>Cloud Saves</span>
+                      </button>
+                    )}
+                  </div>
+
+                  {saveState && saveState.save_paths.length > 0 ? (
+                    <div className="space-y-0.5">
+                      {saveState.save_paths.slice(0, 2).map((sp) => (
+                        <button
+                          key={sp.path}
+                          type="button"
+                          onClick={() => {
+                            if (sp.exists) {
+                              invoke("open_in_explorer", { path: sp.path }).catch((err) =>
+                                console.warn("Failed to open explorer:", err)
+                              );
+                            } else {
+                              onOpenSaveManager?.(activeGame);
+                            }
+                          }}
+                          title={
+                            sp.exists
+                              ? `Click to open in Explorer: ${sp.path}`
+                              : `Predicted path (not created yet): ${sp.path}`
+                          }
+                          className={`text-[10px] font-mono truncate text-left w-full transition-colors cursor-pointer block ${
+                            sp.exists
+                              ? "text-slate-400 hover:text-white"
+                              : "text-slate-500 hover:text-slate-300 italic"
+                          }`}
+                        >
+                          {sp.path}
+                        </button>
+                      ))}
+                      {saveState.save_paths.length > 2 && onOpenSaveManager && (
+                        <button
+                          type="button"
+                          onClick={() => onOpenSaveManager(activeGame)}
+                          className="text-[10px] text-slate-400 hover:text-white cursor-pointer"
+                        >
+                          +{saveState.save_paths.length - 2} more in Save Manager
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => onOpenSaveManager?.(activeGame)}
+                      className="text-[10px] text-slate-500 hover:text-white text-left w-full transition-colors cursor-pointer block"
+                    >
+                      Not detected — Set path
+                    </button>
+                  )}
+                </div>
+
+                {/* Config Location (shown conditionally when found or routed) */}
+                {saveState && saveState.config_paths.length > 0 && (
+                  <div className="pt-2 border-t border-white/10 space-y-1">
+                    <div className="text-slate-400 text-[10px] flex items-center space-x-1">
+                      <Settings className="w-3 h-3 text-slate-400" />
+                      <span>Config Location</span>
+                    </div>
+                    {saveState.config_paths.slice(0, 1).map((cp) => (
+                      <button
+                        key={cp.path}
+                        type="button"
+                        onClick={() => {
+                          if (cp.exists) {
+                            invoke("open_in_explorer", { path: cp.path }).catch((err) =>
+                              console.warn("Failed to open explorer:", err)
+                            );
+                          } else {
+                            onOpenSaveManager?.(activeGame);
+                          }
+                        }}
+                        title={
+                          cp.exists
+                            ? `Click to open in Explorer: ${cp.path}`
+                            : `Predicted config path: ${cp.path}`
+                        }
+                        className="text-[10px] text-slate-400 hover:text-white font-mono truncate text-left w-full transition-colors cursor-pointer block"
+                      >
+                        {cp.path}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -2069,7 +2334,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                 e.stopPropagation();
                 if (onOpenContextMenu) {
                   const rect = e.currentTarget.getBoundingClientRect();
-                  onOpenContextMenu(game, rect.right - 224, rect.top - 290);
+                  onOpenContextMenu(activeGame, rect.right - 224, rect.top - 290);
                 } else {
                   setIsActionMenuOpen(!isActionMenuOpen);
                 }
@@ -2086,7 +2351,10 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
 
             {/* Context Dropdown Popover */}
             {isActionMenuOpen && (
-              <div className="absolute bottom-full right-0 mb-3 w-56 theme-panel-surface backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl p-1.5 z-50 text-xs space-y-0.5 animate-in fade-in slide-in-from-bottom-2 duration-150">
+              <div
+                data-gamepad-zone="popover"
+                className="absolute bottom-full right-0 mb-3 w-56 theme-panel-surface backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl p-1.5 z-50 text-xs space-y-0.5 animate-in fade-in slide-in-from-bottom-2 duration-150"
+              >
                 <button
                   onClick={() => {
                     setIsTrailerModalOpen(true);
@@ -2100,25 +2368,25 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
 
                 <button
                   onClick={() => {
-                    onToggleFavorite(game.id);
+                    onToggleFavorite(activeGame.id);
                     setIsActionMenuOpen(false);
                   }}
                   className="w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl text-left text-slate-200 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
                 >
                   <Star
                     className={`w-4 h-4 shrink-0 ${
-                      game.is_favorite ? "fill-amber-400 text-amber-400" : "text-slate-400"
+                      activeGame.is_favorite ? "fill-amber-400 text-amber-400" : "text-slate-400"
                     }`}
                   />
-                  <span>{game.is_favorite ? "Remove from Favorites" : "Add to Favorites"}</span>
+                  <span>{activeGame.is_favorite ? "Remove from Favorites" : "Add to Favorites"}</span>
                 </button>
 
                 <button
                   onClick={() => {
                     if (onRefreshGame) {
-                      onRefreshGame(game.id);
+                      onRefreshGame(activeGame.id);
                     } else {
-                      onFetchMetadata(game.id);
+                      onFetchMetadata(activeGame.id);
                     }
                     setIsActionMenuOpen(false);
                   }}
@@ -2154,7 +2422,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
 
                 <button
                   onClick={() => {
-                    onOpenEdit(game);
+                    onOpenEdit(activeGame);
                     setIsActionMenuOpen(false);
                   }}
                   className="w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl text-left text-slate-200 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
@@ -2163,10 +2431,10 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                   <span>Game Properties</span>
                 </button>
 
-                {game.install_directory && (
+                {activeGame.install_directory && (
                   <button
                     onClick={() => {
-                      handleOpenLink(`file:///${game.install_directory}`);
+                      handleOpenLink(`file:///${activeGame.install_directory}`);
                       setIsActionMenuOpen(false);
                     }}
                     className="w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl text-left text-slate-200 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
@@ -2176,18 +2444,31 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                   </button>
                 )}
 
+                {onOpenSaveManager && (
+                  <button
+                    onClick={() => {
+                      setIsActionMenuOpen(false);
+                      onOpenSaveManager(activeGame);
+                    }}
+                    className="w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl text-left text-slate-200 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+                  >
+                    <Cloud className="w-4 h-4 theme-accent-text shrink-0" />
+                    <span>Save Manager &amp; Cloud Saves</span>
+                  </button>
+                )}
+
                 {(!["steam", "epic", "gog", "battle.net", "ea app", "ubisoft connect", "xbox"].includes(
-                  game.source.toLowerCase()
+                  activeGame.source.toLowerCase()
                 ) ||
-                  game.source.toLowerCase() === "local" ||
-                  game.source.toLowerCase() === "manual") &&
+                  activeGame.source.toLowerCase() === "local" ||
+                  activeGame.source.toLowerCase() === "manual") &&
                   onRemoveGame && (
                     <>
                       <div className="my-1 border-t border-white/10" />
                       <button
                         onClick={() => {
                           setIsActionMenuOpen(false);
-                          onRemoveGame(game);
+                          onRemoveGame(activeGame);
                         }}
                         className="w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl text-left text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors cursor-pointer"
                       >
@@ -2202,7 +2483,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
 
           {/* 3. Settings Button */}
           <button
-            onClick={() => onOpenEdit(game)}
+            onClick={() => onOpenEdit(activeGame)}
             title="Game Properties"
             className="w-12 h-12 rounded-full bg-white/[0.07] hover:bg-white/15 text-slate-300 hover:text-white border border-white/10 flex items-center justify-center transition-colors cursor-pointer shadow-lg"
           >
@@ -2212,6 +2493,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
           {/* 4. Big Play / Dual Launch Split 80/20 Button */}
           {isRunning ? (
             <button
+              data-gamepad-primary-action="true"
               onClick={() => setIsExitModalOpen(true)}
               title="Game is running. Click to exit."
               className="w-[200px] h-12 rounded-full flex items-center justify-center space-x-2 text-sm font-bold tracking-wider uppercase transition-all shadow-lg cursor-pointer bg-emerald-500/15 hover:bg-rose-500/20 text-emerald-300 hover:text-rose-200 border border-emerald-500/30 hover:border-rose-500/40 group/run"
@@ -2222,11 +2504,17 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
             </button>
           ) : !activeGame.is_installed ? (
             <button
+              data-gamepad-primary-action="true"
               onClick={async () => {
-                try {
-                  await invoke("install_game", { gameId: activeGame.id });
-                } catch (e) {
-                  onLaunch(activeGame);
+                if (onInstall) {
+                  onInstall(activeGame);
+                } else {
+                  try {
+                    await invoke("install_game", { gameId: activeGame.id });
+                  } catch (e: any) {
+                    const msg = typeof e === "string" ? e : e?.message || "Failed to start installation";
+                    alert(msg);
+                  }
                 }
               }}
               disabled={isLaunching}
@@ -2234,6 +2522,16 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
             >
               <Download className="w-4.5 h-4.5" />
               <span>Install</span>
+              {isControllerActive && (
+                <ControllerGlyph
+                  action={activeZone === "game-details" ? "confirm" : "launch"}
+                  profile={glyphProfile}
+                  customBindings={customBindings}
+                  nintendoSwap={nintendoSwap}
+                  size="xs"
+                  className="ml-1"
+                />
+              )}
             </button>
           ) : activeGame.play_actions && activeGame.play_actions.length > 0 ? (
             /* 80/20 Split Play Button for Games with Multiple Play Actions */
@@ -2241,6 +2539,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
               <div className="w-[220px] h-12 rounded-full flex overflow-hidden shadow-xl play-btn-glow bg-white text-slate-950 font-black">
                 {/* 80% Play Primary Action */}
                 <button
+                  data-gamepad-primary-action="true"
                   onClick={() => {
                     const primary = activeGame.play_actions?.find((a) => a.is_primary);
                     onLaunch(activeGame, primary?.id);
@@ -2257,6 +2556,16 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                     <>
                       <Play className="w-4.5 h-4.5 fill-slate-950 text-slate-950" />
                       <span>Play</span>
+                      {isControllerActive && (
+                        <ControllerGlyph
+                          action={activeZone === "game-details" ? "confirm" : "launch"}
+                          profile={glyphProfile}
+                          customBindings={customBindings}
+                          nintendoSwap={nintendoSwap}
+                          size="xs"
+                          className="ml-0.5"
+                        />
+                      )}
                     </>
                   )}
                 </button>
@@ -2280,7 +2589,10 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
 
               {/* Play Actions Dropdown Menu */}
               {isPlayActionsDropdownOpen && (
-                <div className="absolute bottom-full right-0 mb-3 w-64 theme-panel-surface backdrop-blur-2xl border border-white/10 rounded-2xl shadow-2xl p-2 z-50 text-xs space-y-1 animate-in fade-in slide-in-from-bottom-2 duration-150">
+                <div
+                  data-gamepad-zone="popover"
+                  className="absolute bottom-full right-0 mb-3 w-64 theme-panel-surface backdrop-blur-2xl border border-white/10 rounded-2xl shadow-2xl p-2 z-50 text-xs space-y-1 animate-in fade-in slide-in-from-bottom-2 duration-150"
+                >
                   <div className="px-2.5 py-1 text-[10px] uppercase font-bold tracking-wider text-zinc-500">
                     Launch Configurations
                   </div>
@@ -2326,7 +2638,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                   <button
                     onClick={() => {
                       setIsPlayActionsDropdownOpen(false);
-                      onOpenEdit(game);
+                      onOpenEdit(activeGame);
                     }}
                     className="w-full flex items-center space-x-2 px-3 py-1.5 rounded-xl text-left text-zinc-400 hover:text-white hover:bg-white/[0.06] transition-colors cursor-pointer text-[11px]"
                   >
@@ -2339,6 +2651,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
           ) : (
             /* Single Large Play Button when no custom play_actions are configured */
             <button
+              data-gamepad-primary-action="true"
               onClick={() => onLaunch(activeGame)}
               disabled={isLaunching}
               className={`w-[200px] h-12 rounded-full flex items-center justify-center space-x-2.5 text-sm font-black tracking-wider uppercase transition-all shadow-xl cursor-pointer ${
@@ -2356,6 +2669,16 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
                 <>
                   <Play className="w-4.5 h-4.5 fill-slate-950 text-slate-950" />
                   <span>Play</span>
+                  {isControllerActive && (
+                    <ControllerGlyph
+                      action={activeZone === "game-details" ? "confirm" : "launch"}
+                      profile={glyphProfile}
+                      customBindings={customBindings}
+                      nintendoSwap={nintendoSwap}
+                      size="xs"
+                      className="ml-1"
+                    />
+                  )}
                 </>
               )}
             </button>
@@ -2370,6 +2693,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
           className="fixed inset-0 z-50 flex items-center justify-center theme-modal-backdrop p-4 animate-in fade-in duration-150"
         >
           <div
+            data-gamepad-zone="modal"
             onClick={(e) => e.stopPropagation()}
             className="w-full max-w-sm theme-modal-container rounded-2xl p-5 shadow-2xl space-y-4 text-center select-none"
           >
@@ -2386,6 +2710,7 @@ export const GameDetails: React.FC<GameDetailsProps> = ({
 
             <div className="flex items-center space-x-2.5 pt-1">
               <button
+                data-gamepad-close="true"
                 onClick={() => setIsExitModalOpen(false)}
                 className="flex-1 py-2 px-3 rounded-xl bg-white/10 hover:bg-white/15 text-slate-300 hover:text-white text-xs font-semibold transition-colors cursor-pointer"
               >

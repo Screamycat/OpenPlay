@@ -1,3 +1,12 @@
+// Linux Runner & Compatibility
+export interface RunnerInfo {
+  id: string;
+  name: string;
+  runner_type: "proton" | "wine";
+  path: string;
+  is_default: boolean;
+}
+
 export interface AppConfig {
   // Layout & Session State (Reopen right where you left off)
   view_mode?: "split" | "grid" | "list";
@@ -41,6 +50,12 @@ export interface AppConfig {
   trailer_autoplay?: boolean;
   trailer_muted?: boolean;
 
+  // Linux Compatibility & Runner Settings
+  linux_preferred_runner_id?: string;
+  linux_custom_runner_path?: string;
+  enable_gamemode?: boolean;
+  enable_mangohud?: boolean;
+
   // APIs & Services
   steamgriddb_api_key?: string;
   steamgriddb_nsfw?: boolean;
@@ -65,6 +80,15 @@ export interface AppConfig {
   cloud_sync_on_startup?: boolean;
   cloud_sync_on_game_exit?: boolean;
   last_cloud_sync_time?: string | null;
+  cloud_save_retention_count?: number;
+
+  // Controller & Gamepad Navigation
+  controller_enabled?: boolean;
+  controller_glyph_style?: "auto" | "xbox" | "playstation" | "nintendo";
+  controller_nintendo_swap?: boolean;
+  controller_deadzone?: number;
+  controller_suspend_in_game?: boolean;
+  controller_bindings?: Record<string, string>;
 }
 
 export const DEFAULT_APP_CONFIG: AppConfig = {
@@ -90,11 +114,19 @@ export const DEFAULT_APP_CONFIG: AppConfig = {
   cloud_sync_on_startup: true,
   cloud_sync_on_game_exit: true,
   last_cloud_sync_time: null,
+  cloud_save_retention_count: 5,
+  controller_enabled: true,
+  controller_glyph_style: "auto",
+  controller_nintendo_swap: false,
+  controller_deadzone: 0.18,
+  controller_suspend_in_game: true,
+  controller_bindings: {},
   launch_on_startup: false,
   minimize_on_game_launch: false,
   close_to_tray: false,
   merge_duplicates: true,
   unmerged_game_ids: [],
+  active_theme_id: "default",
   theme: "dark",
   background_blur: 32,
   background_opacity: 0.75,
@@ -109,4 +141,14 @@ export const DEFAULT_APP_CONFIG: AppConfig = {
   trailer_muted: true,
   steamgriddb_nsfw: false,
   last_played_date_format: "date_and_time",
+  enable_gamemode: true,
+  enable_mangohud: false,
 };
+
+export interface RunnerInfo {
+  id: string;
+  name: string;
+  runner_type: "proton" | "wine";
+  path: string;
+  is_default: boolean;
+}

@@ -1,8 +1,15 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
 
+const KNOWN_SGDB_APNG_GRID_HASHES = new Set([
+  "5164b46830eb9b286b4e6dd514d84d8c",
+  "1bb6ff4f6f52891ba537ccb13cab09af",
+  "02b293533a7ab5cb9362b406c8e402fd",
+]);
+
 export function isVideoSrc(pathOrUrl?: string): boolean {
   if (!pathOrUrl) return false;
-  const clean = pathOrUrl.split("?")[0].split("#")[0].toLowerCase();
+  const resolved = resolveImageSrc(pathOrUrl) || pathOrUrl;
+  const clean = resolved.split("?")[0].split("#")[0].toLowerCase();
   return (
     clean.endsWith(".webm") ||
     clean.endsWith(".mp4") ||
@@ -18,9 +25,9 @@ export function getStaticFallbackCover(pathOrUrl?: string): string | undefined {
   const resolved = resolveImageSrc(pathOrUrl);
   if (!resolved) return undefined;
 
-  // If SteamGridDB webm thumb, fallback to png thumb or jpg thumb
+  // SteamGridDB does not host static .jpg/.png files for animated .webm hashes
   if (resolved.includes("steamgriddb.com")) {
-    return resolved.replace(/\.webm$/i, ".png");
+    return undefined;
   }
 
   return resolved.replace(/\.(webm|mp4|m4v|ogg)$/i, ".jpg");
@@ -28,6 +35,30 @@ export function getStaticFallbackCover(pathOrUrl?: string): string | undefined {
 
 export function resolveImageSrc(pathOrUrl?: string): string | undefined {
   if (!pathOrUrl) return undefined;
+
+  // Map heavy animated SteamGridDB WebP/APNG files (up to 49MB compressed / 1.3GB uncompressed RGBA in WebKitGTK)
+  // to their lightweight hardware-accelerated .webm streams (~58KB - 2.8MB)
+  if (pathOrUrl.includes("steamgriddb.com")) {
+    const clean = pathOrUrl.split("?")[0].split("#")[0];
+    const file = clean.split("/").pop() || "";
+    const dotIdx = file.lastIndexOf(".");
+    if (dotIdx > 0) {
+      const hash = file.slice(0, dotIdx);
+      const ext = file.slice(dotIdx + 1).toLowerCase();
+      if (ext === "webp" || KNOWN_SGDB_APNG_GRID_HASHES.has(hash)) {
+        if (clean.includes("/grid/")) {
+          return `https://cdn2.steamgriddb.com/thumb/${hash}.webm`;
+        }
+        if (clean.includes("/hero/")) {
+          return `https://cdn2.steamgriddb.com/hero_thumb/${hash}.webm`;
+        }
+        if (clean.includes("/logo/")) {
+          return `https://cdn2.steamgriddb.com/logo_thumb/${hash}.webm`;
+        }
+      }
+    }
+  }
+
   if (
     pathOrUrl.startsWith("http://") ||
     pathOrUrl.startsWith("https://") ||
@@ -36,6 +67,13 @@ export function resolveImageSrc(pathOrUrl?: string): string | undefined {
     pathOrUrl.startsWith("asset:")
   ) {
     return pathOrUrl;
+  }
+  // Ignore unresolvable custom:// or Windows drive paths on Linux/POSIX
+  if (pathOrUrl.startsWith("custom://")) {
+    return undefined;
+  }
+  if (/^[a-zA-Z]:[\\/]/.test(pathOrUrl)) {
+    return undefined;
   }
   try {
     // Normalize Windows backslashes to forward slashes to avoid Edge Webview2 %5C URL encoding issues
@@ -65,6 +103,10 @@ export function resolveGridCoverSrc(
   ) {
     const sep = resolved.includes("?") ? "&" : "?";
     return `${resolved}${sep}h=${targetHeight}&resize=1`;
+  }
+
+  if (resolved.includes("images.igdb.com/igdb/image/upload/t_1080p/")) {
+    return resolved.replace("/t_1080p/", targetHeight > 540 ? "/t_720p/" : "/t_cover_big/");
   }
 
   return resolved;

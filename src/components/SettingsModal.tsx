@@ -16,11 +16,24 @@ import {
   Download,
   CheckCircle2,
   AlertCircle,
+  Cpu,
+  FolderOpen,
+  Gamepad2,
+  RotateCcw,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { AppConfig, DEFAULT_APP_CONFIG } from "../types/config";
+import { AppConfig, DEFAULT_APP_CONFIG, RunnerInfo } from "../types/config";
+import {
+  CONTROLLER_ACTIONS_META,
+  ControllerGlyphStyle,
+  getButtonDisplayName,
+  getPhysicalButtonForAction,
+  resolveGlyphProfile,
+} from "../types/gamepad";
+import { useGamepad } from "../contexts/GamepadContext";
+import { ControllerGlyph } from "./gamepad/ControllerGlyph";
 import { PlayniteBackupTab } from "./library/PlayniteBackupTab";
 import { OpenPlayBackupTab } from "./library/OpenPlayBackupTab";
 import { CloudSyncSettingsCard } from "./library/CloudSyncSettingsCard";
@@ -48,6 +61,8 @@ type SettingsTab =
   | "general"
   | "appearance"
   | "playback"
+  | "controller"
+  | "linux"
   | "apis"
   | "backup"
   | "about";
@@ -91,6 +106,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   });
   const [installerPath, setInstallerPath] = useState<string | null>(null);
   const [backupSubTab, setBackupSubTab] = useState<"cloud" | "openplay" | "playnite">("cloud");
+  const [availableRunners, setAvailableRunners] = useState<RunnerInfo[]>([]);
+  const {
+    isControllerConnected,
+    controllerName,
+    listeningForAction,
+    startListeningForKeybind,
+    cancelListeningForKeybind,
+  } = useGamepad();
+
+  useEffect(() => {
+    if (isOpen && (activeTab === "linux" || activeTab === "playback")) {
+      invoke<RunnerInfo[]>("get_available_runners")
+        .then((runners) => setAvailableRunners(runners || []))
+        .catch((err) => console.warn("Failed to load runners:", err));
+    }
+  }, [isOpen, activeTab]);
 
   useEffect(() => {
     if (isOpen && initialTab) {
@@ -99,7 +130,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   }, [isOpen, initialTab]);
 
   useEffect(() => {
-    if (isOpen) {
+    if (!isOpen) return;
+    const refreshActiveTheme = () => {
       invoke<ThemeInfo[]>("get_installed_themes")
         .then((themes) => {
           const active =
@@ -109,8 +141,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           setActiveTheme(active || null);
         })
         .catch((err) => console.warn("Failed to load active theme in settings:", err));
-    }
-  }, [isOpen]);
+    };
+    refreshActiveTheme();
+    const unlisten = listen("cloud-sync-completed", () => {
+      refreshActiveTheme();
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [isOpen, initialConfig.active_theme_id]);
 
   useEffect(() => {
     if (initialUpdateResult) {
@@ -251,6 +290,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     { id: "general", label: "General", icon: Sliders },
     { id: "appearance", label: "Appearance", icon: Palette },
     { id: "playback", label: "Playback & Media", icon: PlaySquare },
+    { id: "controller", label: "Controller", icon: Gamepad2 },
+    { id: "linux", label: "Linux", icon: Terminal },
     { id: "apis", label: "APIs & Services", icon: KeyRound },
     { id: "backup", label: "Backups & Data", icon: Archive },
     { id: "about", label: "About OpenPlay", icon: Info },
@@ -260,13 +301,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   return (
     <div
+      id="openplay-settings-modal"
       onClick={onClose}
       data-theme-part="settings-modal"
-      className="fixed inset-0 z-50 theme-modal-backdrop flex items-center justify-center p-4 select-none animate-in fade-in duration-150"
+      className="openplay-system-modal fixed inset-0 z-50 theme-modal-backdrop flex items-center justify-center p-4 select-none animate-in fade-in duration-150"
     >
       <div
         onClick={(e) => e.stopPropagation()}
         data-theme-part="modal-container"
+        data-gamepad-zone="modal"
         className="theme-modal-container rounded-2xl w-full max-w-4xl h-[620px] max-h-[90vh] flex flex-col overflow-hidden text-zinc-200"
       >
         {/* Header */}
@@ -285,6 +328,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
           <button
             onClick={onClose}
+            data-gamepad-close="true"
             className="w-7 h-7 rounded-full bg-white/5 hover:bg-white/15 text-zinc-400 hover:text-white flex items-center justify-center transition-colors cursor-pointer border border-white/5"
           >
             <X className="w-4 h-4" />
@@ -294,7 +338,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         {/* Body: Sidebar + Main Settings View */}
         <div className="flex-1 flex overflow-hidden">
           {/* Sidebar Navigation */}
-          <div className="w-52 border-r border-white/10 bg-white/[0.015] p-2.5 space-y-1 shrink-0 overflow-y-auto">
+          <div
+            data-gamepad-tabs="true"
+            className="w-52 border-r border-white/10 bg-white/[0.015] p-2.5 space-y-1 shrink-0 overflow-y-auto"
+          >
             {navItems.map((item) => {
               const Icon = item.icon;
               const isActive = activeTab === item.id;
@@ -302,6 +349,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <button
                   key={item.id}
                   onClick={() => setActiveTab(item.id)}
+                  data-gamepad-tab-active={isActive ? "true" : undefined}
                   className={`w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer text-left ${
                     isActive
                       ? "bg-white/15 text-white shadow-sm border border-white/10"
@@ -841,7 +889,137 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </div>
             )}
 
-            {/* 4. APIs & Services Tab */}
+            {/* 4. Linux Tab */}
+            {activeTab === "linux" && (
+              <div className="space-y-5">
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <h3 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                      <Cpu className="w-3.5 h-3.5 text-purple-400" />
+                      Linux Compatibility & Execution (Wine / Proton)
+                    </h3>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        invoke<RunnerInfo[]>("get_available_runners")
+                          .then((runners) => setAvailableRunners(runners || []))
+                          .catch((e) => console.warn(e));
+                      }}
+                      className="text-[11px] text-zinc-400 hover:text-white flex items-center gap-1 transition-colors px-2 py-0.5 rounded bg-white/5 hover:bg-white/10"
+                      title="Rescan installed Proton / Wine runners"
+                    >
+                      <RefreshCw className="w-3 h-3" />
+                      Rescan
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-zinc-400">
+                    Standalone execution configuration for Windows (.exe) titles running natively on Linux without external frontends.
+                  </p>
+                </div>
+
+                <div className="space-y-4 bg-white/[0.02] border border-white/5 rounded-xl p-4">
+                  {/* Preferred Runner Selection */}
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-zinc-200 block">
+                      Preferred Compatibility Runner
+                    </label>
+                    <select
+                      value={formConfig.linux_preferred_runner_id || ""}
+                      onChange={(e) => updateField("linux_preferred_runner_id", e.target.value || undefined)}
+                      className="w-full px-3 py-2 bg-zinc-900 border border-white/10 rounded-lg text-xs text-white focus:outline-none focus:border-purple-500/50"
+                    >
+                      <option value="">
+                        Auto-Detect Best Runner {availableRunners.find((r) => r.is_default) ? `(Default: ${availableRunners.find((r) => r.is_default)?.name})` : ""}
+                      </option>
+                      {availableRunners.map((runner) => (
+                        <option key={runner.id} value={runner.id}>
+                          {runner.name} [{runner.runner_type.toUpperCase()}] {runner.is_default ? "★ Recommended" : ""}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-[10px] text-zinc-500">
+                      Discovered runners from Steam compatibility tools (GE-Proton), Steam common runtimes, Lutris/Heroic, and system Wine.
+                    </p>
+                  </div>
+
+                  {/* Custom Runner Path (Optional) */}
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-zinc-200 block">
+                      Custom Runner Directory or Binary (Optional)
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={formConfig.linux_custom_runner_path || ""}
+                        onChange={(e) => updateField("linux_custom_runner_path", e.target.value || undefined)}
+                        placeholder="e.g. /home/user/.steam/root/compatibilitytools.d/GE-Proton9-25 or /usr/bin/wine"
+                        className="flex-1 px-3 py-2 bg-zinc-900 border border-white/10 rounded-lg text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-purple-500/50 font-mono"
+                      />
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            const selected = await invoke<string | null>("select_directory");
+                            if (selected) {
+                              updateField("linux_custom_runner_path", selected);
+                            }
+                          } catch (err) {
+                            console.error("Failed to select folder:", err);
+                          }
+                        }}
+                        className="px-3 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-xs text-zinc-300 hover:text-white flex items-center gap-1.5 transition-colors"
+                        title="Browse custom runner folder"
+                      >
+                        <FolderOpen className="w-3.5 h-3.5" />
+                        Browse
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="border-t border-white/5" />
+
+                  {/* Feral GameMode */}
+                  <label className="flex items-center justify-between cursor-pointer group">
+                    <div className="space-y-0.5">
+                      <div className="font-semibold text-zinc-200 group-hover:text-white transition-colors text-xs">
+                        Enable Feral GameMode (<span className="font-mono text-purple-300">gamemoderun</span>)
+                      </div>
+                      <div className="text-[11px] text-zinc-500">
+                        Automatically requests Linux scheduler priority and optimal GPU power governor while game is running.
+                      </div>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={formConfig.enable_gamemode ?? true}
+                      onChange={(e) => updateField("enable_gamemode", e.target.checked)}
+                      className="w-4 h-4 rounded bg-zinc-800 border-zinc-700 text-purple-600 accent-purple-500 cursor-pointer"
+                    />
+                  </label>
+
+                  <div className="border-t border-white/5" />
+
+                  {/* MangoHud Overlay */}
+                  <label className="flex items-center justify-between cursor-pointer group">
+                    <div className="space-y-0.5">
+                      <div className="font-semibold text-zinc-200 group-hover:text-white transition-colors text-xs">
+                        Enable MangoHud Performance Overlay (<span className="font-mono text-purple-300">mangohud</span>)
+                      </div>
+                      <div className="text-[11px] text-zinc-500">
+                        Displays Vulkan / OpenGL in-game FPS, frametime graph, VRAM usage, and hardware thermals.
+                      </div>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={formConfig.enable_mangohud ?? false}
+                      onChange={(e) => updateField("enable_mangohud", e.target.checked)}
+                      className="w-4 h-4 rounded bg-zinc-800 border-zinc-700 text-purple-600 accent-purple-500 cursor-pointer"
+                    />
+                  </label>
+                </div>
+              </div>
+            )}
+
+            {/* 5. APIs & Services Tab */}
             {activeTab === "apis" && (
               <div className="space-y-5">
                 <div>
@@ -985,6 +1163,342 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             )}
 
             {/* 5. Backups & Data Tab */}
+            {activeTab === "controller" && (() => {
+              const activeProfile = resolveGlyphProfile(
+                formConfig.controller_glyph_style,
+                controllerName
+              );
+              const customBindings = formConfig.controller_bindings || {};
+              const nintendoSwap = formConfig.controller_nintendo_swap ?? false;
+              const deadzonePct = Math.round(
+                (formConfig.controller_deadzone ?? 0.18) * 100
+              );
+
+              return (
+                <div className="space-y-6">
+                  <div>
+                    <h3 className="text-xs font-bold text-white uppercase tracking-wider mb-1">
+                      Controller & Gamepad Navigation
+                    </h3>
+                    <p className="text-[11px] text-zinc-400">
+                      Configure desktop controller navigation, button prompt styles, analog stick deadzones, and custom keybinds.
+                    </p>
+                  </div>
+
+                  {/* Connected Controller Status Card */}
+                  <div className="bg-white/[0.02] border border-white/10 rounded-xl p-4 flex items-center justify-between gap-4">
+                    <div className="flex items-center space-x-3.5 min-w-0">
+                      <div
+                        className={`w-10 h-10 rounded-xl flex items-center justify-center border shrink-0 ${
+                          isControllerConnected
+                            ? "theme-accent-subtle-bg theme-accent-text border-[var(--app-accent-color)]/40"
+                            : "bg-white/5 text-zinc-500 border-white/10"
+                        }`}
+                      >
+                        <Gamepad2 className="w-5 h-5" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center space-x-2">
+                          <span className="font-bold text-xs text-white truncate">
+                            {isControllerConnected
+                              ? controllerName || "Gamepad Connected"
+                              : "No Controller Detected"}
+                          </span>
+                          <span
+                            className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${
+                              isControllerConnected
+                                ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/30"
+                                : "bg-white/5 text-zinc-400 border-white/10"
+                            }`}
+                          >
+                            {isControllerConnected ? "Active" : "Standby"}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-zinc-400 mt-0.5">
+                          {isControllerConnected
+                            ? `Active prompt profile: ${
+                                activeProfile === "playstation"
+                                  ? "PlayStation"
+                                  : activeProfile === "nintendo"
+                                  ? "Nintendo Switch"
+                                  : "Xbox / Standard"
+                              }`
+                            : "Press any button on your controller to wake it up."}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Live Face Button Glyph Preview */}
+                    <div className="flex items-center space-x-1.5 shrink-0 bg-black/40 px-3 py-2 rounded-xl border border-white/10">
+                      <ControllerGlyph
+                        button="South"
+                        profile={activeProfile}
+                        size="sm"
+                      />
+                      <ControllerGlyph
+                        button="East"
+                        profile={activeProfile}
+                        size="sm"
+                      />
+                      <ControllerGlyph
+                        button="West"
+                        profile={activeProfile}
+                        size="sm"
+                      />
+                      <ControllerGlyph
+                        button="North"
+                        profile={activeProfile}
+                        size="sm"
+                      />
+                    </div>
+                  </div>
+
+                  {/* General Controller Behavior */}
+                  <div className="space-y-3 bg-white/[0.02] border border-white/5 rounded-xl p-4">
+                    {/* Enable Controller Support */}
+                    <label className="flex items-center justify-between cursor-pointer group">
+                      <div className="space-y-0.5 pr-4">
+                        <div className="font-semibold text-zinc-200 group-hover:text-white transition-colors">
+                          Enable Controller Navigation
+                        </div>
+                        <div className="text-[11px] text-zinc-500">
+                          Navigate your game library, details pane, modals, virtual keyboard, and file browser with a gamepad.
+                        </div>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={formConfig.controller_enabled ?? true}
+                        onChange={(e) =>
+                          updateField("controller_enabled", e.target.checked)
+                        }
+                        className="w-4 h-4 rounded bg-zinc-800 border-zinc-700 text-white accent-white cursor-pointer"
+                      />
+                    </label>
+
+                    <div className="border-t border-white/5" />
+
+                    {/* Suspend Input While In-Game */}
+                    <label className="flex items-center justify-between cursor-pointer group">
+                      <div className="space-y-0.5 pr-4">
+                        <div className="font-semibold text-zinc-200 group-hover:text-white transition-colors">
+                          Suspend Input While In-Game or Unfocused
+                        </div>
+                        <div className="text-[11px] text-zinc-500">
+                          Automatically pause OpenPlay controller navigation while a game is running or when OpenPlay is in the background.
+                        </div>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={formConfig.controller_suspend_in_game ?? true}
+                        onChange={(e) =>
+                          updateField(
+                            "controller_suspend_in_game",
+                            e.target.checked
+                          )
+                        }
+                        className="w-4 h-4 rounded bg-zinc-800 border-zinc-700 text-white accent-white cursor-pointer"
+                      />
+                    </label>
+
+                    <div className="border-t border-white/5" />
+
+                    {/* Nintendo Layout Swap */}
+                    <label className="flex items-center justify-between cursor-pointer group">
+                      <div className="space-y-0.5 pr-4">
+                        <div className="font-semibold text-zinc-200 group-hover:text-white transition-colors">
+                          Nintendo Layout Swap (A/B & X/Y)
+                        </div>
+                        <div className="text-[11px] text-zinc-500">
+                          Swap physical South/East (Confirm/Back) and West/North face button positions to match Nintendo controllers.
+                        </div>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={formConfig.controller_nintendo_swap ?? false}
+                        onChange={(e) =>
+                          updateField(
+                            "controller_nintendo_swap",
+                            e.target.checked
+                          )
+                        }
+                        className="w-4 h-4 rounded bg-zinc-800 border-zinc-700 text-white accent-white cursor-pointer"
+                      />
+                    </label>
+
+                    <div className="border-t border-white/5" />
+
+                    {/* Button Prompt Style */}
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-0.5 pr-4">
+                        <div className="font-semibold text-zinc-200">
+                          Button Prompt Icons (Glyphs)
+                        </div>
+                        <div className="text-[11px] text-zinc-500">
+                          Automatically match connected controller hardware or lock to your preferred button icon set.
+                        </div>
+                      </div>
+                      <select
+                        aria-label="Button Prompt Icons"
+                        value={formConfig.controller_glyph_style ?? "auto"}
+                        onChange={(e) =>
+                          updateField(
+                            "controller_glyph_style",
+                            e.target.value as ControllerGlyphStyle
+                          )
+                        }
+                        className="bg-zinc-800 border border-zinc-700 text-xs text-white rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-zinc-500 shrink-0 cursor-pointer"
+                      >
+                        <option value="auto">Auto-Detect</option>
+                        <option value="xbox">Xbox (A / B / X / Y)</option>
+                        <option value="playstation">
+                          PlayStation (Cross / Circle / Square / Triangle)
+                        </option>
+                        <option value="nintendo">
+                          Nintendo Switch (B / A / Y / X)
+                        </option>
+                      </select>
+                    </div>
+
+                    <div className="border-t border-white/5" />
+
+                    {/* Analog Stick Deadzone Slider */}
+                    <div className="space-y-2 pt-1">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <div className="font-semibold text-zinc-200">
+                            Analog Stick Deadzone
+                          </div>
+                          <div className="text-[11px] text-zinc-500">
+                            Ignore minor stick drift below this threshold before moving focus or scrolling.
+                          </div>
+                        </div>
+                        <span className="text-xs font-mono font-bold text-white bg-white/10 px-2 py-0.5 rounded border border-white/10">
+                          {deadzonePct}%
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        aria-label="Analog Stick Deadzone"
+                        min={0.05}
+                        max={0.4}
+                        step={0.01}
+                        value={formConfig.controller_deadzone ?? 0.18}
+                        onChange={(e) =>
+                          updateField(
+                            "controller_deadzone",
+                            parseFloat(e.target.value)
+                          )
+                        }
+                        className="w-full accent-[var(--app-accent-color)] cursor-pointer"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Interactive Keybind Remapping Suite */}
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h4 className="text-xs font-bold text-white uppercase tracking-wider">
+                          Controller Keybinds
+                        </h4>
+                        <p className="text-[11px] text-zinc-400">
+                          Select any action and press a controller button to assign a custom binding.
+                        </p>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          cancelListeningForKeybind();
+                          updateField("controller_bindings", {});
+                        }}
+                        className="px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-zinc-300 hover:text-white text-xs font-semibold flex items-center space-x-1.5 transition-colors cursor-pointer"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        <span>Reset Defaults</span>
+                      </button>
+                    </div>
+
+                    <div className="bg-white/[0.02] border border-white/5 rounded-xl divide-y divide-white/5 overflow-hidden">
+                      {CONTROLLER_ACTIONS_META.map((meta) => {
+                        const isListening = listeningForAction === meta.action;
+                        const boundPhys = getPhysicalButtonForAction(
+                          meta.action,
+                          customBindings,
+                          nintendoSwap
+                        );
+
+                        return (
+                          <div
+                            key={meta.action}
+                            className="p-3.5 flex items-center justify-between gap-4 hover:bg-white/[0.02] transition-colors"
+                          >
+                            <div className="space-y-0.5 min-w-0">
+                              <div className="font-semibold text-zinc-100 text-xs">
+                                {meta.label}
+                              </div>
+                              <div className="text-[11px] text-zinc-500">
+                                {meta.description}
+                              </div>
+                            </div>
+
+                            <div className="flex items-center space-x-2.5 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (isListening) {
+                                    cancelListeningForKeybind();
+                                  } else {
+                                    startListeningForKeybind(
+                                      meta.action,
+                                      (capturedBtn) => {
+                                        const nextBindings = {
+                                          ...(formConfig.controller_bindings || {}),
+                                          [meta.action]: capturedBtn,
+                                        };
+                                        updateField(
+                                          "controller_bindings",
+                                          nextBindings
+                                        );
+                                      }
+                                    );
+                                  }
+                                }}
+                                className={`px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center space-x-2 transition-all cursor-pointer ${
+                                  isListening
+                                    ? "theme-accent-bg text-white border-white animate-pulse shadow-lg"
+                                    : "bg-black/40 hover:bg-white/10 text-zinc-200 border-white/15"
+                                }`}
+                              >
+                                {isListening ? (
+                                  <span>Press Button...</span>
+                                ) : (
+                                  <>
+                                    <ControllerGlyph
+                                      button={boundPhys}
+                                      profile={activeProfile}
+                                      size="sm"
+                                    />
+                                    <span>
+                                      {getButtonDisplayName(
+                                        boundPhys,
+                                        activeProfile
+                                      )}
+                                    </span>
+                                  </>
+                                )}
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* 5. Backups & Data Tab */}
             {activeTab === "backup" && (
               <div className="space-y-4">
                 {/* Sub-navigation tabs */}
@@ -1022,7 +1536,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </div>
 
                 {backupSubTab === "cloud" && (
-                  <CloudSyncSettingsCard onReloadGames={onReloadGames} />
+                  <CloudSyncSettingsCard
+                    onReloadGames={onReloadGames}
+                    config={formConfig}
+                    onSaveConfig={(updated) => {
+                      setFormConfig(updated);
+                      onSaveConfig(updated);
+                    }}
+                  />
                 )}
 
                 {backupSubTab === "openplay" && (

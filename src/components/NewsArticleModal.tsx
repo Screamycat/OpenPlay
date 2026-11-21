@@ -100,6 +100,7 @@ export const NewsArticleModal: React.FC<NewsArticleModalProps> = ({
       <div
         onClick={(e) => e.stopPropagation()}
         data-theme-part="modal-container"
+        data-gamepad-zone="modal"
         className="w-full max-w-3xl max-h-[88vh] theme-modal-container rounded-2xl flex flex-col overflow-hidden text-xs text-zinc-200 animate-in zoom-in-95 duration-150"
       >
         {/* Header */}
@@ -125,6 +126,7 @@ export const NewsArticleModal: React.FC<NewsArticleModalProps> = ({
 
           <button
             onClick={onClose}
+            data-gamepad-close="true"
             className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer shrink-0"
           >
             <X className="w-4 h-4" />
@@ -132,7 +134,10 @@ export const NewsArticleModal: React.FC<NewsArticleModalProps> = ({
         </div>
 
         {/* Scrollable Content Body */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-4 select-text">
+        <div
+          data-gamepad-scroll="news-article"
+          className="flex-1 overflow-y-auto p-6 space-y-4 select-text"
+        >
           {/* Banner image if present */}
           {(article.banner_image || article.image_url) && (
             <div className="rounded-xl overflow-hidden border border-white/10 shadow-2xl max-h-[300px]">

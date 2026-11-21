@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./styles/core-fallback.css";
 
 @layer base {
   :root {
@@ -44,9 +45,7 @@
   }
 
   .theme-modal-container {
-    background-color: color-mix(in srgb, var(--app-panel-tint, #0e0e11) 94%, transparent) !important;
-    backdrop-filter: blur(24px) !important;
-    -webkit-backdrop-filter: blur(24px) !important;
+    background-color: color-mix(in srgb, var(--app-panel-tint, #0e0e11) 97%, transparent) !important;
     border: 1px solid var(--theme-border-color, rgba(255, 255, 255, 0.1)) !important;
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.85) !important;
   }
@@ -375,4 +374,52 @@ section:hover::-webkit-scrollbar-thumb,
 .animate-bg-crossfade {
   animation: bgCrossFade 1100ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
+
+/* Native Controller Mode Focus Ring & Card Glint */
+html[data-controller-mode="true"],
+html[data-controller-mode="true"] * {
+  cursor: none !important;
+}
+
+html[data-controller-mode="true"] .poster-zoom-slider {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+@keyframes controllerFocusPulse {
+  0%, 100% {
+    box-shadow:
+      0 0 0 2px #ffffff,
+      0 0 0 4px var(--app-accent-color, #783efe),
+      0 0 22px color-mix(in srgb, var(--app-accent-color, #783efe) 85%, transparent);
+  }
+  50% {
+    box-shadow:
+      0 0 0 2px #ffffff,
+      0 0 0 5px var(--app-accent-color, #783efe),
+      0 0 32px color-mix(in srgb, var(--app-accent-color, #783efe) 95%, transparent);
+  }
+}
+
+html[data-controller-mode="true"] [data-gamepad-focused="true"] {
+  outline: none !important;
+  position: relative;
+  z-index: 35 !important;
+  animation: controllerFocusPulse 2s ease-in-out infinite !important;
+}
+
+html[data-controller-mode="true"] [data-gamepad-card-focused="true"] {
+  z-index: 25 !important;
+  transform: scale(1.035);
+  opacity: 1 !important;
+  animation: controllerFocusPulse 2s ease-in-out infinite !important;
+}
+
+html[data-controller-mode="true"] [data-gamepad-card-focused="true"] .card-shine-beam {
+  will-change: transform, opacity;
+  transform: translate3d(100%, 100%, 0);
+  opacity: 1;
+  transition: transform 1.4s cubic-bezier(0.35, 0, 0.15, 1), opacity 0.4s ease;
+}
+
 

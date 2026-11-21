@@ -5,6 +5,7 @@ pub mod achievement;
 pub mod emulator;
 pub mod backup;
 pub mod cloud_sync;
+pub mod saves;
 
 pub use game::*;
 pub use integration::*;
@@ -13,3 +14,4 @@ pub use achievement::*;
 pub use emulator::*;
 pub use backup::*;
 pub use cloud_sync::*;
+pub use saves::*;

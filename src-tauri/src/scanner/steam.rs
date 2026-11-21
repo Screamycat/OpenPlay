@@ -70,6 +70,34 @@ impl SteamScanner {
         folders
     }
 
+    /// Discovers the active local user SteamID64 from the Steam userdata directory
+    pub fn find_local_steamid64() -> Option<String> {
+        let steam_dir = Self::find_steam_install_dir()?;
+        let userdata_dir = steam_dir.join("userdata");
+        if userdata_dir.exists() {
+            if let Ok(entries) = fs::read_dir(&userdata_dir) {
+                let mut candidates: Vec<u64> = Vec::new();
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        if let Some(folder_name) = path.file_name().and_then(|n| n.to_str()) {
+                            if let Ok(acc32) = folder_name.parse::<u64>() {
+                                if acc32 > 0 {
+                                    candidates.push(acc32);
+                                }
+                            }
+                        }
+                    }
+                }
+                if let Some(&first) = candidates.first() {
+                    let sid64 = first + 76561197960265728;
+                    return Some(sid64.to_string());
+                }
+            }
+        }
+        None
+    }
+
     /// Reads user playtime (in seconds) from localconfig.vdf across all userdata profiles
     pub fn get_user_playtimes(steam_dir: &Path) -> std::collections::HashMap<String, u64> {
         let mut playtimes = std::collections::HashMap::new();
@@ -211,7 +239,7 @@ impl SteamScanner {
                                                 if ts > 0 {
                                                     if let Some(dt) = chrono::DateTime::from_timestamp(ts, 0) {
                                                         let entry = history.entry(appid.clone()).or_insert((0u64, None));
-                                                        entry.1 = Some(dt.format("%Y-%m-%d").to_string());
+                                                        entry.1 = Some(dt.to_rfc3339());
                                                     }
                                                 }
                                             }
@@ -654,7 +682,7 @@ impl SteamScanner {
                                 let last_played_str = last_played_raw.and_then(|ts| {
                                     if ts > 0 {
                                         chrono::DateTime::from_timestamp(ts, 0)
-                                            .map(|dt| dt.format("%Y-%m-%d").to_string())
+                                            .map(|dt| dt.to_rfc3339())
                                     } else {
                                         None
                                     }

@@ -1,16 +1,46 @@
 use crate::db::Database;
 use std::collections::HashMap;
+use std::fs;
 use std::path::Path;
 use std::process::Command;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
 use tauri::{AppHandle, Emitter};
 
+pub mod runners;
+pub mod wine;
+
+pub use runners::{RunnerInfo, RunnerManager};
+pub use wine::LinuxWineEngine;
+
+#[derive(Clone)]
+pub enum LauncherEventSink {
+    Tauri(AppHandle),
+    Daemon(crate::daemon::DaemonEmitter),
+    None,
+}
+
+impl LauncherEventSink {
+    pub fn emit<T: serde::Serialize>(&self, event: &str, payload: &T) {
+        match self {
+            LauncherEventSink::Tauri(handle) => {
+                let _ = handle.emit(event, payload);
+            }
+            LauncherEventSink::Daemon(emitter) => {
+                emitter.emit(event, payload);
+            }
+            LauncherEventSink::None => {}
+        }
+    }
+}
+
 pub struct RunningGameInfo {
     pub game_id: String,
     pub pids: Vec<u32>,
     pub candidate_exes: Vec<String>,
     pub install_directory: Option<String>,
+    pub prefix_path: Option<String>,
+    pub runner_path: Option<String>,
     pub start_time: Instant,
 }
 
@@ -23,6 +53,59 @@ fn running_games_map() -> &'static Mutex<HashMap<String, RunningGameInfo>> {
 fn unregister_running_game(gid: &str) -> Option<RunningGameInfo> {
     let mut map = running_games_map().lock().unwrap();
     map.remove(gid)
+}
+
+fn finalize_game_session(
+    sink: Option<&LauncherEventSink>,
+    db: Option<&Arc<Database>>,
+    gid: &str,
+    elapsed: u64,
+    end_str: &str,
+) {
+    if let Some(database) = db {
+        let _ = database.update_playtime(gid, elapsed, end_str);
+    }
+    if let Some(s) = sink {
+        s.emit(
+            "game-stopped",
+            &serde_json::json!({
+                "id": gid,
+                "elapsed_seconds": elapsed,
+                "last_played": end_str
+            }),
+        );
+    }
+    if let Some(database) = db {
+        let db_bg = database.clone();
+        let sink_bg = sink.cloned();
+        let gid_owned = gid.to_string();
+        std::thread::spawn(move || {
+            crate::saves::cloud::push_cloud_save_on_exit(&db_bg, &gid_owned, sink_bg.as_ref());
+
+            let sync_on_exit = db_bg
+                .get_app_config()
+                .ok()
+                .and_then(|c| c.cloud_sync_on_game_exit)
+                .unwrap_or(true);
+            if sync_on_exit {
+                if let Ok(status) = crate::cloud_sync::get_cloud_sync_status(&db_bg) {
+                    if status.enabled && status.is_folder_valid {
+                        if let Some(folder) = status.folder_path {
+                            let p = std::path::PathBuf::from(folder);
+                            if let Ok(summary) = crate::cloud_sync::sync_cloud_directory(&db_bg, &p) {
+                                if let Some(s) = sink_bg {
+                                    s.emit("cloud-sync-completed", &summary);
+                                    s.emit("library-updated", &serde_json::json!({}));
+                                }
+                            }
+                            return;
+                        }
+                    }
+                }
+            }
+            crate::cloud_sync::spawn_background_export(db_bg);
+        });
+    }
 }
 
 /// Recursively scans an installation folder (up to depth 2) to collect legitimate game executable filenames
@@ -75,6 +158,160 @@ fn get_candidate_executables(install_dir: &str) -> Vec<String> {
     exes
 }
 
+/// Returns true if a normalized path (`\`-separated, lowercase) is a shared system/user directory
+/// rather than an isolated game installation folder. Never match or kill processes by directory prefix
+/// if the directory is a shared system path!
+fn is_unsafe_shared_directory(dir_clean: &str) -> bool {
+    let trimmed = dir_clean.trim_matches('\\');
+    if trimmed.is_empty() {
+        return true;
+    }
+
+    // Reject root or top-level system directories on Linux (/usr, /usr/bin, /bin, /lib, /etc, /opt, /var, /tmp, /run, /proc, /sys, /dev)
+    let linux_unsafe = [
+        "usr",
+        "usr\\bin",
+        "usr\\local",
+        "usr\\local\\bin",
+        "usr\\lib",
+        "usr\\lib64",
+        "usr\\libexec",
+        "usr\\share",
+        "bin",
+        "sbin",
+        "lib",
+        "lib64",
+        "etc",
+        "var",
+        "tmp",
+        "opt",
+        "run",
+        "proc",
+        "sys",
+        "dev",
+        "home",
+        "root",
+        "app",
+        "app\\bin",
+        "snap",
+        " snap\\bin",
+    ];
+    if linux_unsafe.contains(&trimmed) {
+        return true;
+    }
+
+    // Reject if it's directly `/home/<user>` or `/home/<user>/.local/bin` or `/run/user/...`
+    let parts: Vec<&str> = trimmed.split('\\').filter(|s| !s.is_empty()).collect();
+    if parts.len() <= 2 && (parts.first() == Some(&"home") || parts.first() == Some(&"users") || parts.first() == Some(&"run")) {
+        return true;
+    }
+    if parts.first() == Some(&"run") && parts.get(1) == Some(&"user") {
+        return true;
+    }
+    if trimmed.ends_with("\\.local\\bin") || trimmed.ends_with("\\.cargo\\bin") {
+        return true;
+    }
+
+    // Reject Windows system directories (C:, C:\Windows, C:\Windows\System32, C:\Program Files, C:\Users\<user>)
+    if parts.len() == 1 && parts[0].ends_with(':') {
+        return true;
+    }
+    if parts.len() >= 2 && parts[0].ends_with(':') {
+        let second = parts[1];
+        if second == "windows" || second == "program files" || second == "program files (x86)" || second == "programdata" {
+            if parts.len() <= 3 {
+                return true;
+            }
+        }
+        if second == "users" && parts.len() <= 3 {
+            return true;
+        }
+    }
+
+    false
+}
+
+/// Returns true if a process name belongs to a critical desktop, display server, audio, session,
+/// or system service that must NEVER be considered a game process or terminated.
+fn is_protected_system_process(name_lower: &str) -> bool {
+    let exact_protected = [
+        "systemd",
+        "init",
+        "kwin_wayland",
+        "kwin_x11",
+        "mutter",
+        "gnome-shell",
+        "plasmashell",
+        " Hyprland",
+        "hyprland",
+        "sway",
+        "weston",
+        "wlroots",
+        "wayfire",
+        "labwc",
+        "niri",
+        "cosmic-comp",
+        "xorg",
+        "xwayland",
+        "sddm",
+        "gdm",
+        "lightdm",
+        "greetd",
+        "dbus-daemon",
+        "dbus-broker",
+        "pipewire",
+        "pipewire-pulse",
+        "wireplumber",
+        "pulseaudio",
+        "xdg-desktop-portal",
+        "xdg-open",
+        "bash",
+        "sh",
+        "zsh",
+        "fish",
+        "sudo",
+        "pkexec",
+        "polkitd",
+        "networkmanager",
+        "wpa_supplicant",
+        "bluetoothd",
+        "upowerd",
+        "udisksd",
+        " flatpak",
+        "bwrap",
+        "steam",
+        "steamwebhelper",
+        "openplay",
+        "openplay-core",
+        "electron",
+        "explorer.exe",
+        "dwm.exe",
+        "csrss.exe",
+        "wininit.exe",
+        "winlogon.exe",
+        "services.exe",
+        "lsass.exe",
+        "svchost.exe",
+    ];
+    if exact_protected.iter().any(|p| p.trim() == name_lower) {
+        return true;
+    }
+    if name_lower.starts_with("systemd-")
+        || name_lower.starts_with("xdg-desktop-portal")
+        || name_lower.starts_with("kwin")
+        || name_lower.starts_with("plasma-")
+        || name_lower.starts_with("gnome-session")
+        || name_lower.starts_with("gvfs")
+        || name_lower.starts_with("ibus")
+        || name_lower.starts_with("fcitx")
+        || name_lower.starts_with("at-spi")
+        || name_lower.starts_with("dconf")
+    {
+        return true;
+    }
+    false
+}
+
 /// Finds all running process PIDs matching candidate executables or install directory
 fn find_active_pids_for_game(
     sys: &sysinfo::System,
@@ -82,22 +319,34 @@ fn find_active_pids_for_game(
     install_dir: Option<&str>,
 ) -> Vec<u32> {
     let mut pids = Vec::new();
-    let dir_clean = install_dir.map(|d| {
-        let mut s = d.to_lowercase().replace('/', "\\");
-        if s.starts_with(r"\\?\") {
-            s = s[4..].to_string();
-        }
-        s.trim_end_matches('\\').to_string()
-    });
+    let self_pid = std::process::id();
+
+    let dir_clean = install_dir
+        .map(|d| {
+            let mut s = d.to_lowercase().replace('/', "\\");
+            if s.starts_with(r"\\?\") {
+                s = s[4..].to_string();
+            }
+            s.trim_end_matches('\\').to_string()
+        })
+        .filter(|d| !is_unsafe_shared_directory(d));
 
     for (pid, proc) in sys.processes() {
+        let pid_u32 = pid.as_u32();
+        if pid_u32 <= 1 || pid_u32 == self_pid {
+            continue;
+        }
+
         let name_str = proc.name().to_string_lossy().to_lowercase();
+        if is_protected_system_process(&name_str) {
+            continue;
+        }
 
         // Check 1: Match by candidate executable name (always reliable on Windows)
         if !candidate_exes.is_empty()
             && candidate_exes.iter().any(|c| c.eq_ignore_ascii_case(&name_str))
         {
-            pids.push(pid.as_u32());
+            pids.push(pid_u32);
             continue;
         }
 
@@ -108,7 +357,9 @@ fn find_active_pids_for_game(
                 if exe_str.starts_with(r"\\?\") {
                     exe_str = exe_str[4..].to_string();
                 }
-                if exe_str.starts_with(dir_clean_str) {
+                // Ensure boundary match (exact directory prefix followed by '\')
+                let prefix_with_sep = format!("{}\\", dir_clean_str);
+                if exe_str.starts_with(&prefix_with_sep) {
                     let is_ignored = name_str.contains("unins")
                         || name_str.contains("installer")
                         || name_str.contains("setup")
@@ -119,7 +370,7 @@ fn find_active_pids_for_game(
                         || name_str.contains("dxsetup")
                         || name_str.contains("createdump");
                     if !is_ignored {
-                        pids.push(pid.as_u32());
+                        pids.push(pid_u32);
                     }
                 }
             }
@@ -157,9 +408,106 @@ fn split_cli_arguments(args: &str) -> Vec<String> {
     parts
 }
 
+/// Resolves an executable command string (which could be an absolute path,
+/// a command in PATH, or a command with arguments like "flatpak run ...")
+pub fn resolve_executable_command(exe_str: &str) -> Option<(std::path::PathBuf, Vec<String>)> {
+    let trimmed = exe_str.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    // 1. Direct path exists
+    let direct_path = std::path::PathBuf::from(trimmed);
+    if direct_path.exists() && direct_path.is_file() {
+        return Some((direct_path, Vec::new()));
+    }
+
+    // 2. Parse command arguments if command contains spaces (e.g. "flatpak run org.prismlauncher.PrismLauncher")
+    let parts = split_cli_arguments(trimmed);
+    if parts.is_empty() {
+        return None;
+    }
+    let cmd_binary = &parts[0];
+    let cmd_args = parts[1..].to_vec();
+
+    let cmd_path = std::path::PathBuf::from(cmd_binary);
+    if cmd_path.exists() && cmd_path.is_file() {
+        return Some((cmd_path, cmd_args));
+    }
+
+    // 3. Search PATH
+    if let Ok(paths) = std::env::var("PATH") {
+        for dir in std::env::split_paths(&paths) {
+            let candidate = dir.join(cmd_binary);
+            if candidate.is_file() {
+                return Some((candidate, cmd_args.clone()));
+            }
+            #[cfg(target_os = "windows")]
+            {
+                let candidate_exe = dir.join(format!("{}.exe", cmd_binary));
+                if candidate_exe.is_file() {
+                    return Some((candidate_exe, cmd_args.clone()));
+                }
+            }
+        }
+    }
+
+    None
+}
+
 impl GameLauncher {
+    pub fn is_game_running(game_id: &str) -> bool {
+        let map = running_games_map().lock().unwrap();
+        map.contains_key(game_id)
+    }
+
+    pub fn launch_game_by_id(
+        sink: LauncherEventSink,
+        db: Arc<Database>,
+        game_id: &str,
+        action_id: Option<&str>,
+    ) -> Result<String, String> {
+        let all = db.get_all_games()?;
+        let game = all
+            .into_iter()
+            .find(|g| g.id == game_id)
+            .ok_or_else(|| "Game not found".to_string())?;
+
+        // Guard: Never update last_played or launch a playtime tracking session for uninstalled games.
+        // Route to install_game_core safely instead.
+        if !game.is_installed {
+            crate::install_game_core(&db, game_id)?;
+            return Ok(String::new());
+        }
+
+        if let Some(aid) = action_id {
+            if let Some(action) = game.play_actions.iter().find(|a| a.id == aid) {
+                return Self::launch_custom_action(
+                    sink,
+                    db.clone(),
+                    game.id,
+                    Some(action.path.clone()),
+                    action.arguments.clone(),
+                    action.working_dir.clone().or(game.install_directory.clone()),
+                );
+            }
+        }
+
+        Self::launch_game(
+            sink,
+            db,
+            game.id,
+            game.source,
+            game.source_id,
+            game.executable_path,
+            game.install_directory,
+            game.launch_arguments,
+            game.emulator_id,
+        )
+    }
+
     pub fn launch_game(
-        app_handle: AppHandle,
+        sink: LauncherEventSink,
         db: Arc<Database>,
         game_id: String,
         source: String,
@@ -175,7 +523,7 @@ impl GameLauncher {
             if let Some(ref dir) = install_directory {
                 if !Path::new(dir).exists() {
                     let _ = db.update_game_installed(&game_id, false);
-                    let _ = app_handle.emit("game-updated", serde_json::json!({ "id": &game_id, "is_installed": false }));
+                    sink.emit("game-updated", &serde_json::json!({ "id": &game_id, "is_installed": false }));
                     return Err(format!("Riot game folder not found at '{}'. Please verify installation via Riot Client.", dir));
                 }
             }
@@ -203,9 +551,9 @@ impl GameLauncher {
 
                 // Update last played timestamp in database
                 let _ = db.update_playtime(&game_id, 0, &now_str);
-                let _ = app_handle.emit(
+                sink.emit(
                     "game-launched",
-                    serde_json::json!({
+                    &serde_json::json!({
                         "id": &game_id,
                         "last_played": &now_str,
                     }),
@@ -237,14 +585,16 @@ impl GameLauncher {
                             pids: Vec::new(),
                             candidate_exes: candidate_exes.clone(),
                             install_directory: install_directory.clone(),
+                            prefix_path: None,
+                            runner_path: None,
                             start_time,
                         },
                     );
                 }
-                let _ = app_handle.emit("game-running", serde_json::json!({ "id": &game_id }));
+                sink.emit("game-running", &serde_json::json!({ "id": &game_id }));
 
                 // Monitor Steam process lifetime in background
-                let app_handle_clone = app_handle.clone();
+                let sink_clone = sink.clone();
                 let db_clone = db.clone();
                 let gid = game_id.clone();
                 let inst_dir = install_directory.clone();
@@ -297,15 +647,7 @@ impl GameLauncher {
                     unregister_running_game(&gid);
                     let elapsed = start_time.elapsed().as_secs();
                     let end_str = chrono::Local::now().format("%Y-%m-%d %H:%M").to_string();
-                    let _ = db_clone.update_playtime(&gid, elapsed, &end_str);
-                    let _ = app_handle_clone.emit(
-                        "game-stopped",
-                        serde_json::json!({
-                            "id": gid,
-                            "elapsed_seconds": elapsed,
-                            "last_played": end_str
-                        }),
-                    );
+                    finalize_game_session(Some(&sink_clone), Some(&db_clone), &gid, elapsed, &end_str);
                 });
 
                 return Ok(now_str);
@@ -330,13 +672,15 @@ impl GameLauncher {
                 {
                     if let Some(ref exe) = executable_path {
                         Command::new(exe).spawn().map_err(|e| e.to_string())?;
+                    } else {
+                        let _ = Command::new("xdg-open").arg(&epic_url).spawn();
                     }
                 }
 
                 let _ = db.update_playtime(&game_id, 0, &now_str);
-                let _ = app_handle.emit(
+                sink.emit(
                     "game-launched",
-                    serde_json::json!({
+                    &serde_json::json!({
                         "id": &game_id,
                         "last_played": &now_str,
                     }),
@@ -366,13 +710,15 @@ impl GameLauncher {
                             pids: Vec::new(),
                             candidate_exes: candidate_exes.clone(),
                             install_directory: install_directory.clone(),
+                            prefix_path: None,
+                            runner_path: None,
                             start_time,
                         },
                     );
                 }
-                let _ = app_handle.emit("game-running", serde_json::json!({ "id": &game_id }));
+                sink.emit("game-running", &serde_json::json!({ "id": &game_id }));
 
-                let app_handle_clone = app_handle.clone();
+                let sink_clone = sink.clone();
                 let db_clone = db.clone();
                 let gid = game_id.clone();
                 let inst_dir = install_directory.clone();
@@ -420,15 +766,7 @@ impl GameLauncher {
                     unregister_running_game(&gid);
                     let elapsed = start_time.elapsed().as_secs();
                     let end_str = chrono::Local::now().format("%Y-%m-%d %H:%M").to_string();
-                    let _ = db_clone.update_playtime(&gid, elapsed, &end_str);
-                    let _ = app_handle_clone.emit(
-                        "game-stopped",
-                        serde_json::json!({
-                            "id": gid,
-                            "elapsed_seconds": elapsed,
-                            "last_played": end_str
-                        }),
-                    );
+                    finalize_game_session(Some(&sink_clone), Some(&db_clone), &gid, elapsed, &end_str);
                 });
 
                 return Ok(now_str);
@@ -494,7 +832,12 @@ impl GameLauncher {
 
             let mut cmd = Command::new(&exe_path);
             let emu_path_buf = std::path::PathBuf::from(&exe_path);
-            let parent_dir = emu_path_buf.parent().map(|p| p.to_string_lossy().to_string());
+            let raw_parent = emu_path_buf.parent().map(|p| p.to_string_lossy().to_string());
+            // Never use a shared system directory (like /usr/bin) as install_directory for process scanning!
+            let parent_dir = raw_parent.filter(|d| {
+                let norm = d.to_lowercase().replace('/', "\\");
+                !is_unsafe_shared_directory(norm.trim_end_matches('\\'))
+            });
             let emu_filename = emu_path_buf
                 .file_name()
                 .map(|f| f.to_string_lossy().to_lowercase())
@@ -513,16 +856,16 @@ impl GameLauncher {
                 .map_err(|e| format!("Failed to execute emulator '{}' ({}): {}", emu_name, exe_path, e))?;
 
             let child_pid = child.id();
-            let candidate_exes = if !emu_filename.is_empty() {
+            let candidate_exes = if !emu_filename.is_empty() && !is_protected_system_process(&emu_filename) {
                 vec![emu_filename]
             } else {
                 Vec::new()
             };
 
             let _ = db.update_playtime(&game_id, 0, &now_str);
-            let _ = app_handle.emit(
+            sink.emit(
                 "game-launched",
-                serde_json::json!({
+                &serde_json::json!({
                     "id": &game_id,
                     "last_played": &now_str,
                 }),
@@ -537,13 +880,15 @@ impl GameLauncher {
                         pids: vec![child_pid],
                         candidate_exes: candidate_exes.clone(),
                         install_directory: parent_dir.clone(),
+                        prefix_path: None,
+                        runner_path: None,
                         start_time,
                     },
                 );
             }
-            let _ = app_handle.emit("game-running", serde_json::json!({ "id": &game_id }));
+            sink.emit("game-running", &serde_json::json!({ "id": &game_id }));
 
-            let app_handle_clone = app_handle.clone();
+            let sink_clone = sink.clone();
             let db_clone = db.clone();
             let gid = game_id.clone();
             let inst_dir = parent_dir;
@@ -591,15 +936,7 @@ impl GameLauncher {
                 unregister_running_game(&gid);
                 let elapsed = start_time.elapsed().as_secs();
                 let end_str = chrono::Local::now().format("%Y-%m-%d %H:%M").to_string();
-                let _ = db_clone.update_playtime(&gid, elapsed, &end_str);
-                let _ = app_handle_clone.emit(
-                    "game-stopped",
-                    serde_json::json!({
-                        "id": gid,
-                        "elapsed_seconds": elapsed,
-                        "last_played": end_str
-                    }),
-                );
+                finalize_game_session(Some(&sink_clone), Some(&db_clone), &gid, elapsed, &end_str);
             });
 
             return Ok(now_str);
@@ -625,7 +962,7 @@ impl GameLauncher {
             let trimmed_exe = exe_path.trim();
             if trimmed_exe.is_empty() || trimmed_exe == r"\\" || trimmed_exe == "//" {
                 let _ = db.update_game_installed(&game_id, false);
-                let _ = app_handle.emit("game-updated", serde_json::json!({ "id": &game_id, "is_installed": false }));
+                sink.emit("game-updated", &serde_json::json!({ "id": &game_id, "is_installed": false }));
                 return Err("Cannot launch game: executable path is invalid or empty.".to_string());
             }
 
@@ -637,7 +974,7 @@ impl GameLauncher {
             if is_protocol_uri || is_shell_app || is_shortcut {
                 if is_shortcut && !Path::new(trimmed_exe).exists() {
                     let _ = db.update_game_installed(&game_id, false);
-                    let _ = app_handle.emit("game-updated", serde_json::json!({ "id": &game_id, "is_installed": false }));
+                    sink.emit("game-updated", &serde_json::json!({ "id": &game_id, "is_installed": false }));
                     return Err(format!("Shortcut file not found at '{}'. The file may have been moved or deleted.", trimmed_exe));
                 }
 
@@ -665,9 +1002,9 @@ impl GameLauncher {
                 }
 
                 let _ = db.update_playtime(&game_id, 0, &now_str);
-                let _ = app_handle.emit(
+                sink.emit(
                     "game-launched",
-                    serde_json::json!({
+                    &serde_json::json!({
                         "id": &game_id,
                         "last_played": &now_str,
                     }),
@@ -687,13 +1024,15 @@ impl GameLauncher {
                                     pids: Vec::new(),
                                     candidate_exes: candidate_exes.clone(),
                                     install_directory: install_directory.clone(),
+                                    prefix_path: None,
+                                    runner_path: None,
                                     start_time,
                                 },
                             );
                         }
-                        let _ = app_handle.emit("game-running", serde_json::json!({ "id": &game_id }));
+                        sink.emit("game-running", &serde_json::json!({ "id": &game_id }));
 
-                        let app_handle_clone = app_handle.clone();
+                        let sink_clone = sink.clone();
                         let db_clone = db.clone();
                         let gid = game_id.clone();
                         let inst_dir = install_directory.clone();
@@ -739,45 +1078,107 @@ impl GameLauncher {
                             unregister_running_game(&gid);
                             let elapsed = start_time.elapsed().as_secs();
                             let end_str = chrono::Local::now().format("%Y-%m-%d %H:%M").to_string();
-                            let _ = db_clone.update_playtime(&gid, elapsed, &end_str);
-                            let _ = app_handle_clone.emit(
-                                "game-stopped",
-                                serde_json::json!({
-                                    "id": gid,
-                                    "elapsed_seconds": elapsed,
-                                    "last_played": end_str
-                                }),
-                            );
+                            finalize_game_session(Some(&sink_clone), Some(&db_clone), &gid, elapsed, &end_str);
                         });
+                        return Ok(now_str);
                     }
                 }
 
+                crate::cloud_sync::spawn_background_export(db.clone());
                 return Ok(now_str);
             }
 
-            let exe_path_buf = std::path::PathBuf::from(&exe_path);
-            if !exe_path_buf.exists() {
+            let (exe_path_buf, extra_args) = resolve_executable_command(trimmed_exe).ok_or_else(|| {
                 let _ = db.update_game_installed(&game_id, false);
-                let _ = app_handle.emit("game-updated", serde_json::json!({ "id": &game_id, "is_installed": false }));
-                return Err(format!("Game executable not found at '{}'. The directory may have been moved or deleted.", exe_path));
-            }
-            let mut cmd = Command::new(&exe_path);
-            let parent_dir = install_directory
+                sink.emit("game-updated", &serde_json::json!({ "id": &game_id, "is_installed": false }));
+                format!("Game executable not found at '{}'. The directory or command could not be resolved.", trimmed_exe)
+            })?;
+
+            let raw_parent = install_directory
                 .clone()
                 .or_else(|| exe_path_buf.parent().map(|p| p.to_string_lossy().to_string()));
+            // Never use a shared system directory (like /usr/bin) as install_directory for process scanning!
+            let parent_dir = raw_parent.clone().filter(|d| {
+                let norm = d.to_lowercase().replace('/', "\\");
+                !is_unsafe_shared_directory(norm.trim_end_matches('\\'))
+            });
             let exe_filename = exe_path_buf
                 .file_name()
                 .map(|f| f.to_string_lossy().to_lowercase())
                 .unwrap_or_default();
 
-            if let Some(parent) = exe_path_buf.parent() {
-                cmd.current_dir(parent);
+            let mut all_args = extra_args;
+            if let Some(ref custom_args) = launch_arguments {
+                let mut parts = split_cli_arguments(custom_args);
+                all_args.append(&mut parts);
             }
 
-            if let Some(args_str) = launch_arguments {
-                let parts = split_cli_arguments(&args_str);
-                cmd.args(parts);
-            }
+            #[cfg(target_os = "linux")]
+            let (mut cmd, prefix_path_opt, runner_path_opt) = {
+                let is_windows_exe = exe_path_buf
+                    .extension()
+                    .map(|e| e.to_string_lossy().eq_ignore_ascii_case("exe"))
+                    .unwrap_or(false);
+
+                if is_windows_exe {
+                    let config = db.get_app_config().unwrap_or_default();
+                    let runner = RunnerManager::resolve_runner(
+                        config.linux_preferred_runner_id.as_deref(),
+                        config.linux_custom_runner_path.as_deref(),
+                    ).ok_or_else(|| {
+                        "No Proton or Wine runner found on this system. Please ensure Steam Proton or Wine is installed, or configure a runner path in Settings.".to_string()
+                    })?;
+
+                    let prefix_dir = LinuxWineEngine::get_game_prefix_dir(&game_id);
+                    let enable_gamemode = config.enable_gamemode.unwrap_or(true);
+                    let enable_mangohud = config.enable_mangohud.unwrap_or(false);
+
+                    let c = LinuxWineEngine::build_execution_command(
+                        &exe_path_buf,
+                        raw_parent.as_deref().map(Path::new),
+                        &all_args,
+                        &prefix_dir,
+                        &runner,
+                        enable_gamemode,
+                        enable_mangohud,
+                        &HashMap::new(),
+                    )?;
+                    (c, Some(prefix_dir.to_string_lossy().to_string()), Some(runner.path.clone()))
+                } else {
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::PermissionsExt;
+                        if let Ok(meta) = fs::metadata(&exe_path_buf) {
+                            let mut perms = meta.permissions();
+                            let mode = perms.mode();
+                            if mode & 0o111 == 0 {
+                                perms.set_mode(mode | 0o755);
+                                let _ = fs::set_permissions(&exe_path_buf, perms);
+                            }
+                        }
+                    }
+                    let mut c = Command::new(&exe_path_buf);
+                    if let Some(ref p) = raw_parent {
+                        c.current_dir(p);
+                    }
+                    if !all_args.is_empty() {
+                        c.args(&all_args);
+                    }
+                    (c, None, None)
+                }
+            };
+
+            #[cfg(not(target_os = "linux"))]
+            let (mut cmd, prefix_path_opt, runner_path_opt) = {
+                let mut c = Command::new(&exe_path_buf);
+                if let Some(ref p) = raw_parent {
+                    c.current_dir(p);
+                }
+                if !all_args.is_empty() {
+                    c.args(&all_args);
+                }
+                (c, None::<String>, None::<String>)
+            };
 
             let start_time = Instant::now();
             let mut child = cmd
@@ -785,16 +1186,16 @@ impl GameLauncher {
                 .map_err(|e| format!("Failed to execute '{}': {}", exe_path, e))?;
 
             let child_pid = child.id();
-            let candidate_exes = if !exe_filename.is_empty() {
-                vec![exe_filename]
+            let candidate_exes = if !exe_filename.is_empty() && !is_protected_system_process(&exe_filename) {
+                vec![exe_filename.clone()]
             } else {
                 Vec::new()
             };
 
             let _ = db.update_playtime(&game_id, 0, &now_str);
-            let _ = app_handle.emit(
+            sink.emit(
                 "game-launched",
-                serde_json::json!({
+                &serde_json::json!({
                     "id": &game_id,
                     "last_played": &now_str,
                 }),
@@ -809,14 +1210,28 @@ impl GameLauncher {
                         pids: vec![child_pid],
                         candidate_exes: candidate_exes.clone(),
                         install_directory: parent_dir.clone(),
+                        prefix_path: prefix_path_opt.clone(),
+                        runner_path: runner_path_opt.clone(),
                         start_time,
                     },
                 );
             }
-            let _ = app_handle.emit("game-running", serde_json::json!({ "id": &game_id }));
+            sink.emit("game-running", &serde_json::json!({ "id": &game_id }));
+
+            let is_minecraft_or_prism = {
+                let lower_exe = exe_filename.to_lowercase();
+                let lower_gid = game_id.to_lowercase();
+                let lower_raw = trimmed_exe.to_lowercase();
+                lower_exe.contains("prism")
+                    || lower_exe.contains("minecraft")
+                    || lower_gid.contains("prism")
+                    || lower_gid.contains("minecraft")
+                    || lower_raw.contains("prism")
+                    || lower_raw.contains("minecraft")
+            };
 
             // Spawn background thread to monitor process lifetime
-            let app_handle_clone = app_handle.clone();
+            let sink_clone = sink.clone();
             let db_clone = db.clone();
             let gid = game_id.clone();
             let candidate_exes_clone = candidate_exes.clone();
@@ -842,11 +1257,29 @@ impl GameLauncher {
                     };
 
                     sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
-                    let active_pids = find_active_pids_for_game(
+                    let mut active_pids = find_active_pids_for_game(
                         &sys,
                         &candidate_exes_clone,
                         parent_dir.as_deref(),
                     );
+
+                    if is_minecraft_or_prism {
+                        for (pid, proc) in sys.processes() {
+                            let p_name = proc.name().to_string_lossy().to_lowercase();
+                            if p_name == "java" || p_name == "javaw" || p_name.contains("minecraft") || p_name.contains("prism") {
+                                let matches_cmd = proc.cmd().iter().any(|arg| {
+                                    let s = arg.to_string_lossy().to_lowercase();
+                                    s.contains("minecraft") || s.contains("prism") || s.contains("mojang")
+                                });
+                                if matches_cmd {
+                                    let u = pid.as_u32();
+                                    if !active_pids.contains(&u) {
+                                        active_pids.push(u);
+                                    }
+                                }
+                            }
+                        }
+                    }
 
                     if child_exited && active_pids.is_empty() {
                         consecutive_missing += 1;
@@ -865,15 +1298,7 @@ impl GameLauncher {
                 unregister_running_game(&gid);
                 let elapsed = start_time.elapsed().as_secs();
                 let end_str = chrono::Local::now().format("%Y-%m-%d %H:%M").to_string();
-                let _ = db_clone.update_playtime(&gid, elapsed, &end_str);
-                let _ = app_handle_clone.emit(
-                    "game-stopped",
-                    serde_json::json!({
-                        "id": gid,
-                        "elapsed_seconds": elapsed,
-                        "last_played": end_str
-                    }),
-                );
+                finalize_game_session(Some(&sink_clone), Some(&db_clone), &gid, elapsed, &end_str);
             });
 
             return Ok(now_str);
@@ -883,7 +1308,7 @@ impl GameLauncher {
     }
 
     pub fn launch_custom_action(
-        app_handle: AppHandle,
+        sink: LauncherEventSink,
         db: Arc<Database>,
         game_id: String,
         executable_path: Option<String>,
@@ -906,8 +1331,16 @@ impl GameLauncher {
                     .spawn()
                     .map_err(|e| format!("Failed to launch action URL '{}': {}", trimmed_target, e))?;
             }
+            #[cfg(not(target_os = "windows"))]
+            {
+                Command::new("xdg-open")
+                    .arg(trimmed_target)
+                    .spawn()
+                    .map_err(|e| format!("Failed to launch action URL '{}': {}", trimmed_target, e))?;
+            }
             let _ = db.update_playtime(&game_id, 0, &now_str);
-            let _ = app_handle.emit("game-launched", serde_json::json!({ "id": &game_id, "last_played": &now_str }));
+            sink.emit("game-launched", &serde_json::json!({ "id": &game_id, "last_played": &now_str }));
+            crate::cloud_sync::spawn_background_export(db.clone());
             return Ok(now_str);
         }
 
@@ -915,20 +1348,81 @@ impl GameLauncher {
         if !path_buf.exists() {
             return Err(format!("Action target executable not found at '{}'.", trimmed_target));
         }
-        let mut cmd = Command::new(trimmed_target);
-        let path_buf = std::path::PathBuf::from(&target);
+
         let work_dir = working_directory
             .map(std::path::PathBuf::from)
             .or_else(|| path_buf.parent().map(|p| p.to_path_buf()));
 
-        if let Some(ref dir) = work_dir {
-            cmd.current_dir(dir);
-        }
+        #[cfg(target_os = "linux")]
+        let (mut cmd, prefix_path_opt, runner_path_opt) = {
+            let is_windows_exe = path_buf
+                .extension()
+                .map(|e| e.to_string_lossy().eq_ignore_ascii_case("exe"))
+                .unwrap_or(false);
 
-        if let Some(ref args_str) = launch_arguments {
-            let parts: Vec<&str> = args_str.split_whitespace().collect();
-            cmd.args(parts);
-        }
+            if is_windows_exe {
+                let config = db.get_app_config().unwrap_or_default();
+                let runner = RunnerManager::resolve_runner(
+                    config.linux_preferred_runner_id.as_deref(),
+                    config.linux_custom_runner_path.as_deref(),
+                ).ok_or_else(|| "No Proton or Wine runner found on system.".to_string())?;
+
+                let prefix_dir = LinuxWineEngine::get_game_prefix_dir(&game_id);
+                let parts = launch_arguments
+                    .as_deref()
+                    .map(split_cli_arguments)
+                    .unwrap_or_default();
+                let enable_gamemode = config.enable_gamemode.unwrap_or(true);
+                let enable_mangohud = config.enable_mangohud.unwrap_or(false);
+
+                let c = LinuxWineEngine::build_execution_command(
+                    &path_buf,
+                    work_dir.as_deref(),
+                    &parts,
+                    &prefix_dir,
+                    &runner,
+                    enable_gamemode,
+                    enable_mangohud,
+                    &HashMap::new(),
+                )?;
+                (c, Some(prefix_dir.to_string_lossy().to_string()), Some(runner.path.clone()))
+            } else {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    if let Ok(meta) = fs::metadata(&path_buf) {
+                        let mut perms = meta.permissions();
+                        let mode = perms.mode();
+                        if mode & 0o111 == 0 {
+                            perms.set_mode(mode | 0o755);
+                            let _ = fs::set_permissions(&path_buf, perms);
+                        }
+                    }
+                }
+                let mut c = Command::new(trimmed_target);
+                if let Some(ref dir) = work_dir {
+                    c.current_dir(dir);
+                }
+                if let Some(ref args_str) = launch_arguments {
+                    let parts: Vec<&str> = args_str.split_whitespace().collect();
+                    c.args(parts);
+                }
+                (c, None, None)
+            }
+        };
+
+        #[cfg(not(target_os = "linux"))]
+        let (mut cmd, prefix_path_opt, runner_path_opt) = {
+            let mut c = Command::new(trimmed_target);
+            if let Some(ref dir) = work_dir {
+                c.current_dir(dir);
+            }
+            if let Some(ref args_str) = launch_arguments {
+                let parts: Vec<&str> = args_str.split_whitespace().collect();
+                c.args(parts);
+            }
+            (c, None::<String>, None::<String>)
+        };
 
         let start_time = Instant::now();
         let mut child = cmd
@@ -940,10 +1434,21 @@ impl GameLauncher {
             .file_name()
             .map(|f| f.to_string_lossy().to_lowercase())
             .unwrap_or_default();
-        let candidate_exes = if !exe_filename.is_empty() { vec![exe_filename] } else { Vec::new() };
+        let candidate_exes = if !exe_filename.is_empty() && !is_protected_system_process(&exe_filename) {
+            vec![exe_filename]
+        } else {
+            Vec::new()
+        };
+
+        let safe_work_dir = work_dir
+            .map(|p| p.to_string_lossy().to_string())
+            .filter(|d| {
+                let norm = d.to_lowercase().replace('/', "\\");
+                !is_unsafe_shared_directory(norm.trim_end_matches('\\'))
+            });
 
         let _ = db.update_playtime(&game_id, 0, &now_str);
-        let _ = app_handle.emit("game-launched", serde_json::json!({ "id": &game_id, "last_played": &now_str }));
+        sink.emit("game-launched", &serde_json::json!({ "id": &game_id, "last_played": &now_str }));
 
         {
             let mut map = running_games_map().lock().unwrap();
@@ -953,17 +1458,19 @@ impl GameLauncher {
                     game_id: game_id.clone(),
                     pids: vec![child_pid],
                     candidate_exes: candidate_exes.clone(),
-                    install_directory: work_dir.map(|p| p.to_string_lossy().to_string()),
+                    install_directory: safe_work_dir.clone(),
+                    prefix_path: prefix_path_opt.clone(),
+                    runner_path: runner_path_opt.clone(),
                     start_time,
                 },
             );
         }
-        let _ = app_handle.emit("game-running", serde_json::json!({ "id": &game_id }));
+        sink.emit("game-running", &serde_json::json!({ "id": &game_id }));
 
-        let app_handle_clone = app_handle.clone();
+        let sink_clone = sink.clone();
         let db_clone = db.clone();
         let gid = game_id.clone();
-        let parent_dir_str = path_buf.parent().map(|p| p.to_string_lossy().to_string());
+        let parent_dir_str = safe_work_dir;
         let candidate_exes_clone = candidate_exes.clone();
 
         std::thread::spawn(move || {
@@ -1008,70 +1515,112 @@ impl GameLauncher {
             unregister_running_game(&gid);
             let elapsed = start_time.elapsed().as_secs();
             let end_str = chrono::Local::now().format("%Y-%m-%d %H:%M").to_string();
-            let _ = db_clone.update_playtime(&gid, elapsed, &end_str);
-            let _ = app_handle_clone.emit(
-                "game-stopped",
-                serde_json::json!({
-                    "id": gid,
-                    "elapsed_seconds": elapsed,
-                    "last_played": end_str
-                }),
-            );
+            finalize_game_session(Some(&sink_clone), Some(&db_clone), &gid, elapsed, &end_str);
         });
 
         Ok(now_str)
     }
 
-    pub fn stop_game(app_handle: AppHandle, game_id: &str) -> Result<(), String> {
+    pub fn stop_game(sink: LauncherEventSink, db: Option<Arc<Database>>, game_id: &str) -> Result<(), String> {
         let mut pids_to_kill = Vec::new();
         let mut candidate_exes = Vec::new();
+        let mut prefix_path_opt: Option<String> = None;
+        let mut runner_path_opt: Option<String> = None;
+        let mut elapsed = 0u64;
 
         if let Some(info) = unregister_running_game(game_id) {
             pids_to_kill = info.pids;
             candidate_exes = info.candidate_exes;
+            prefix_path_opt = info.prefix_path;
+            runner_path_opt = info.runner_path;
+            elapsed = info.start_time.elapsed().as_secs();
         }
+
+        let self_pid = std::process::id();
 
         #[cfg(target_os = "windows")]
         {
             for pid in &pids_to_kill {
-                let _ = Command::new("taskkill")
-                    .args(["/PID", &pid.to_string(), "/T", "/F"])
-                    .spawn();
+                if *pid > 4 && *pid != self_pid {
+                    let _ = Command::new("taskkill")
+                        .args(["/PID", &pid.to_string(), "/T", "/F"])
+                        .spawn();
+                }
+            }
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            if let Some(ref pfx) = prefix_path_opt {
+                LinuxWineEngine::shutdown_prefix(Path::new(pfx), runner_path_opt.as_deref());
             }
         }
 
         let mut sys = sysinfo::System::new();
         sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
 
+        let mut targets = Vec::new();
         for (pid, proc) in sys.processes() {
+            let pid_u32 = pid.as_u32();
+            if pid_u32 <= 1 || pid_u32 == self_pid {
+                continue;
+            }
             let name_str = proc.name().to_string_lossy().to_lowercase();
-            let matches_candidate = candidate_exes.iter().any(|c| c.eq_ignore_ascii_case(&name_str));
-            let is_in_pids = pids_to_kill.contains(&pid.as_u32());
+            if is_protected_system_process(&name_str) {
+                continue;
+            }
+            let matches_candidate = !candidate_exes.is_empty()
+                && candidate_exes.iter().any(|c| c.eq_ignore_ascii_case(&name_str));
+            let is_in_pids = pids_to_kill.contains(&pid_u32);
 
             if is_in_pids || matches_candidate {
-                let _ = proc.kill();
-                #[cfg(target_os = "windows")]
+                targets.push(pid_u32);
+            }
+        }
+
+        // First send polite SIGTERM so graphics drivers (Vulkan/DRM/Wayland) and audio release cleanly
+        for pid_u32 in &targets {
+            if let Some(proc) = sys.process(sysinfo::Pid::from_u32(*pid_u32)) {
+                let _ = proc.kill_with(sysinfo::Signal::Term);
+            }
+            #[cfg(target_os = "windows")]
+            {
                 let _ = Command::new("taskkill")
-                    .args(["/PID", &pid.as_u32().to_string(), "/T", "/F"])
+                    .args(["/PID", &pid_u32.to_string(), "/T"])
                     .spawn();
             }
         }
 
+        // Give processes a brief grace window (400ms) to release GPU/compositor contexts, then SIGKILL stragglers
+        if !targets.is_empty() {
+            let targets_bg = targets.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(400));
+                let mut sys_after = sysinfo::System::new();
+                sys_after.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+                for pid_u32 in targets_bg {
+                    if let Some(proc) = sys_after.process(sysinfo::Pid::from_u32(pid_u32)) {
+                        let name_str = proc.name().to_string_lossy().to_lowercase();
+                        if !is_protected_system_process(&name_str) {
+                            let _ = proc.kill();
+                            #[cfg(target_os = "windows")]
+                            let _ = Command::new("taskkill")
+                                .args(["/PID", &pid_u32.to_string(), "/T", "/F"])
+                                .spawn();
+                        }
+                    }
+                }
+            });
+        }
+
         let end_str = chrono::Local::now().format("%Y-%m-%d %H:%M").to_string();
-        let _ = app_handle.emit(
-            "game-stopped",
-            serde_json::json!({
-                "id": game_id,
-                "elapsed_seconds": 0,
-                "last_played": end_str
-            }),
-        );
+        finalize_game_session(Some(&sink), db.as_ref(), game_id, elapsed, &end_str);
 
         Ok(())
     }
 
     pub fn get_running_games(
-        app_handle: Option<&AppHandle>,
+        sink: Option<&LauncherEventSink>,
         db: Option<&Arc<Database>>,
     ) -> Vec<String> {
         let mut dead_games = Vec::new();
@@ -1112,19 +1661,7 @@ impl GameLauncher {
                 unregister_running_game(&gid);
                 let elapsed = start_time.elapsed().as_secs();
                 let end_str = chrono::Local::now().format("%Y-%m-%d %H:%M").to_string();
-                if let Some(database) = db {
-                    let _ = database.update_playtime(&gid, elapsed, &end_str);
-                }
-                if let Some(handle) = app_handle {
-                    let _ = handle.emit(
-                        "game-stopped",
-                        serde_json::json!({
-                            "id": gid,
-                            "elapsed_seconds": elapsed,
-                            "last_played": end_str
-                        }),
-                    );
-                }
+                finalize_game_session(sink, db, &gid, elapsed, &end_str);
             }
         }
 

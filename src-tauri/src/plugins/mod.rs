@@ -52,6 +52,91 @@ pub fn get_plugins_dir() -> PathBuf {
         .join("plugins")
 }
 
+pub fn list_installed_plugin_ids_in(plugins_dir: &Path) -> Vec<String> {
+    let mut ids = Vec::new();
+    let Ok(entries) = fs::read_dir(plugins_dir) else {
+        return ids;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let manifest_path = if path.join("plugin.json").exists() {
+            path.join("plugin.json")
+        } else if path.join("manifest.json").exists() {
+            path.join("manifest.json")
+        } else {
+            continue;
+        };
+        if let Ok(content) = fs::read_to_string(&manifest_path) {
+            if let Ok(manifest) = serde_json::from_str::<PluginManifest>(&content) {
+                let id = manifest.id.trim().to_lowercase();
+                if !id.is_empty() && !ids.contains(&id) {
+                    ids.push(id);
+                }
+            }
+        }
+    }
+    ids.sort();
+    ids
+}
+
+pub fn get_effective_enabled_plugins_in(db: &Database, plugins_dir: &Path) -> Vec<String> {
+    if let Ok(Some(raw)) = db.get_setting("enabled_plugins") {
+        if let Ok(list) = serde_json::from_str::<Vec<String>>(&raw) {
+            return list;
+        }
+    }
+    list_installed_plugin_ids_in(plugins_dir)
+}
+
+pub fn get_effective_enabled_plugins(db: &Database) -> Vec<String> {
+    get_effective_enabled_plugins_in(db, &get_plugins_dir())
+}
+
+pub fn set_enabled_plugins_from_sync(db: &Database, enabled_list: &[String]) -> Result<(), String> {
+    let json = serde_json::to_string(enabled_list).map_err(|e| e.to_string())?;
+    db.set_setting("enabled_plugins", &json)
+}
+
+pub fn get_deleted_plugin_tombstones(db: &Database) -> Vec<crate::models::ExtensionTombstone> {
+    if let Ok(Some(raw)) = db.get_setting("deleted_plugins_tombstones") {
+        if let Ok(list) = serde_json::from_str::<Vec<crate::models::ExtensionTombstone>>(&raw) {
+            return list;
+        }
+    }
+    Vec::new()
+}
+
+pub fn record_plugin_tombstone(db: &Database, plugin_id: &str, deleted_at: &str) {
+    let mut list = get_deleted_plugin_tombstones(db);
+    if let Some(existing) = list.iter_mut().find(|t| t.id == plugin_id) {
+        if deleted_at > existing.deleted_at.as_str() {
+            existing.deleted_at = deleted_at.to_string();
+        }
+    } else {
+        list.push(crate::models::ExtensionTombstone {
+            id: plugin_id.to_string(),
+            deleted_at: deleted_at.to_string(),
+        });
+    }
+    if let Ok(json) = serde_json::to_string(&list) {
+        let _ = db.set_setting("deleted_plugins_tombstones", &json);
+    }
+}
+
+pub fn clear_plugin_tombstone(db: &Database, plugin_id: &str) {
+    let mut list = get_deleted_plugin_tombstones(db);
+    let prev_len = list.len();
+    list.retain(|t| t.id != plugin_id);
+    if list.len() != prev_len {
+        if let Ok(json) = serde_json::to_string(&list) {
+            let _ = db.set_setting("deleted_plugins_tombstones", &json);
+        }
+    }
+}
+
 pub fn is_plugin_enabled(db: &Database, plugin_id: &str) -> bool {
     if let Ok(Some(raw)) = db.get_setting("enabled_plugins") {
         if let Ok(list) = serde_json::from_str::<Vec<String>>(&raw) {
@@ -63,12 +148,7 @@ pub fn is_plugin_enabled(db: &Database, plugin_id: &str) -> bool {
 }
 
 pub fn toggle_plugin(db: &Database, plugin_id: &str, enabled: bool) -> Result<(), String> {
-    let mut list = if let Ok(Some(raw)) = db.get_setting("enabled_plugins") {
-        serde_json::from_str::<Vec<String>>(&raw).unwrap_or_default()
-    } else {
-        // If no preference stored yet, collect existing plugin IDs
-        Vec::new()
-    };
+    let mut list = get_effective_enabled_plugins(db);
 
     if enabled {
         if !list.contains(&plugin_id.to_string()) {
@@ -79,7 +159,10 @@ pub fn toggle_plugin(db: &Database, plugin_id: &str, enabled: bool) -> Result<()
     }
 
     let json = serde_json::to_string(&list).map_err(|e| e.to_string())?;
-    db.set_setting("enabled_plugins", &json)
+    db.set_setting("enabled_plugins", &json)?;
+    let now_utc = chrono::Utc::now().to_rfc3339();
+    let _ = db.set_setting("extensions_updated_at", &now_utc);
+    Ok(())
 }
 
 pub fn get_plugin_config(db: &Database, plugin_id: &str) -> Result<HashMap<String, serde_json::Value>, String> {
@@ -92,9 +175,36 @@ pub fn get_plugin_config(db: &Database, plugin_id: &str) -> Result<HashMap<Strin
     Ok(HashMap::new())
 }
 
-pub fn save_plugin_config(db: &Database, plugin_id: &str, config_json: &str) -> Result<(), String> {
+pub fn save_plugin_config_from_sync(db: &Database, plugin_id: &str, config_json: &str) -> Result<(), String> {
     let key = format!("plugin_config:{}", plugin_id);
     db.set_setting(&key, config_json)
+}
+
+pub fn save_plugin_config(db: &Database, plugin_id: &str, config_json: &str) -> Result<(), String> {
+    let key = format!("plugin_config:{}", plugin_id);
+    db.set_setting(&key, config_json)?;
+    let now_utc = chrono::Utc::now().to_rfc3339();
+    let _ = db.set_setting("extensions_updated_at", &now_utc);
+    Ok(())
+}
+
+fn file_to_data_url(path: &Path) -> Option<String> {
+    if !path.is_file() {
+        return None;
+    }
+    let bytes = fs::read(path).ok()?;
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("png").to_lowercase();
+    let mime = match ext.as_str() {
+        "jpg" | "jpeg" => "image/jpeg",
+        "png" => "image/png",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "svg" => "image/svg+xml",
+        _ => "application/octet-stream",
+    };
+    use base64::Engine;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    Some(format!("data:{};base64,{}", mime, b64))
 }
 
 pub fn list_plugins(db: &Database) -> Result<Vec<PluginInfo>, String> {
@@ -120,21 +230,17 @@ pub fn list_plugins(db: &Database) -> Result<Vec<PluginInfo>, String> {
                 if let Ok(manifest) = serde_json::from_str::<PluginManifest>(&manifest_content) {
                     let is_enabled = is_plugin_enabled(db, &manifest.id);
 
-                    // Resolve absolute path for icon
+                    // Resolve data URL for icon
                     let icon_file = path.join(&manifest.icon);
-                    let resolved_icon = if icon_file.exists() {
-                        Some(icon_file.to_string_lossy().to_string())
-                    } else {
-                        None
-                    };
+                    let resolved_icon = file_to_data_url(&icon_file);
 
-                    // Resolve absolute paths for screenshots
+                    // Resolve data URLs for screenshots
                     let mut resolved_screenshots = Vec::new();
                     if let Some(ref screenshots) = manifest.screenshots {
                         for s in screenshots {
                             let s_path = path.join(s);
-                            if s_path.exists() {
-                                resolved_screenshots.push(s_path.to_string_lossy().to_string());
+                            if let Some(data_url) = file_to_data_url(&s_path) {
+                                resolved_screenshots.push(data_url);
                             }
                         }
                     }
@@ -165,7 +271,33 @@ pub fn list_plugins(db: &Database) -> Result<Vec<PluginInfo>, String> {
     Ok(results)
 }
 
+pub fn delete_plugin_from_sync(
+    db: &Database,
+    plugin_id: &str,
+    deleted_at: &str,
+    plugins_dir_override: Option<&Path>,
+) -> Result<(), String> {
+    let plugins_dir = plugins_dir_override
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(get_plugins_dir);
+    let plugin_dir = plugins_dir.join(plugin_id);
+    if plugin_dir.exists() {
+        fs::remove_dir_all(&plugin_dir).map_err(|e| format!("Failed to delete plugin directory: {}", e))?;
+    }
+
+    let key = format!("plugin_config:{}", plugin_id);
+    let _ = db.set_setting(&key, "{}");
+
+    let mut list = get_effective_enabled_plugins_in(db, &plugins_dir);
+    list.retain(|id| id != plugin_id);
+    let _ = set_enabled_plugins_from_sync(db, &list);
+
+    record_plugin_tombstone(db, plugin_id, deleted_at);
+    Ok(())
+}
+
 pub fn delete_plugin(db: &Database, plugin_id: &str) -> Result<(), String> {
+    let now_utc = chrono::Utc::now().to_rfc3339();
     let plugins_dir = get_plugins_dir();
     let plugin_dir = plugins_dir.join(plugin_id);
     if plugin_dir.exists() {
@@ -176,23 +308,29 @@ pub fn delete_plugin(db: &Database, plugin_id: &str) -> Result<(), String> {
     let key = format!("plugin_config:{}", plugin_id);
     let _ = db.set_setting(&key, "{}");
 
-    // Remove from enabled list
+    // Remove from enabled list (this also stamps extensions_updated_at)
     let _ = toggle_plugin(db, plugin_id, false);
+    record_plugin_tombstone(db, plugin_id, &now_utc);
+    let _ = db.set_setting("extensions_updated_at", &now_utc);
 
     Ok(())
 }
 
-pub fn import_plugin_zip(db: &Database, zip_path_str: &str) -> Result<PluginInfo, String> {
-    let zip_path = Path::new(zip_path_str);
+pub fn extract_and_install_plugin_zip_to(
+    zip_path: &Path,
+    dest_plugins_dir: &Path,
+) -> Result<(String, PathBuf, PluginManifest), String> {
     if !zip_path.exists() {
         return Err("Selected plugin zip file does not exist.".to_string());
     }
+
+    fs::create_dir_all(dest_plugins_dir).map_err(|e| format!("Failed to create plugins folder: {}", e))?;
 
     let file = fs::File::open(zip_path).map_err(|e| format!("Failed to open zip file: {}", e))?;
     let mut archive = ZipArchive::new(file).map_err(|e| format!("Invalid zip archive: {}", e))?;
 
     let temp_import_id = uuid::Uuid::new_v4().to_string();
-    let temp_dir = get_plugins_dir().join(format!(".temp_plugin_{}", temp_import_id));
+    let temp_dir = dest_plugins_dir.join(format!(".temp_plugin_{}", temp_import_id));
     fs::create_dir_all(&temp_dir).map_err(|e| format!("Failed to create temporary folder: {}", e))?;
 
     let canonical_temp = temp_dir.canonicalize().map_err(|e| e.to_string())?;
@@ -314,7 +452,7 @@ pub fn import_plugin_zip(db: &Database, zip_path_str: &str) -> Result<PluginInfo
     }
 
     // Target destination
-    let final_dest = get_plugins_dir().join(&plugin_id);
+    let final_dest = dest_plugins_dir.join(&plugin_id);
     if final_dest.exists() {
         // Replace existing version
         fs::remove_dir_all(&final_dest).map_err(|e| format!("Failed to update existing plugin: {}", e))?;
@@ -328,24 +466,39 @@ pub fn import_plugin_zip(db: &Database, zip_path_str: &str) -> Result<PluginInfo
         let _ = fs::remove_dir_all(&temp_dir);
     }
 
-    // Ensure enabled by default
+    Ok((plugin_id, final_dest, manifest))
+}
+
+pub fn install_plugin_zip_from_sync(
+    db: &Database,
+    zip_path: &Path,
+    plugins_dir_override: Option<&Path>,
+) -> Result<String, String> {
+    let dest_dir = plugins_dir_override
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(get_plugins_dir);
+    let (plugin_id, _, _) = extract_and_install_plugin_zip_to(zip_path, &dest_dir)?;
+    clear_plugin_tombstone(db, &plugin_id);
+    Ok(plugin_id)
+}
+
+pub fn import_plugin_zip(db: &Database, zip_path_str: &str) -> Result<PluginInfo, String> {
+    let zip_path = Path::new(zip_path_str);
+    let plugins_dir = get_plugins_dir();
+    let (plugin_id, final_dest, manifest) = extract_and_install_plugin_zip_to(zip_path, &plugins_dir)?;
+
+    clear_plugin_tombstone(db, &plugin_id);
+    // Ensure enabled by default (also stamps extensions_updated_at)
     let _ = toggle_plugin(db, &plugin_id, true);
 
     let is_enabled = true;
-    let resolved_icon = Some(final_dest.join(&manifest.icon).to_string_lossy().to_string());
+    let resolved_icon = file_to_data_url(&final_dest.join(&manifest.icon));
     let resolved_screenshots = manifest
         .screenshots
         .as_ref()
         .map(|list| {
             list.iter()
-                .filter_map(|s| {
-                    let p = final_dest.join(s);
-                    if p.exists() {
-                        Some(p.to_string_lossy().to_string())
-                    } else {
-                        None
-                    }
-                })
+                .filter_map(|s| file_to_data_url(&final_dest.join(s)))
                 .collect()
         })
         .unwrap_or_default();

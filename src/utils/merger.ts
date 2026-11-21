@@ -145,6 +145,76 @@ export function mergeDuplicateGames(
     const primary = { ...sorted[0] };
     const siblings = sorted.slice(1);
 
+    // Inherit missing artwork, metadata, and scores from siblings so an installed copy never appears blank
+    for (const sib of siblings) {
+      if (!primary.cover_image?.trim() && sib.cover_image?.trim()) {
+        primary.cover_image = sib.cover_image;
+      }
+      if (!primary.background_image?.trim() && sib.background_image?.trim()) {
+        primary.background_image = sib.background_image;
+      }
+      if (!primary.logo_image?.trim() && sib.logo_image?.trim()) {
+        primary.logo_image = sib.logo_image;
+      }
+      if (!primary.icon_image?.trim() && sib.icon_image?.trim()) {
+        primary.icon_image = sib.icon_image;
+      }
+      if (!primary.description?.trim() && sib.description?.trim()) {
+        primary.description = sib.description;
+      }
+      if (!primary.developer?.trim() && sib.developer?.trim()) {
+        primary.developer = sib.developer;
+      }
+      if (!primary.publisher?.trim() && sib.publisher?.trim()) {
+        primary.publisher = sib.publisher;
+      }
+      if (!primary.release_date?.trim() && sib.release_date?.trim()) {
+        primary.release_date = sib.release_date;
+      }
+      if ((!primary.genres || primary.genres.length === 0) && sib.genres && sib.genres.length > 0) {
+        primary.genres = sib.genres;
+      }
+      if ((!primary.tags || primary.tags.length === 0) && sib.tags && sib.tags.length > 0) {
+        primary.tags = sib.tags;
+      }
+      if ((!primary.categories || primary.categories.length === 0) && sib.categories && sib.categories.length > 0) {
+        primary.categories = sib.categories;
+      }
+      if ((!primary.features || primary.features.length === 0) && sib.features && sib.features.length > 0) {
+        primary.features = sib.features;
+      }
+      if ((!primary.trailers || primary.trailers.length === 0) && sib.trailers && sib.trailers.length > 0) {
+        primary.trailers = sib.trailers;
+      }
+      if ((!primary.screenshots || primary.screenshots.length === 0) && sib.screenshots && sib.screenshots.length > 0) {
+        primary.screenshots = sib.screenshots;
+      }
+      if ((!primary.links || primary.links.length === 0) && sib.links && sib.links.length > 0) {
+        primary.links = sib.links;
+      }
+      if (primary.critic_score == null && sib.critic_score != null) {
+        primary.critic_score = sib.critic_score;
+      }
+      if (primary.community_score == null && sib.community_score != null) {
+        primary.community_score = sib.community_score;
+      }
+      if (primary.user_rating == null && sib.user_rating != null) {
+        primary.user_rating = sib.user_rating;
+      }
+      if (primary.hltb_main == null && sib.hltb_main != null) {
+        primary.hltb_main = sib.hltb_main;
+      }
+      if (primary.hltb_extra == null && sib.hltb_extra != null) {
+        primary.hltb_extra = sib.hltb_extra;
+      }
+      if (primary.hltb_completionist == null && sib.hltb_completionist != null) {
+        primary.hltb_completionist = sib.hltb_completionist;
+      }
+      if (!primary.notes?.trim() && sib.notes?.trim()) {
+        primary.notes = sib.notes;
+      }
+    }
+
     // If any platform version is marked as favorite, the merged game reflects it
     const isAnyFavorite = group.some((g) => g.is_favorite);
     primary.is_favorite = isAnyFavorite;

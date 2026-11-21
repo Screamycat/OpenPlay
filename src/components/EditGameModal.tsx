@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { Game, GameLink, GameAction } from "../types/game";
+import { GameSaveState } from "../types/saves";
 import { ConfiguredConsole, EmulatorProfile } from "../types/emulator";
 import { resolveImageSrc, formatFileSize, isVideoSrc } from "../utils/image";
 import { MetadataDiffModal, MetadataComparison } from "./MetadataDiffModal";
@@ -36,6 +37,7 @@ import {
   Users,
   Repeat,
   Monitor,
+  MonitorSmartphone,
   Layers,
   Terminal,
   CheckCircle2,
@@ -45,6 +47,8 @@ import {
   Upload,
   Search,
   Loader2,
+  Cloud,
+  RefreshCw,
 } from "lucide-react";
 
 interface EditGameModalProps {
@@ -53,6 +57,7 @@ interface EditGameModalProps {
   onClose: () => void;
   onSave: (updated: Game) => void;
   onOpenSteamGridDB?: (game: Game) => void;
+  onOpenSaveManager?: (game: Game) => void;
   onRemoveGame?: (game: Game) => void;
 }
 
@@ -196,6 +201,7 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
   onClose,
   onSave,
   onOpenSteamGridDB,
+  onOpenSaveManager,
   onRemoveGame,
 }) => {
   if (!isOpen || !game) return null;
@@ -219,6 +225,8 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
   const [emulatorId, setEmulatorId] = useState<string>(game.emulator_id || "");
   const [configuredConsoles, setConfiguredConsoles] = useState<ConfiguredConsole[]>([]);
   const [emulatorProfiles, setEmulatorProfiles] = useState<EmulatorProfile[]>([]);
+  const [saveState, setSaveState] = useState<GameSaveState | null>(null);
+  const [isDetectingSaves, setIsDetectingSaves] = useState(false);
   const [isInstalled, setIsInstalled] = useState(game.is_installed ?? true);
   const [installDirectory, setInstallDirectory] = useState(game.install_directory || "");
   const [executablePath, setExecutablePath] = useState(game.executable_path || "");
@@ -232,7 +240,14 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
     invoke<EmulatorProfile[]>("get_emulator_profiles")
       .then((profs) => setEmulatorProfiles(profs || []))
       .catch((err) => console.warn("Failed to load emulator profiles in EditGameModal:", err));
-  }, []);
+
+    invoke<GameSaveState>("get_game_save_state", {
+      gameId: game.id,
+      forceRefreshDetection: false,
+    })
+      .then((res) => setSaveState(res))
+      .catch((err) => console.warn("Failed to load save state in EditGameModal:", err));
+  }, [game.id]);
 
   // Tab 3: Play Actions (Dual Launch & Alternate Executables)
   const [playActions, setPlayActions] = useState<GameAction[]>(game.play_actions || []);
@@ -266,6 +281,7 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
   );
   const [playCount, setPlayCount] = useState<number>(game.play_count || 0);
   const [lastPlayed, setLastPlayed] = useState(game.last_played || "");
+  const [playedOnOtherDevice, setPlayedOnOtherDevice] = useState(Boolean(game.played_on_other_device));
   const [dateAdded, setDateAdded] = useState(game.date_added || "");
   const [copiedId, setCopiedId] = useState(false);
 
@@ -521,6 +537,10 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
       play_actions: playActions,
       auto_beaten: autoBeaten,
       beaten_prompt_playtime: game.beaten_prompt_playtime,
+      cloud_save_enabled: game.cloud_save_enabled,
+      cloud_save_retention_override: game.cloud_save_retention_override,
+      played_on_other_device: playedOnOtherDevice,
+      last_played_device_id: playedOnOtherDevice ? game.last_played_device_id : undefined,
     };
 
     onSave(updated);
@@ -582,6 +602,7 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
       <div
         onClick={(e) => e.stopPropagation()}
         data-theme-part="modal-container"
+        data-gamepad-zone="modal"
         className="theme-modal-container rounded-2xl w-full max-w-4xl h-[720px] max-h-[92vh] flex flex-col overflow-hidden text-xs text-zinc-200"
       >
         {/* Top Header */}
@@ -625,6 +646,7 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
 
           <button
             onClick={onClose}
+            data-gamepad-close="true"
             className="w-8 h-8 rounded-full bg-white/5 hover:bg-white/15 text-zinc-400 hover:text-white flex items-center justify-center transition-colors cursor-pointer border border-white/5"
           >
             <X className="w-4 h-4 text-zinc-400" />
@@ -634,7 +656,10 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
         {/* Modal Body: Left Sidebar Tabs + Right Scrollable Form Pane */}
         <div className="flex-1 flex overflow-hidden">
           {/* Left Tabs Sidebar (~210px) */}
-          <div className="w-52 border-r border-white/10 bg-white/[0.02] p-2.5 space-y-1 shrink-0 overflow-y-auto">
+          <div
+            data-gamepad-tabs="true"
+            className="w-52 border-r border-white/10 bg-white/[0.02] p-2.5 space-y-1 shrink-0 overflow-y-auto"
+          >
             {tabs.map((tab) => {
               const Icon = tab.icon;
               const isActive = activeTab === tab.key;
@@ -642,6 +667,7 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
                 <button
                   key={tab.key}
                   type="button"
+                  data-gamepad-tab-active={isActive ? "true" : undefined}
                   onClick={() => setActiveTab(tab.key)}
                   className={`w-full flex items-center space-x-2.5 px-3 py-2.5 rounded-xl text-left text-xs transition-all cursor-pointer ${
                     isActive
@@ -1049,6 +1075,153 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
                       </div>
                     </>
                   )}
+
+                  {/* Save & Config Locations */}
+                  <div className="pt-2 border-t border-white/10 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <label className="text-zinc-300 font-medium flex items-center space-x-1.5">
+                        <Cloud className="w-3.5 h-3.5 text-zinc-400" />
+                        <span>Save &amp; Config Locations</span>
+                      </label>
+                      <div className="flex items-center space-x-2">
+                        <button
+                          type="button"
+                          disabled={isDetectingSaves}
+                          onClick={async () => {
+                            setIsDetectingSaves(true);
+                            try {
+                              const res = await invoke<GameSaveState>("get_game_save_state", {
+                                gameId: game.id,
+                                forceRefreshDetection: true,
+                              });
+                              setSaveState(res);
+                            } finally {
+                              setIsDetectingSaves(false);
+                            }
+                          }}
+                          className="px-2.5 py-1 bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-white rounded-lg text-[11px] flex items-center space-x-1 border border-white/10 cursor-pointer disabled:opacity-50"
+                        >
+                          <RefreshCw className={`w-3 h-3 ${isDetectingSaves ? "animate-spin" : ""}`} />
+                          <span>Auto-Detect</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            const selected = await invoke<string | null>("select_directory");
+                            if (!selected || !saveState) return;
+                            const nextSaves = [...saveState.custom_save_paths, selected];
+                            const res = await invoke<GameSaveState>("save_custom_save_paths", {
+                              gameId: game.id,
+                              savePaths: nextSaves,
+                              configPaths: saveState.custom_config_paths,
+                            });
+                            setSaveState(res);
+                          }}
+                          className="px-2.5 py-1 bg-white/10 hover:bg-white/15 text-white rounded-lg text-[11px] flex items-center space-x-1 border border-white/10 cursor-pointer"
+                        >
+                          <FolderOpen className="w-3 h-3 text-zinc-300" />
+                          <span>Add Save Folder</span>
+                        </button>
+                        {onOpenSaveManager && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onClose();
+                              onOpenSaveManager(game);
+                            }}
+                            className="px-2.5 py-1 bg-white/10 hover:bg-white/20 text-white rounded-lg text-[11px] font-semibold border border-white/10 cursor-pointer"
+                          >
+                            Cloud Saves...
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {saveState && saveState.save_paths.length > 0 ? (
+                      <div className="space-y-1.5">
+                        {saveState.save_paths.map((sp) => (
+                          <div
+                            key={sp.path}
+                            className="flex items-center justify-between gap-2 px-3 py-2 bg-white/[0.03] border border-white/10 rounded-xl"
+                          >
+                            <div className="min-w-0">
+                              <div className="font-mono text-[11px] text-zinc-200 truncate">
+                                {sp.path}
+                              </div>
+                              <div className="text-[10px] text-zinc-500">
+                                {sp.origin} · {sp.exists ? `${sp.file_count} files` : "Not created yet"}
+                              </div>
+                            </div>
+                            <div className="flex items-center space-x-1.5 shrink-0">
+                              {sp.exists && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenFolder(sp.path)}
+                                  className="px-2.5 py-1 bg-white/5 hover:bg-white/15 text-zinc-300 hover:text-white rounded-lg text-[11px] cursor-pointer border border-white/10"
+                                >
+                                  Open
+                                </button>
+                              )}
+                              {sp.origin === "custom" && (
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    const nextSaves = saveState.custom_save_paths.filter(
+                                      (p) => p !== sp.path
+                                    );
+                                    const res = await invoke<GameSaveState>(
+                                      "save_custom_save_paths",
+                                      {
+                                        gameId: game.id,
+                                        savePaths: nextSaves,
+                                        configPaths: saveState.custom_config_paths,
+                                      }
+                                    );
+                                    setSaveState(res);
+                                  }}
+                                  className="p-1 text-zinc-500 hover:text-rose-400 cursor-pointer"
+                                  title="Remove custom save path"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="px-3 py-2 bg-white/[0.02] border border-dashed border-white/10 rounded-xl text-[11px] text-zinc-500">
+                        No save location detected yet. Use Auto-Detect or Add Save Folder.
+                      </div>
+                    )}
+
+                    {saveState && saveState.config_paths.length > 0 && (
+                      <div className="space-y-1">
+                        <span className="text-[10px] text-zinc-400 uppercase tracking-wider font-semibold block">
+                          Config Location(s)
+                        </span>
+                        {saveState.config_paths.map((cp) => (
+                          <div
+                            key={cp.path}
+                            className="flex items-center justify-between gap-2 px-3 py-1.5 bg-white/[0.02] border border-white/5 rounded-xl"
+                          >
+                            <span className="font-mono text-[10px] text-zinc-400 truncate">
+                              {cp.path}
+                            </span>
+                            {cp.exists && (
+                              <button
+                                type="button"
+                                onClick={() => handleOpenFolder(cp.path)}
+                                className="px-2 py-0.5 bg-white/5 hover:bg-white/15 text-zinc-300 hover:text-white rounded text-[10px] cursor-pointer shrink-0"
+                              >
+                                Open
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
 
                   {/* Size on Disk (Read-Only Hardware Display) */}
                   <div className="pt-2">
@@ -1670,10 +1843,23 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
                 {/* Dates: Last Played & Date Added */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-zinc-300 font-medium mb-1 flex items-center space-x-1.5">
-                      <Calendar className="w-3.5 h-3.5 text-zinc-400" />
-                      <span>Last Played Date</span>
-                    </label>
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                      <label className="text-zinc-300 font-medium flex items-center space-x-1.5">
+                        <Calendar className="w-3.5 h-3.5 text-zinc-400" />
+                        <span>Last Played Date</span>
+                      </label>
+                      {playedOnOtherDevice && (
+                        <button
+                          type="button"
+                          onClick={() => setPlayedOnOtherDevice(false)}
+                          title="Mark as played on this device and hide the other-device badge"
+                          className="inline-flex items-center gap-1 text-[11px] text-zinc-400 hover:text-white transition-colors cursor-pointer"
+                        >
+                          <MonitorSmartphone className="w-3 h-3" />
+                          <span>Played elsewhere · Clear</span>
+                        </button>
+                      )}
+                    </div>
                     <input
                       type="text"
                       value={lastPlayed}

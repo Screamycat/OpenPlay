@@ -183,6 +183,7 @@ export const TrailerModal: React.FC<TrailerModalProps> = ({
       <div
         onClick={(e) => e.stopPropagation()}
         data-theme-part="modal-container"
+        data-gamepad-zone="modal"
         className="theme-modal-container rounded-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]"
       >
         {/* Header */}
@@ -202,6 +203,7 @@ export const TrailerModal: React.FC<TrailerModalProps> = ({
           </div>
           <button
             onClick={onClose}
+            data-gamepad-close="true"
             className="p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-[#1a1f2e] transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />

@@ -803,6 +803,7 @@ export const LibraryManagerModal: React.FC<LibraryManagerModalProps> = ({
       <div
         onClick={(e) => e.stopPropagation()}
         data-theme-part="modal-container"
+        data-gamepad-zone="modal"
         className="w-full max-w-5xl theme-modal-container rounded-2xl flex flex-col h-[88vh] max-h-[880px] min-h-[640px] overflow-hidden"
       >
         {/* Header Bar */}
@@ -823,6 +824,7 @@ export const LibraryManagerModal: React.FC<LibraryManagerModalProps> = ({
 
           <button
             onClick={onClose}
+            data-gamepad-close="true"
             className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
@@ -832,7 +834,10 @@ export const LibraryManagerModal: React.FC<LibraryManagerModalProps> = ({
         {/* Modal Body: Left Categorized Sidebar + Right Content Pane */}
         <div className="flex-1 flex overflow-hidden">
           {/* Left Categorized Navigation (Manual, Emulation, Providers) */}
-          <div className="w-64 border-r theme-border bg-black/20 overflow-y-auto p-3 space-y-4 select-none">
+          <div
+            data-gamepad-tabs="true"
+            className="w-64 border-r theme-border bg-black/20 overflow-y-auto p-3 space-y-4 select-none"
+          >
             {/* 1. MANUAL & IMPORT */}
             <div>
               <div className="px-2 py-1 text-[10px] uppercase font-bold text-slate-500 tracking-wider">
@@ -841,6 +846,7 @@ export const LibraryManagerModal: React.FC<LibraryManagerModalProps> = ({
               <div className="space-y-0.5 mt-1">
                 <button
                   onClick={() => setActiveTab("manual_local")}
+                  data-gamepad-tab-active={activeTab === "manual_local" ? "true" : undefined}
                   className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-all cursor-pointer ${
                     activeTab === "manual_local"
                       ? "theme-accent-subtle-bg theme-accent-text border theme-accent-subtle-border font-semibold"
@@ -865,6 +871,7 @@ export const LibraryManagerModal: React.FC<LibraryManagerModalProps> = ({
               <div className="space-y-0.5 mt-1">
                 <button
                   onClick={() => setActiveTab("emulation")}
+                  data-gamepad-tab-active={activeTab === "emulation" ? "true" : undefined}
                   className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-all cursor-pointer ${
                     activeTab === "emulation"
                       ? "theme-accent-subtle-bg theme-accent-text border theme-accent-subtle-border font-semibold"
@@ -883,6 +890,7 @@ export const LibraryManagerModal: React.FC<LibraryManagerModalProps> = ({
                   return (
                     <button
                       onClick={() => setActiveTab("retroachievements")}
+                      data-gamepad-tab-active={activeTab === "retroachievements" ? "true" : undefined}
                       className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-all cursor-pointer ${
                         activeTab === "retroachievements"
                           ? getProviderBrandClasses("retroachievements", true)
@@ -912,6 +920,7 @@ export const LibraryManagerModal: React.FC<LibraryManagerModalProps> = ({
                 {/* Steam */}
                 <button
                   onClick={() => setActiveTab("steam")}
+                  data-gamepad-tab-active={activeTab === "steam" ? "true" : undefined}
                   className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-all cursor-pointer ${
                     activeTab === "steam"
                       ? getProviderBrandClasses("steam", true)
@@ -929,6 +938,7 @@ export const LibraryManagerModal: React.FC<LibraryManagerModalProps> = ({
                 {/* Epic Games */}
                 <button
                   onClick={() => setActiveTab("epic")}
+                  data-gamepad-tab-active={activeTab === "epic" ? "true" : undefined}
                   className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-all cursor-pointer ${
                     activeTab === "epic"
                       ? getProviderBrandClasses("epic", true)
@@ -952,6 +962,7 @@ export const LibraryManagerModal: React.FC<LibraryManagerModalProps> = ({
                   return (
                     <button
                       key={prov.id}
+                      data-gamepad-tab-active={isActive ? "true" : undefined}
                       onClick={() => {
                         setActiveTab(prov.id);
                         setShowProviderManualInput(false);

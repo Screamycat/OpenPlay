@@ -1,6 +1,7 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Game } from "../../types/game";
+import { resolveImageSrc } from "../../utils/image";
 import {
   FileCode,
   FolderOpen,
@@ -11,6 +12,8 @@ import {
   Layers,
   Sparkles,
   HardDrive,
+  AppWindow,
+  Search,
 } from "lucide-react";
 
 interface LocalGamesTabProps {
@@ -32,6 +35,17 @@ export const LocalGamesTab: React.FC<LocalGamesTabProps> = ({
   // Multi / Folder candidates review
   const [folderCandidates, setFolderCandidates] = useState<Game[]>([]);
   const [selectedFolderIds, setSelectedFolderIds] = useState<Record<string, boolean>>({});
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const filteredFolderCandidates = useMemo(() => {
+    if (!searchQuery.trim()) return folderCandidates;
+    const q = searchQuery.toLowerCase();
+    return folderCandidates.filter(
+      (c) =>
+        c.title.toLowerCase().includes(q) ||
+        (c.executable_path && c.executable_path.toLowerCase().includes(q))
+    );
+  }, [folderCandidates, searchQuery]);
 
   // 1. Select Single Executable
   const handleSelectSingleExe = async () => {
@@ -114,14 +128,55 @@ export const LocalGamesTab: React.FC<LocalGamesTabProps> = ({
     }
   };
 
+  // 4. Scan Installed Desktop Apps (Linux & system launchers)
+  const handleScanInstalledApps = async () => {
+    setErrorMsg(null);
+    setSuccessMsg(null);
+    try {
+      setIsScanning(true);
+      const candidates = await invoke<Game[]>("scan_installed_linux_apps");
+      if (!candidates || candidates.length === 0) {
+        setErrorMsg("No installed desktop applications or launchers were detected.");
+        return;
+      }
+      setFolderCandidates(candidates);
+      setSingleCandidate(null);
+
+      // Pre-select known gaming launchers / tools or select all if few
+      const initSelected: Record<string, boolean> = {};
+      candidates.forEach((c) => {
+        const titleLower = c.title.toLowerCase();
+        if (
+          titleLower.includes("prism") ||
+          titleLower.includes("minecraft") ||
+          titleLower.includes("steam") ||
+          titleLower.includes("heroic") ||
+          titleLower.includes("lutris") ||
+          titleLower.includes("bottle") ||
+          candidates.length <= 6
+        ) {
+          initSelected[c.id] = true;
+        }
+      });
+      setSelectedFolderIds(initSelected);
+    } catch (err: any) {
+      setErrorMsg(
+        typeof err === "string" ? err : err.message || "Failed to scan installed applications"
+      );
+    } finally {
+      setIsScanning(false);
+    }
+  };
+
   // Save single candidate to OpenPlay
   const handleSaveSingle = async () => {
     if (!singleCandidate) return;
     try {
-      await invoke("save_game", { game: singleCandidate });
-      setSuccessMsg(`Added "${singleCandidate.title}" to your library!`);
+      const saved = await invoke<Game>("save_game", { game: singleCandidate });
+      const effectiveGame = saved && saved.id ? saved : singleCandidate;
+      setSuccessMsg(`Added "${effectiveGame.title}" to your library!`);
       if (onGameAdded) {
-        onGameAdded(singleCandidate);
+        onGameAdded(effectiveGame);
       }
       setSingleCandidate(null);
     } catch (err: any) {
@@ -162,7 +217,7 @@ export const LocalGamesTab: React.FC<LocalGamesTabProps> = ({
       </div>
 
       {/* Action Options Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         {/* Card 1: Executable File */}
         <button
           type="button"
@@ -175,15 +230,35 @@ export const LocalGamesTab: React.FC<LocalGamesTabProps> = ({
           </div>
           <div>
             <span className="text-xs font-bold text-white block group-hover:theme-accent-text transition-colors">
-              Select Executable (.exe)
+              Select Executable
             </span>
             <span className="text-[10px] text-zinc-400 leading-tight block mt-0.5">
-              Pick a single launcher file. Automatically formats clean game title and path.
+              Pick a binary, script (.sh), AppImage, or .exe file.
             </span>
           </div>
         </button>
 
-        {/* Card 2: Folder Scanner */}
+        {/* Card 2: Installed System Apps */}
+        <button
+          type="button"
+          disabled={isScanning}
+          onClick={handleScanInstalledApps}
+          className="p-4 rounded-xl bg-[#12141f] border border-white/10 hover:border-emerald-500/40 hover:bg-emerald-500/10 text-left transition-all cursor-pointer group flex flex-col justify-between space-y-3"
+        >
+          <div className="p-2 rounded-lg bg-white/5 border border-white/10 text-emerald-400 group-hover:scale-105 transition-transform w-fit">
+            <AppWindow className="w-5 h-5" />
+          </div>
+          <div>
+            <span className="text-xs font-bold text-white block group-hover:text-emerald-300 transition-colors">
+              Installed System Apps
+            </span>
+            <span className="text-[10px] text-zinc-400 leading-tight block mt-0.5">
+              Scans Linux desktop launchers like Prism Launcher, Steam, Heroic, and Emulators.
+            </span>
+          </div>
+        </button>
+
+        {/* Card 3: Folder Scanner */}
         <button
           type="button"
           disabled={isScanning}
@@ -203,7 +278,7 @@ export const LocalGamesTab: React.FC<LocalGamesTabProps> = ({
           </div>
         </button>
 
-        {/* Card 3: Batch Executables */}
+        {/* Card 4: Batch Executables */}
         <button
           type="button"
           disabled={isScanning}
@@ -218,7 +293,7 @@ export const LocalGamesTab: React.FC<LocalGamesTabProps> = ({
               Batch Select Files
             </span>
             <span className="text-[10px] text-zinc-400 leading-tight block mt-0.5">
-              Select multiple .exe files simultaneously to add a collection in one go.
+              Select multiple executable files simultaneously to add a collection in one go.
             </span>
           </div>
         </button>
@@ -325,7 +400,7 @@ export const LocalGamesTab: React.FC<LocalGamesTabProps> = ({
           <div className="flex items-center justify-between border-b border-white/5 pb-2">
             <span className="text-xs font-bold text-white uppercase tracking-wider flex items-center space-x-1.5">
               <Layers className="w-3.5 h-3.5 theme-accent-text" />
-              <span>Detected Executables ({folderCandidates.length})</span>
+              <span>Detected Applications & Games ({folderCandidates.length})</span>
             </span>
             <div className="flex items-center space-x-2 text-xs">
               <button
@@ -350,8 +425,21 @@ export const LocalGamesTab: React.FC<LocalGamesTabProps> = ({
             </div>
           </div>
 
-          <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-            {folderCandidates.map((candidate) => (
+          {folderCandidates.length > 4 && (
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 text-zinc-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Filter detected applications (e.g. Prism, Minecraft)..."
+                className="w-full pl-8 pr-3 py-1.5 bg-black/30 border border-white/10 rounded-lg text-white text-xs placeholder:text-zinc-500 focus:outline-none theme-accent-focus"
+              />
+            </div>
+          )}
+
+          <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+            {filteredFolderCandidates.map((candidate) => (
               <label
                 key={candidate.id}
                 className={`p-2.5 rounded-lg border transition-all flex items-center justify-between cursor-pointer ${
@@ -372,6 +460,17 @@ export const LocalGamesTab: React.FC<LocalGamesTabProps> = ({
                     }
                     className="w-4 h-4 rounded bg-white/10 border-white/20 cursor-pointer accent-[var(--app-accent-color)]"
                   />
+                  {candidate.icon_image ? (
+                    <img
+                      src={resolveImageSrc(candidate.icon_image)}
+                      alt=""
+                      className="w-8 h-8 rounded-lg object-contain bg-black/40 border border-white/10 shrink-0 p-0.5"
+                    />
+                  ) : (
+                    <div className="w-8 h-8 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center shrink-0">
+                      <FileCode className="w-4 h-4 text-zinc-400" />
+                    </div>
+                  )}
                   <div className="min-w-0">
                     <span className="text-xs font-semibold block truncate">
                       {candidate.title}
@@ -382,11 +481,22 @@ export const LocalGamesTab: React.FC<LocalGamesTabProps> = ({
                   </div>
                 </div>
 
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/5 border border-white/10 font-mono text-zinc-400 shrink-0">
-                  Executable
+                <span
+                  className={`text-[10px] px-2 py-0.5 rounded-full font-mono shrink-0 ${
+                    candidate.source === "Local" || candidate.platforms?.includes("PC (Linux)")
+                      ? "bg-emerald-500/10 border border-emerald-500/25 text-emerald-400"
+                      : "bg-white/5 border border-white/10 text-zinc-400"
+                  }`}
+                >
+                  {candidate.source === "Local" ? "System App" : "Executable"}
                 </span>
               </label>
             ))}
+            {filteredFolderCandidates.length === 0 && (
+              <div className="text-center py-6 text-zinc-500 text-xs font-mono">
+                No applications match "{searchQuery}"
+              </div>
+            )}
           </div>
 
           <div className="flex items-center justify-between pt-2 border-t border-white/5">

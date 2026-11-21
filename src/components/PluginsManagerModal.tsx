@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import {
   X,
   Blocks,
@@ -43,11 +44,16 @@ export const PluginsManagerModal: React.FC<PluginsManagerModalProps> = ({
   const [isSavingConfig, setIsSavingConfig] = useState(false);
 
   useEffect(() => {
-    if (isOpen) {
+    if (!isOpen) return;
+    loadPlugins();
+    setErrorMessage(null);
+    setSuccessMessage(null);
+    const unlisten = listen("cloud-sync-completed", () => {
       loadPlugins();
-      setErrorMessage(null);
-      setSuccessMessage(null);
-    }
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
   }, [isOpen]);
 
   const loadPlugins = async () => {
@@ -188,6 +194,7 @@ export const PluginsManagerModal: React.FC<PluginsManagerModalProps> = ({
       <div
         onClick={(e) => e.stopPropagation()}
         data-theme-part="modal-container"
+        data-gamepad-zone="modal"
         className="theme-modal-container rounded-2xl w-full max-w-5xl h-[88vh] flex flex-col overflow-hidden text-zinc-100 z-10"
       >
         {/* Top Header */}
@@ -248,6 +255,7 @@ export const PluginsManagerModal: React.FC<PluginsManagerModalProps> = ({
             {/* Close */}
             <button
               onClick={onClose}
+              data-gamepad-close="true"
               className="w-8 h-8 rounded-xl bg-white/5 hover:bg-white/15 text-zinc-400 hover:text-white flex items-center justify-center transition-colors cursor-pointer border border-white/10"
             >
               <X className="w-4 h-4" />

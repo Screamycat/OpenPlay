@@ -117,8 +117,9 @@ export const FilterPopover: React.FC<FilterPopoverProps> = ({
   return (
     <div
       ref={popoverRef}
+      data-gamepad-zone="popover"
       onMouseDown={(e) => e.stopPropagation()}
-      className="absolute top-full left-0 mt-2 w-[380px] sm:w-[440px] theme-panel-surface backdrop-blur-2xl border border-white/15 rounded-2xl shadow-2xl z-50 overflow-hidden flex flex-col text-slate-200 select-none animate-in fade-in zoom-in-95 duration-150"
+      className="titlebar-no-drag absolute top-full left-0 mt-2 w-[380px] sm:w-[440px] theme-panel-surface backdrop-blur-2xl border border-white/15 rounded-2xl shadow-2xl z-50 overflow-hidden flex flex-col text-slate-200 select-none animate-in fade-in zoom-in-95 duration-150"
     >
       {/* Top Header */}
       <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between bg-black/30">
@@ -147,6 +148,7 @@ export const FilterPopover: React.FC<FilterPopoverProps> = ({
 
           <button
             onClick={onClose}
+            data-gamepad-close="true"
             className="p-1 text-slate-400 hover:text-white hover:bg-white/10 rounded-md transition-colors cursor-pointer"
           >
             <X className="w-4 h-4" />
@@ -157,6 +159,7 @@ export const FilterPopover: React.FC<FilterPopoverProps> = ({
       <div className="p-3.5 space-y-3 max-h-[calc(88vh-80px)] overflow-y-auto">
         {/* Prominent Favorites Section (Distinctly Separated at the Top) */}
         <div
+          role="button"
           onClick={onToggleFavoritesOnly}
           className={`flex items-center justify-between px-3.5 py-2.5 rounded-xl border transition-all cursor-pointer ${
             showFavoritesOnly
@@ -187,6 +190,7 @@ export const FilterPopover: React.FC<FilterPopoverProps> = ({
         {/* Only Show Hidden Games Section */}
         {onToggleHiddenOnly && (
           <div
+            role="button"
             onClick={onToggleHiddenOnly}
             className={`flex items-center justify-between px-3.5 py-2.5 rounded-xl border transition-all cursor-pointer ${
               showHiddenOnly
@@ -231,6 +235,7 @@ export const FilterPopover: React.FC<FilterPopoverProps> = ({
         {/* Show Hidden Games Section */}
         {onToggleShowHidden && (
           <div
+            role="button"
             onClick={onToggleShowHidden}
             className={`flex items-center justify-between px-3.5 py-2.5 rounded-xl border transition-all cursor-pointer ${
               showHiddenGames
@@ -280,10 +285,14 @@ export const FilterPopover: React.FC<FilterPopoverProps> = ({
         <div className="h-px bg-white/10 my-1" />
 
         {/* Filter Categories Tab Switcher */}
-        <div className="flex items-center bg-black/40 rounded-xl p-1 border border-white/10 text-xs">
+        <div
+          data-gamepad-tabs="true"
+          className="flex items-center bg-black/40 rounded-xl p-1 border border-white/10 text-xs"
+        >
           {/* Tags Tab */}
           <button
             onClick={() => setActiveTab("tags")}
+            data-gamepad-tab-active={activeTab === "tags" ? "true" : undefined}
             className={`flex-1 py-1.5 px-2 rounded-lg font-semibold transition-all flex items-center justify-center space-x-1.5 cursor-pointer ${
               activeTab === "tags"
                 ? "bg-white/15 text-white shadow-sm"
@@ -302,6 +311,7 @@ export const FilterPopover: React.FC<FilterPopoverProps> = ({
           {/* Developers Tab */}
           <button
             onClick={() => setActiveTab("developers")}
+            data-gamepad-tab-active={activeTab === "developers" ? "true" : undefined}
             className={`flex-1 py-1.5 px-2 rounded-lg font-semibold transition-all flex items-center justify-center space-x-1.5 cursor-pointer ${
               activeTab === "developers"
                 ? "bg-white/15 text-white shadow-sm"
@@ -320,6 +330,7 @@ export const FilterPopover: React.FC<FilterPopoverProps> = ({
           {/* Libraries Tab */}
           <button
             onClick={() => setActiveTab("libraries")}
+            data-gamepad-tab-active={activeTab === "libraries" ? "true" : undefined}
             className={`flex-1 py-1.5 px-2 rounded-lg font-semibold transition-all flex items-center justify-center space-x-1.5 cursor-pointer ${
               activeTab === "libraries"
                 ? "bg-white/15 text-white shadow-sm"
@@ -376,6 +387,7 @@ export const FilterPopover: React.FC<FilterPopoverProps> = ({
                   return (
                     <div
                       key={name}
+                      role="button"
                       onClick={() => onToggleGenre(name)}
                       className={`flex items-center justify-between px-2.5 py-1.5 rounded-lg border text-xs transition-all cursor-pointer ${
                         isChecked
@@ -420,6 +432,7 @@ export const FilterPopover: React.FC<FilterPopoverProps> = ({
                   return (
                     <div
                       key={name}
+                      role="button"
                       onClick={() => onToggleDeveloper(name)}
                       className={`flex items-center justify-between px-3 py-1.5 rounded-lg border text-xs transition-all cursor-pointer ${
                         isChecked
@@ -464,6 +477,7 @@ export const FilterPopover: React.FC<FilterPopoverProps> = ({
                   return (
                     <div
                       key={name}
+                      role="button"
                       onClick={() => onToggleSource(name)}
                       className={`flex items-center justify-between px-3 py-2 rounded-lg border text-xs transition-all cursor-pointer ${
                         isChecked

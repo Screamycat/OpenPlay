@@ -120,20 +120,19 @@ export const TopNav: React.FC<TopNavProps> = ({
   const filterContainerRef = useRef<HTMLDivElement>(null);
   const handleHeaderDoubleClick = async (e: React.MouseEvent) => {
     if (e.button === 0) {
-      if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
-        try {
-          await getCurrentWindow().toggleMaximize();
-        } catch (err) {}
-      }
+      try {
+        await getCurrentWindow().toggleMaximize();
+      } catch (err) {}
     }
   };
 
   return (
     <header
       data-theme-part="top-nav"
+      data-gamepad-zone="top-nav"
       data-tauri-drag-region
       onDoubleClick={handleHeaderDoubleClick}
-      className="h-14 bg-black/25 backdrop-blur-xl border-b border-white/10 px-4 flex items-center justify-between select-none z-30 gap-3 shadow-lg"
+      className="titlebar-drag-region h-14 bg-black/25 backdrop-blur-xl border-b border-white/10 px-4 flex items-center justify-between select-none z-30 gap-3 shadow-lg"
     >
       {/* Top Left: OpenPlay Menu, Filters, Sort, Search */}
       <div
@@ -194,6 +193,7 @@ export const TopNav: React.FC<TopNavProps> = ({
 
             {/* Down Arrow: Advanced Filter Dropdown Access with subtle active indicator */}
             <button
+              data-gamepad-popover-trigger="true"
               onClick={() => setIsFilterPopoverOpen((prev) => !prev)}
               title={
                 activeFilterCount > 0
@@ -311,6 +311,9 @@ export const TopNav: React.FC<TopNavProps> = ({
           <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
           <input
             type="text"
+            data-gamepad-search-input="true"
+            data-gamepad-live-input="true"
+            aria-label="Search Library"
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
             placeholder="Search..."

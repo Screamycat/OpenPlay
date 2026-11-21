@@ -26,16 +26,21 @@ import { LibraryManagerModal, CategoryTab } from "./components/LibraryManagerMod
 import { GameContextMenu } from "./components/GameContextMenu";
 import { SteamGridDBModal } from "./components/SteamGridDBModal";
 import { TrailerModal } from "./components/TrailerModal";
+import { SaveManagerModal } from "./components/SaveManagerModal";
+import { NewerCloudSaveModal } from "./components/NewerCloudSaveModal";
+import { CloudSaveSnapshot, PreLaunchSaveCheck } from "./types/saves";
 import { DynamicBackground } from "./components/DynamicBackground";
 import { AchievementHunterHub } from "./components/AchievementHunterHub";
 import { HunterProfile } from "./types/achievement";
 import { mergeDuplicateGames, findMergeCandidate } from "./utils/merger";
 import { Gamepad2, Loader2, Sparkles, RefreshCw } from "lucide-react";
 import { resolveImageSrc } from "./utils/image";
-import { applyTheme } from "./utils/themeEngine";
+import { parseLastPlayedMs } from "./utils/date";
+import { applyTheme, removeCustomTheme } from "./utils/themeEngine";
 import { ThemeInfo } from "./types/themes";
 import { UpdateCheckResult } from "./types/update";
 import { pluginRuntime } from "./utils/pluginRuntime";
+import { GamepadProvider } from "./contexts/GamepadContext";
 import "./App.css";
 
 interface ScanResult {
@@ -125,6 +130,7 @@ export function App() {
   // Application Config & Persistence
   const [appConfig, setAppConfig] = useState<AppConfig>(DEFAULT_APP_CONFIG);
   const isConfigLoadedRef = useRef(false);
+  const isApplyingRemoteConfigRef = useRef(false);
   const saveConfigTimeoutRef = useRef<number | null>(null);
 
   // Apply user-configured theme accent, panel tint, and modal backdrop to document CSS variables
@@ -160,6 +166,34 @@ export function App() {
       .catch((err) => console.warn("Failed to apply initial active theme:", err));
   }, []);
 
+  const [showEmergencyResetToast, setShowEmergencyResetToast] = useState(false);
+
+  // Global Anti-Softlock Hotkey (Ctrl+Shift+F8) to force-revert to immutable default theme
+  useEffect(() => {
+    const handleEmergencyReset = async (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.shiftKey && e.key === "F8") {
+        e.preventDefault();
+        console.warn("[Anti-Softlock] Emergency theme reset triggered (Ctrl+Shift+F8)");
+        try {
+          await invoke("set_active_theme", { themeId: "default" });
+          removeCustomTheme();
+          const themes = await invoke<ThemeInfo[]>("get_installed_themes");
+          const defaultTheme = themes.find((t) => t.manifest.id === "default");
+          if (defaultTheme) {
+            applyTheme(defaultTheme);
+          }
+          setShowEmergencyResetToast(true);
+          setTimeout(() => setShowEmergencyResetToast(false), 5000);
+        } catch (err) {
+          console.error("Failed to execute emergency theme reset:", err);
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleEmergencyReset);
+    return () => window.removeEventListener("keydown", handleEmergencyReset);
+  }, []);
+
   // Default cardWidth to 108 for 7 columns, persist in localStorage
   const [cardWidth, setCardWidth] = useState(() => {
     const saved = localStorage.getItem("openplay_card_width");
@@ -167,7 +201,7 @@ export function App() {
   });
 
   // Fixed grid width proportion (defaults to 52% for 7 vertical columns)
-  const [gridWidthPercent] = useState(() => {
+  const [gridWidthPercent, setGridWidthPercent] = useState(() => {
     const saved = localStorage.getItem("openplay_grid_width");
     return saved ? Number(saved) : 52;
   });
@@ -211,6 +245,13 @@ export function App() {
   // Modals triggered from context menu
   const [steamGridDBGame, setSteamGridDBGame] = useState<Game | null>(null);
   const [trailerGame, setTrailerGame] = useState<Game | null>(null);
+  const [saveManagerGame, setSaveManagerGame] = useState<Game | null>(null);
+  const [saveRefreshNonce, setSaveRefreshNonce] = useState(0);
+  const [newerSavePrompt, setNewerSavePrompt] = useState<{
+    game: Game;
+    actionId?: string;
+    snapshot: CloudSaveSnapshot;
+  } | null>(null);
 
   // Achievement Hunter Hub state
   const [isHunterHubOpen, setIsHunterHubOpen] = useState(false);
@@ -295,11 +336,27 @@ export function App() {
           setAppConfig(loadedCfg);
 
           if (cfg.view_mode) setViewMode(cfg.view_mode as ViewMode);
-          if (cfg.card_width) setCardWidth(cfg.card_width);
+          if (cfg.card_width) {
+            setCardWidth(cfg.card_width);
+            try {
+              localStorage.setItem("openplay_card_width", String(cfg.card_width));
+            } catch {}
+          }
+          if (cfg.grid_width_percent) {
+            setGridWidthPercent(cfg.grid_width_percent);
+            try {
+              localStorage.setItem("openplay_grid_width", String(cfg.grid_width_percent));
+            } catch {}
+          }
           if (cfg.status_filter) setStatusFilter(cfg.status_filter as StatusFilter);
           if (cfg.sort_by) setSortBy(cfg.sort_by as SortOption);
           if (cfg.sort_direction) setSortDirection(cfg.sort_direction as SortDirection);
-          if (cfg.group_by) setGroupBy(cfg.group_by as GroupByOption);
+          if (cfg.group_by) {
+            setGroupBy(cfg.group_by as GroupByOption);
+            try {
+              localStorage.setItem("openplay_group_by", cfg.group_by);
+            } catch {}
+          }
           if (cfg.show_favorites_only !== undefined) setShowFavoritesOnly(cfg.show_favorites_only);
           if (cfg.selected_genres) setSelectedGenres(cfg.selected_genres);
           if (cfg.selected_developers) setSelectedDevelopers(cfg.selected_developers);
@@ -368,7 +425,7 @@ export function App() {
 
   // Auto-persist session & layout state to SQLite config
   useEffect(() => {
-    if (!isConfigLoadedRef.current) return;
+    if (!isConfigLoadedRef.current || isApplyingRemoteConfigRef.current) return;
 
     if (saveConfigTimeoutRef.current) clearTimeout(saveConfigTimeoutRef.current);
     saveConfigTimeoutRef.current = window.setTimeout(() => {
@@ -435,7 +492,11 @@ export function App() {
         const lastPlayed = typeof payload === "string" ? undefined : payload.last_played;
         if (lastPlayed) {
           setGames((prev) =>
-            prev.map((g) => (g.id === id ? { ...g, last_played: lastPlayed } : g))
+            prev.map((g) =>
+              g.id === id
+                ? { ...g, last_played: lastPlayed, played_on_other_device: false }
+                : g
+            )
           );
         }
         invoke<Game[]>("get_all_games")
@@ -469,6 +530,7 @@ export function App() {
               ...g,
               playtime_seconds: g.playtime_seconds + elapsed_seconds,
               last_played,
+              played_on_other_device: false,
             };
           }
           return g;
@@ -521,6 +583,77 @@ export function App() {
       }
     });
 
+    const unlistenLibraryUpdated = listen("library-updated", async () => {
+      try {
+        const list = await invoke<Game[]>("get_games");
+        setGames(list);
+      } catch (err) {
+        console.error("Error refreshing library on library-updated:", err);
+      }
+    });
+
+    const unlistenCloudSync = listen("cloud-sync-completed", async () => {
+      try {
+        if (saveConfigTimeoutRef.current) {
+          clearTimeout(saveConfigTimeoutRef.current);
+          saveConfigTimeoutRef.current = null;
+        }
+        isApplyingRemoteConfigRef.current = true;
+
+        const cfg = await invoke<AppConfig>("get_app_config");
+        if (cfg) {
+          const merged = { ...DEFAULT_APP_CONFIG, ...cfg };
+          setAppConfig(merged);
+          if (cfg.view_mode) setViewMode(cfg.view_mode as ViewMode);
+          if (cfg.card_width) {
+            setCardWidth(cfg.card_width);
+            try {
+              localStorage.setItem("openplay_card_width", String(cfg.card_width));
+            } catch {}
+          }
+          if (cfg.grid_width_percent) {
+            setGridWidthPercent(cfg.grid_width_percent);
+            try {
+              localStorage.setItem("openplay_grid_width", String(cfg.grid_width_percent));
+            } catch {}
+          }
+          if (cfg.status_filter) setStatusFilter(cfg.status_filter as StatusFilter);
+          if (cfg.sort_by) setSortBy(cfg.sort_by as SortOption);
+          if (cfg.sort_direction) setSortDirection(cfg.sort_direction as SortDirection);
+          if (cfg.group_by) {
+            setGroupBy(cfg.group_by as GroupByOption);
+            try {
+              localStorage.setItem("openplay_group_by", cfg.group_by);
+            } catch {}
+          }
+          if (cfg.show_favorites_only !== undefined) setShowFavoritesOnly(cfg.show_favorites_only);
+          if (cfg.selected_genres) setSelectedGenres(cfg.selected_genres);
+          if (cfg.selected_developers) setSelectedDevelopers(cfg.selected_developers);
+          if (cfg.selected_sources) setSelectedSources(cfg.selected_sources);
+        }
+
+        const list = await invoke<Game[]>("get_games");
+        setGames(list);
+
+        const themes = await invoke<ThemeInfo[]>("get_installed_themes");
+        const active =
+          themes.find((t) => t.is_active) ||
+          themes.find((t) => t.manifest.id === "default") ||
+          themes[0];
+        if (active) {
+          applyTheme(active);
+        }
+
+        pluginRuntime.syncWithBackend();
+      } catch (err) {
+        console.warn("Error applying synced cloud state:", err);
+      } finally {
+        window.setTimeout(() => {
+          isApplyingRemoteConfigRef.current = false;
+        }, 150);
+      }
+    });
+
     // Listen for Steam login webview success
     const unlistenSteamLogin = listen<string>("steam-login-detected", async (event) => {
       const extracted = event.payload;
@@ -560,6 +693,8 @@ export function App() {
       unlistenEpicLogin.then((f) => f());
       unlistenProgress.then((f) => f());
       unlistenSyncComplete.then((f) => f());
+      unlistenLibraryUpdated.then((f) => f());
+      unlistenCloudSync.then((f) => f());
     };
   }, []);
 
@@ -821,28 +956,78 @@ export function App() {
     }
   };
 
+  // Install Game (Delegates to native launcher / store protocol without modifying last_played)
+  const handleInstallGame = async (game: Game) => {
+    try {
+      await invoke("install_game", { gameId: game.id });
+    } catch (err: any) {
+      console.warn("Could not start installation automatically:", err);
+      const msg = typeof err === "string" ? err : err?.message || "Installation is not available for this source";
+      alert(msg);
+    }
+  };
+
   // Launch Game (Supports default action or custom Dual Launch actionId)
-  const handleLaunchGame = async (game: Game, actionId?: string) => {
+  const handleLaunchGame = async (game: Game, actionId?: string, skipSaveCheck = false) => {
+    let target = game;
+    // If target game is not installed but has an installed sibling, launch that sibling
+    if (!target.is_installed && target.sibling_games && target.sibling_games.length > 0) {
+      const installedSib = target.sibling_games.find((s) => s.is_installed);
+      if (installedSib) target = installedSib;
+    }
+
+    // Guard: Uninstalled games cannot be played; trigger install without touching last_played
+    if (!target.is_installed) {
+      await handleInstallGame(target);
+      return;
+    }
+
+    if (!skipSaveCheck && target.cloud_save_enabled) {
+      try {
+        const preCheck = await invoke<PreLaunchSaveCheck>("check_pre_launch_cloud_save", {
+          gameId: target.id,
+        });
+        if (preCheck?.status === "newer_peer_available" && preCheck.latest_snapshot) {
+          setNewerSavePrompt({
+            game: target,
+            actionId,
+            snapshot: preCheck.latest_snapshot,
+          });
+          return;
+        }
+      } catch (saveErr) {
+        console.warn("Pre-launch cloud save check failed (continuing launch):", saveErr);
+      }
+    }
+
     try {
       const now = new Date();
       const pad = (n: number) => n.toString().padStart(2, "0");
       const nowStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
 
-      handleSelectGame(game.id);
-      setIsLaunchingId(game.id);
+      handleSelectGame(target.id);
+      setIsLaunchingId(target.id);
 
       // Immediately update last_played so UI and sorting reflect it without delay
       setGames((prev) =>
-        prev.map((g) => (g.id === game.id ? { ...g, last_played: nowStr } : g))
+        prev.map((g) =>
+          g.id === target.id
+            ? { ...g, last_played: nowStr, played_on_other_device: false }
+            : g
+        )
       );
 
       const res = await invoke<string>("launch_game", {
-        gameId: game.id,
+        gameId: target.id,
         actionId: actionId || null,
       });
       if (res && res.includes(":")) {
         setGames((prev) =>
-          prev.map((g) => (g.id === game.id ? { ...g, last_played: res } : g))
+          prev.map((g) =>
+            g.id === target.id
+              ? { ...g, last_played: res, played_on_other_device: false }
+              : g
+          )
         );
       }
 
@@ -1113,7 +1298,97 @@ export function App() {
   const handleSaveGame = async (updated: Game) => {
     try {
       await invoke("save_game", { game: updated });
-      setGames((prev) => prev.map((g) => (g.id === updated.id ? updated : g)));
+
+      // If this game belongs to a merged multi-platform group, sync shared metadata across its siblings
+      const mergedGroup = filteredGames.find(
+        (g) => g.id === updated.id || g.sibling_games?.some((s) => s.id === updated.id)
+      );
+
+      if (mergedGroup && mergedGroup.sibling_games && mergedGroup.sibling_games.length > 0) {
+        const allGroupCopies = [mergedGroup, ...mergedGroup.sibling_games];
+        const siblingCopies = allGroupCopies.filter((c) => c.id !== updated.id);
+
+        for (const sib of siblingCopies) {
+          const syncedSib: Game = {
+            ...sib,
+            title: updated.title,
+            sorting_title: updated.sorting_title,
+            cover_image: updated.cover_image,
+            background_image: updated.background_image,
+            logo_image: updated.logo_image,
+            icon_image: updated.icon_image,
+            description: updated.description,
+            notes: updated.notes,
+            developer: updated.developer,
+            publisher: updated.publisher,
+            release_date: updated.release_date,
+            genres: updated.genres,
+            tags: updated.tags,
+            categories: updated.categories,
+            features: updated.features,
+            critic_score: updated.critic_score,
+            community_score: updated.community_score,
+            user_rating: updated.user_rating,
+            completion_status: updated.completion_status,
+            auto_beaten: updated.auto_beaten,
+            is_favorite: updated.is_favorite,
+            is_hidden: updated.is_hidden,
+            hltb_main: updated.hltb_main,
+            hltb_extra: updated.hltb_extra,
+            hltb_completionist: updated.hltb_completionist,
+            links: updated.links,
+            trailers: updated.trailers,
+            screenshots: updated.screenshots,
+            // Individual platform fields (playtime_seconds, last_played, install_directory, executable_path, play_actions, is_installed) are untouched!
+          };
+          invoke("save_game", { game: syncedSib }).catch((e) =>
+            console.warn("Failed to sync sibling metadata in SQLite:", e)
+          );
+        }
+
+        const sibIds = new Set(siblingCopies.map((s) => s.id));
+        setGames((prev) =>
+          prev.map((g) => {
+            if (g.id === updated.id) return updated;
+            if (sibIds.has(g.id)) {
+              return {
+                ...g,
+                title: updated.title,
+                sorting_title: updated.sorting_title,
+                cover_image: updated.cover_image,
+                background_image: updated.background_image,
+                logo_image: updated.logo_image,
+                icon_image: updated.icon_image,
+                description: updated.description,
+                notes: updated.notes,
+                developer: updated.developer,
+                publisher: updated.publisher,
+                release_date: updated.release_date,
+                genres: updated.genres,
+                tags: updated.tags,
+                categories: updated.categories,
+                features: updated.features,
+                critic_score: updated.critic_score,
+                community_score: updated.community_score,
+                user_rating: updated.user_rating,
+                completion_status: updated.completion_status,
+                auto_beaten: updated.auto_beaten,
+                is_favorite: updated.is_favorite,
+                is_hidden: updated.is_hidden,
+                hltb_main: updated.hltb_main,
+                hltb_extra: updated.hltb_extra,
+                hltb_completionist: updated.hltb_completionist,
+                links: updated.links,
+                trailers: updated.trailers,
+                screenshots: updated.screenshots,
+              };
+            }
+            return g;
+          })
+        );
+      } else {
+        setGames((prev) => prev.map((g) => (g.id === updated.id ? updated : g)));
+      }
     } catch (err) {
       console.error("Failed to save game:", err);
     }
@@ -1143,9 +1418,46 @@ export function App() {
         iconImage: updates.iconImage ?? updates.icon_image,
         icon_image: updates.iconImage ?? updates.icon_image,
       });
-      setGames((prev) =>
-        prev.map((g) => (g.id === updated.id ? { ...g, ...updated } : g))
+      // Keep sibling artwork in sync
+      const mergedGroup = filteredGames.find(
+        (g) => g.id === steamGridDBGame.id || g.sibling_games?.some((s) => s.id === steamGridDBGame.id)
       );
+      if (mergedGroup && mergedGroup.sibling_games && mergedGroup.sibling_games.length > 0) {
+        const allGroupIds = [mergedGroup.id, ...mergedGroup.sibling_games.map((s) => s.id)];
+        for (const sid of allGroupIds) {
+          if (sid !== updated.id) {
+            invoke("apply_custom_artwork", {
+              gameId: sid,
+              game_id: sid,
+              coverImage: updated.cover_image,
+              cover_image: updated.cover_image,
+              backgroundImage: updated.background_image,
+              background_image: updated.background_image,
+              logoImage: updated.logo_image,
+              logo_image: updated.logo_image,
+              iconImage: updated.icon_image,
+              icon_image: updated.icon_image,
+            }).catch(() => {});
+          }
+        }
+        setGames((prev) =>
+          prev.map((g) =>
+            allGroupIds.includes(g.id)
+              ? {
+                  ...g,
+                  cover_image: updated.cover_image,
+                  background_image: updated.background_image,
+                  logo_image: updated.logo_image,
+                  icon_image: updated.icon_image,
+                }
+              : g
+          )
+        );
+      } else {
+        setGames((prev) =>
+          prev.map((g) => (g.id === updated.id ? { ...g, ...updated } : g))
+        );
+      }
     } catch (err: any) {
       console.error("Failed to apply artwork:", err);
     }
@@ -1178,11 +1490,13 @@ export function App() {
         screenshots: [],
         ...partialGame,
       };
-      await invoke("save_game", { game: newGame });
+      const saved = await invoke<Game>("save_game", { game: newGame });
       const list = await invoke<Game[]>("get_games");
       setGames(list);
-      const target = list.find((g) => g.title.toLowerCase() === (newGame.title || "").toLowerCase()) || newGame;
-      handleSelectGame(target.id);
+      const targetId =
+        saved?.id ||
+        (list.find((g) => g.title.toLowerCase() === (newGame.title || "").toLowerCase()) || newGame).id;
+      handleSelectGame(targetId);
     } catch (err) {
       console.error("Failed to add manual game:", err);
     }
@@ -1289,19 +1603,39 @@ export function App() {
 
   // Filter and sort games
   const filteredGames = useMemo(() => {
-    const list = games.filter((g) => {
+    // 1. Merge duplicate titles across platforms first so all platform copies (siblings) are preserved
+    const mergedList = mergeDuplicateGames(
+      games,
+      appConfig.merge_duplicates ?? true,
+      appConfig.unmerged_game_ids ?? []
+    );
+
+    // 2. Filter merged titles
+    const list = mergedList.filter((g) => {
       if (showHiddenOnly) {
         if (!g.is_hidden) return false;
       } else if (!showHiddenGames && g.is_hidden) {
         return false;
       }
-      if (statusFilter === "installed" && !g.is_installed) return false;
-      if (statusFilter === "uninstalled" && g.is_installed) return false;
+
+      const allCopies = [g, ...(g.sibling_games || [])];
+
+      // Multi-Platform Status Filter:
+      // In "installed": at least one platform copy must be installed
+      if (statusFilter === "installed" && !allCopies.some((c) => c.is_installed)) {
+        return false;
+      }
+      // In "uninstalled": at least one platform copy must be uninstalled
+      if (statusFilter === "uninstalled" && !allCopies.some((c) => !c.is_installed)) {
+        return false;
+      }
+
       if (showFavoritesOnly && !g.is_favorite) return false;
 
       // Filter by Tags / Genres
       if (selectedGenres.length > 0) {
-        const hasGenre = g.genres.some((genre) =>
+        const allGenres = Array.from(new Set(allCopies.flatMap((c) => c.genres || [])));
+        const hasGenre = allGenres.some((genre) =>
           selectedGenres.includes(genre.trim())
         );
         if (!hasGenre) return false;
@@ -1309,28 +1643,35 @@ export function App() {
 
       // Filter by Developer
       if (selectedDevelopers.length > 0) {
-        const dev = g.developer?.trim() || "";
-        if (!selectedDevelopers.includes(dev)) return false;
+        const hasDev = allCopies.some((c) =>
+          c.developer && selectedDevelopers.includes(c.developer.trim())
+        );
+        if (!hasDev) return false;
       }
 
-      // Filter by Library / Source
+      // Filter by Library / Source:
+      // Match if ANY platform copy matches the selected source(s)
       if (selectedSources.length > 0) {
-        const src = g.source?.trim() || "Manual";
-        if (!selectedSources.includes(src)) return false;
+        const hasSource = allCopies.some((c) => {
+          const src = c.source?.trim() || "Manual";
+          return selectedSources.includes(src);
+        });
+        if (!hasSource) return false;
       }
 
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
         const matchesTitle = g.title.toLowerCase().includes(q);
-        const matchesDev = g.developer?.toLowerCase().includes(q);
-        const matchesGenre = g.genres.some((genre) =>
-          genre.toLowerCase().includes(q)
+        const matchesDev = allCopies.some((c) => c.developer?.toLowerCase().includes(q));
+        const matchesGenre = allCopies.some((c) =>
+          (c.genres || []).some((genre) => genre.toLowerCase().includes(q))
         );
         if (!matchesTitle && !matchesDev && !matchesGenre) return false;
       }
       return true;
     });
 
+    // 3. Sort merged titles
     const sorted = list.sort((a, b) => {
       let cmp = 0;
       switch (sortBy) {
@@ -1344,7 +1685,9 @@ export function App() {
           const aHas = Boolean(a.last_played && a.last_played.trim());
           const bHas = Boolean(b.last_played && b.last_played.trim());
           if (aHas && bHas) {
-            cmp = (a.last_played || "").localeCompare(b.last_played || "");
+            const aMs = parseLastPlayedMs(a.last_played);
+            const bMs = parseLastPlayedMs(b.last_played);
+            cmp = aMs !== bMs ? aMs - bMs : (a.last_played || "").localeCompare(b.last_played || "");
           } else if (aHas && !bHas) {
             cmp = 1;
           } else if (!aHas && bHas) {
@@ -1366,11 +1709,7 @@ export function App() {
       return sortDirection === "asc" ? cmp : -cmp;
     });
 
-    return mergeDuplicateGames(
-      sorted,
-      appConfig.merge_duplicates ?? true,
-      appConfig.unmerged_game_ids ?? []
-    );
+    return sorted;
   }, [
     games,
     statusFilter,
@@ -1468,7 +1807,56 @@ export function App() {
     return () => clearInterval(timer);
   }, [isHunterHubOpen, cycleHunterHero]);
 
+  const handleGridWidthPercentChange = useCallback((val: number) => {
+    setGridWidthPercent(val);
+    try {
+      localStorage.setItem("openplay_grid_width", String(val));
+    } catch {}
+  }, []);
+
+  const handleGamepadLaunchOrInstall = useCallback(
+    (g: Game) => {
+      const hasInstalled =
+        g.is_installed ||
+        (g.sibling_games && g.sibling_games.some((s) => s.is_installed));
+      const isInstalledInContext =
+        statusFilter === "uninstalled" ? false : hasInstalled;
+      if (!isInstalledInContext) {
+        handleInstallGame(g);
+      } else {
+        handleLaunchGame(g);
+      }
+    },
+    [statusFilter]
+  );
+
   return (
+    <GamepadProvider
+      config={appConfig}
+      games={filteredGames}
+      selectedGame={selectedGame || null}
+      onSelectGame={handleSelectGame}
+      onLaunchOrInstallGame={handleGamepadLaunchOrInstall}
+      onOpenContextMenuForGame={handleOpenContextMenu}
+      onCloseContextMenu={handleCloseContextMenu}
+      isContextMenuOpen={Boolean(contextMenu)}
+      isDrawerOpen={isDrawerOpen}
+      onToggleDrawer={() => setIsDrawerOpen((p) => !p)}
+      onCloseDrawer={() => setIsDrawerOpen(false)}
+      statusFilter={statusFilter}
+      onStatusFilterChange={setStatusFilter}
+      viewMode={viewMode}
+      onViewModeChange={setViewMode}
+      cardWidth={cardWidth}
+      onCardWidthChange={handleCardWidthChange}
+      gridWidthPercent={gridWidthPercent}
+      onGridWidthPercentChange={handleGridWidthPercentChange}
+      searchQuery={searchQuery}
+      onSearchChange={setSearchQuery}
+      isRunningOrLaunching={
+        runningGameIds.length > 0 || isLaunchingId !== null
+      }
+    >
     <div
       data-theme-part="workspace-root"
       className={`h-screen w-screen flex flex-col bg-[#07080c] text-slate-100 overflow-hidden relative font-sans select-none ${
@@ -1597,6 +1985,7 @@ export function App() {
                   onContextMenu={handleOpenContextMenu}
                   groupBy={groupBy}
                   achievementSummaryMap={achievementSummaryMap}
+                  statusFilter={statusFilter}
                 />
                 <PosterZoomSlider
                   cardWidth={cardWidth}
@@ -1612,6 +2001,7 @@ export function App() {
                   <GameDetails
                     game={selectedGame}
                     onLaunch={handleLaunchGame}
+                    onInstall={handleInstallGame}
                     onStop={handleStopGame}
                     onToggleFavorite={handleToggleFavorite}
                     onOpenEdit={(g) => setEditingGame(g)}
@@ -1627,12 +2017,15 @@ export function App() {
                     onOpenContextMenu={handleOpenContextMenu}
                     onOpenSteamGridDB={(g) => setSteamGridDBGame(g)}
                     onOpenTrailers={(g) => setTrailerGame(g)}
+                    onOpenSaveManager={(g) => setSaveManagerGame(g)}
+                    saveRefreshNonce={saveRefreshNonce}
                     selectedGenres={selectedGenres}
                     onToggleGenre={handleToggleGenre}
                     selectedDevelopers={selectedDevelopers}
                     onToggleDeveloper={handleToggleDeveloper}
                     selectedSources={selectedSources}
                     onToggleSource={handleToggleSource}
+                    statusFilter={statusFilter}
                     trailerAutoplay={appConfig.trailer_autoplay ?? true}
                     trailerMuted={appConfig.trailer_muted ?? true}
                     lastPlayedDateFormat={appConfig.last_played_date_format ?? "date_and_time"}
@@ -1658,6 +2051,7 @@ export function App() {
                 onContextMenu={handleOpenContextMenu}
                 groupBy={groupBy}
                 achievementSummaryMap={achievementSummaryMap}
+                statusFilter={statusFilter}
               />
               <PosterZoomSlider
                 cardWidth={cardWidth}
@@ -1668,7 +2062,13 @@ export function App() {
             </div>
           ) : (
             /* List View */
-            <div key="list" data-theme-part="workspace-table" className="flex-1 overflow-y-auto p-4 bg-transparent animate-view-fade">
+            <div
+              key="list"
+              data-theme-part="workspace-table"
+              data-gamepad-zone="game-grid"
+              data-gamepad-scroll="game-grid"
+              className="flex-1 overflow-y-auto p-4 bg-transparent animate-view-fade"
+            >
             <table className="w-full text-left text-xs text-slate-300">
               <thead className="text-[11px] uppercase tracking-wider text-slate-500 border-b border-[#1f2436]">
                 <tr>
@@ -1684,6 +2084,8 @@ export function App() {
                 {filteredGames.map((g) => (
                   <tr
                     key={g.id}
+                    data-gamepad-card-id={g.id}
+                    data-gamepad-atomic="true"
                     onClick={() => {
                       handleSelectGame(g.id);
                       setViewMode("split");
@@ -1715,15 +2117,25 @@ export function App() {
                       </span>
                     </td>
                     <td className="py-2.5 px-3 text-right">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleLaunchGame(g);
-                        }}
-                        className="px-3 py-1 theme-accent-subtle-bg hover:opacity-90 theme-accent-text border border-[var(--app-accent-color)]/40 rounded text-xs font-semibold cursor-pointer"
-                      >
-                        Play
-                      </button>
+                      {(() => {
+                        const hasInstalled = g.is_installed || (g.sibling_games && g.sibling_games.some((s) => s.is_installed));
+                        const isInstalledInContext = statusFilter === "uninstalled" ? false : hasInstalled;
+                        return (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (!isInstalledInContext) {
+                                handleInstallGame(g);
+                              } else {
+                                handleLaunchGame(g);
+                              }
+                            }}
+                            className="px-3 py-1 theme-accent-subtle-bg hover:opacity-90 theme-accent-text border border-[var(--app-accent-color)]/40 rounded text-xs font-semibold cursor-pointer"
+                          >
+                            {isInstalledInContext ? "Play" : "Install"}
+                          </button>
+                        );
+                      })()}
                     </td>
                   </tr>
                 ))}
@@ -1763,7 +2175,12 @@ export function App() {
         initialTab={libraryManagerTab}
         onRefreshGames={handleReloadGames}
         onGameAdded={(newGame) => {
-          setGames((prev) => [newGame, ...prev]);
+          setGames((prev) => {
+            const exists = prev.some((g) => g.id === newGame.id);
+            return exists
+              ? prev.map((g) => (g.id === newGame.id ? newGame : g))
+              : [newGame, ...prev];
+          });
           handleSelectGame(newGame.id);
         }}
         steamIntegration={steamIntegration}
@@ -1809,6 +2226,7 @@ export function App() {
         onClose={() => setEditingGame(null)}
         onSave={handleSaveGame}
         onOpenSteamGridDB={(g) => setSteamGridDBGame(g)}
+        onOpenSaveManager={(g) => setSaveManagerGame(g)}
         onRemoveGame={handleRemoveGame}
       />
 
@@ -1840,6 +2258,9 @@ export function App() {
       <ThemesManagerModal
         isOpen={isThemesOpen}
         onClose={() => setIsThemesOpen(false)}
+        onThemeChanged={(theme) => {
+          setAppConfig((prev) => ({ ...prev, active_theme_id: theme.manifest.id }));
+        }}
       />
 
       {/* Plugins Manager Modal */}
@@ -1859,6 +2280,7 @@ export function App() {
           y={contextMenu.y}
           onClose={handleCloseContextMenu}
           onLaunch={handleLaunchGame}
+          onInstall={handleInstallGame}
           onStop={handleStopGame}
           isRunning={runningGameIds.includes(contextMenu.game.id)}
           isLaunching={isLaunchingId === contextMenu.game.id}
@@ -1870,6 +2292,7 @@ export function App() {
           onRefreshGame={handleRefreshGameLive}
           isRefreshing={refreshingGameIds.includes(contextMenu.game.id)}
           onOpenEdit={(g) => setEditingGame(g)}
+          onOpenSaveManager={(g) => setSaveManagerGame(g)}
           onRemoveGame={handleRemoveGame}
           onToggleHide={handleToggleHideGame}
           onUnmerge={handleUnmergeGame}
@@ -1897,6 +2320,54 @@ export function App() {
           onSaveTrailers={handleSaveTrailersGlobal}
         />
       )}
+
+      {/* Save Location & Cloud Save Manager Modal */}
+      <SaveManagerModal
+        game={saveManagerGame}
+        isOpen={!!saveManagerGame}
+        onClose={() => setSaveManagerGame(null)}
+        onOpenCloudSettings={() => handleOpenSettings("backup")}
+        onGameUpdated={(updated) => {
+          setGames((prev) =>
+            prev.map((g) => (g.id === updated.id ? { ...g, ...updated } : g))
+          );
+          setSaveManagerGame((curr) =>
+            curr && curr.id === updated.id ? { ...curr, ...updated } : curr
+          );
+        }}
+        onSaveStateChanged={() => setSaveRefreshNonce((n) => n + 1)}
+      />
+
+      {/* Pre-Launch Newer Peer Cloud Save Prompt */}
+      <NewerCloudSaveModal
+        game={newerSavePrompt?.game ?? null}
+        snapshot={newerSavePrompt?.snapshot ?? null}
+        isOpen={!!newerSavePrompt}
+        onClose={() => setNewerSavePrompt(null)}
+        onLoadAndPlay={async () => {
+          if (!newerSavePrompt) return;
+          const { game: g, actionId, snapshot } = newerSavePrompt;
+          await invoke("restore_cloud_save_snapshot", {
+            gameId: g.id,
+            snapshotId: snapshot.id,
+          });
+          setSaveRefreshNonce((n) => n + 1);
+          setNewerSavePrompt(null);
+          await handleLaunchGame(g, actionId, true);
+        }}
+        onOpenSaveManager={() => {
+          if (!newerSavePrompt) return;
+          const g = newerSavePrompt.game;
+          setNewerSavePrompt(null);
+          setSaveManagerGame(g);
+        }}
+        onLaunchAnyway={() => {
+          if (!newerSavePrompt) return;
+          const { game: g, actionId } = newerSavePrompt;
+          setNewerSavePrompt(null);
+          handleLaunchGame(g, actionId, true);
+        }}
+      />
 
       {/* Floating Full Library Refresh Progress Widget */}
       {fullRefreshProgress && (
@@ -1932,8 +2403,16 @@ export function App() {
           </div>
         </div>
       )}
+
+      {/* Anti-Softlock Emergency Recovery Banner */}
+      {showEmergencyResetToast && (
+        <div id="openplay-emergency-toast">
+          <span>🛡️ Theme reset to OpenPlay Default (Ctrl+Shift+F8)</span>
+        </div>
+      )}
       </div>
     </div>
+    </GamepadProvider>
   );
 }
 

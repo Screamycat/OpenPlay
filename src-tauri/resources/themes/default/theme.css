@@ -1,0 +1,63 @@
+/* OpenPlay Default Theme CSS
+ * High-performance dark glassmorphic styling
+ */
+:root {
+  --openplay-theme-id: "default";
+}
+
+/* 1. Theme-Specific Surface & Accent Tokens */
+[data-theme-id="default"] {
+  --theme-surface-glow: color-mix(in srgb, var(--app-accent-color, #783efe) 20%, transparent);
+}
+
+/* 2. Game Grid & Card Styling */
+[data-theme-part="game-card"] {
+  border-radius: var(--theme-card-radius, 16px);
+  aspect-ratio: var(--theme-card-aspect, 2 / 3);
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s ease;
+}
+
+[data-theme-part="game-card"]:hover {
+  transform: translateY(-2px) scale(1.02);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.8), 0 0 20px color-mix(in srgb, var(--app-accent-color, #783efe) calc(var(--theme-card-glow, 1) * 35%), transparent);
+}
+
+/* 3. Navigation Bar Styling */
+[data-theme-part="top-nav"] {
+  background-color: color-mix(in srgb, #000000 35%, transparent);
+  backdrop-filter: blur(var(--theme-glass-blur, 24px));
+  -webkit-backdrop-filter: blur(var(--theme-glass-blur, 24px));
+  border-bottom: 1px solid var(--theme-border-color, rgba(255, 255, 255, 0.08));
+}
+
+/* 4. Hero Banner & Details Styling */
+[data-theme-part="hero-banner"] {
+  aspect-ratio: var(--theme-hero-aspect, 96 / 31);
+}
+
+[data-theme-part="hero-title-logo"] {
+  width: var(--theme-logo-max-w, 50%);
+  max-width: var(--theme-logo-max-w, 50%);
+  height: var(--theme-logo-max-h, 65%);
+  max-height: var(--theme-logo-max-h, 65%);
+}
+
+/* 5. Modals & Dialogs */
+[data-theme-part="modal-backdrop"] {
+  background-color: color-mix(in srgb, #000000 var(--modal-backdrop-opacity, 45%), transparent);
+  backdrop-filter: blur(var(--modal-backdrop-blur, 8px));
+  -webkit-backdrop-filter: blur(var(--modal-backdrop-blur, 8px));
+}
+
+[data-theme-part="modal-container"] {
+  background-color: color-mix(in srgb, var(--app-panel-tint, #0e0e11) 97%, transparent);
+  border: 1px solid var(--theme-border-color, rgba(255, 255, 255, 0.1));
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.85);
+}
+
+[data-theme-part="drawer"] {
+  background-color: color-mix(in srgb, var(--app-panel-tint, #0e0e11) 92%, transparent);
+  backdrop-filter: blur(var(--theme-glass-blur, 24px));
+  -webkit-backdrop-filter: blur(var(--theme-glass-blur, 24px));
+  border-right: 1px solid var(--theme-border-color, rgba(255, 255, 255, 0.1));
+}

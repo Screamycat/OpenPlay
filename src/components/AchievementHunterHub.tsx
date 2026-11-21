@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Game } from "../types/game";
 import { Achievement, HunterProfile } from "../types/achievement";
@@ -47,35 +47,43 @@ export const AchievementHunterHub: React.FC<AchievementHunterHubProps> = ({
     gameCover?: string | null;
   } | null>(null);
 
+  const isSyncingRef = useRef(false);
+
   const loadHunterProfile = async (forceSync = false) => {
+    if (isSyncingRef.current) return;
     try {
       if (forceSync) {
+        isSyncingRef.current = true;
         setIsSyncingAll(true);
-        const synced = await invoke<HunterProfile>("sync_all_achievements");
-        setProfile(synced);
+        try {
+          const synced = await invoke<HunterProfile>("sync_all_achievements");
+          if (synced && typeof synced === "object" && Array.isArray(synced.games_summaries)) {
+            setProfile(synced);
+          } else {
+            const data = await invoke<HunterProfile>("get_hunter_profile");
+            if (data && typeof data === "object" && Array.isArray(data.games_summaries)) {
+              setProfile(data);
+            }
+          }
+        } catch (err) {
+          console.error("Failed to sync all achievements:", err);
+          const data = await invoke<HunterProfile>("get_hunter_profile");
+          if (data && typeof data === "object" && Array.isArray(data.games_summaries)) {
+            setProfile(data);
+          }
+        }
         return;
       }
 
       setIsLoading(true);
-      let data = await invoke<HunterProfile>("get_hunter_profile");
-      setProfile(data);
-
-      // If library has Steam, Epic, GOG, Xbox, EA, or RetroAchievements games but no achievements cached yet, trigger background sync
-      if (
-        data.total_achievements_count === 0 &&
-        games.some((g) =>
-          ["steam", "epic", "gog", "xbox", "ea app", "ea", "retroachievements"].includes(
-            g.source.toLowerCase()
-          )
-        )
-      ) {
-        setIsSyncingAll(true);
-        const synced = await invoke<HunterProfile>("sync_all_achievements");
-        setProfile(synced);
+      const data = await invoke<HunterProfile>("get_hunter_profile");
+      if (data && typeof data === "object" && Array.isArray(data.games_summaries)) {
+        setProfile(data);
       }
     } catch (err) {
       console.error("Failed to load hunter profile:", err);
     } finally {
+      isSyncingRef.current = false;
       setIsLoading(false);
       setIsSyncingAll(false);
     }
@@ -83,11 +91,11 @@ export const AchievementHunterHub: React.FC<AchievementHunterHubProps> = ({
 
   useEffect(() => {
     loadHunterProfile();
-  }, [games]);
+  }, []);
 
   // Tier filtering for catalog
   const filteredGames = useMemo(() => {
-    if (!profile) return [];
+    if (!profile || typeof profile !== "object" || !Array.isArray(profile.games_summaries)) return [];
     return profile.games_summaries.filter((s) => {
       // Search query
       if (searchQuery.trim()) {
@@ -160,15 +168,20 @@ export const AchievementHunterHub: React.FC<AchievementHunterHubProps> = ({
     rarest_achievements = [],
     almost_there_games = [],
     games_summaries = [],
-  } = profile || {};
+  } = (profile && typeof profile === "object") ? profile : {};
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-transparent overflow-y-auto animate-view-fade relative">
+    <div
+      data-gamepad-zone="achievement-hub"
+      data-gamepad-scroll="achievement-hub"
+      className="flex-1 flex flex-col h-full bg-transparent overflow-y-auto animate-view-fade relative"
+    >
       {/* Top Header Bar */}
       <div className="sticky top-0 z-30 bg-[#07080c]/60 backdrop-blur-xl border-b border-white/10 px-8 py-3.5 flex items-center justify-between">
         <div className="flex items-center space-x-4">
           <button
             onClick={onBackToLibrary}
+            data-gamepad-close="true"
             className="flex items-center space-x-2 px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white font-semibold text-xs transition-all cursor-pointer shadow-sm"
           >
             <ArrowLeft className="w-3.5 h-3.5" />
@@ -320,6 +333,8 @@ export const AchievementHunterHub: React.FC<AchievementHunterHubProps> = ({
               {rarest_achievements.map((ach) => (
                 <div
                   key={`${ach.game_id}-${ach.api_name}`}
+                  role="button"
+                  data-gamepad-atomic="true"
                   onClick={() => {
                     const matched = games.find((g) => g.id === ach.game_id);
                     setSelectedAchievement({
@@ -388,6 +403,8 @@ export const AchievementHunterHub: React.FC<AchievementHunterHubProps> = ({
                 return (
                   <div
                     key={g.game_id}
+                    role="button"
+                    data-gamepad-atomic="true"
                     onClick={() => {
                       const matched = games.find((item) => item.id === g.game_id);
                       if (matched) setInspectGame(matched);
@@ -468,7 +485,10 @@ export const AchievementHunterHub: React.FC<AchievementHunterHubProps> = ({
           </div>
 
           {/* Tier Filter Tabs */}
-          <div className="flex items-center space-x-1.5 overflow-x-auto pb-1">
+          <div
+            data-gamepad-tabs="true"
+            className="flex items-center space-x-1.5 overflow-x-auto pb-1"
+          >
             {[
               { id: "all", label: `All (${games_summaries.length})` },
               { id: "perfect", label: `🏆 Perfect (${perfect_games_count})` },
@@ -510,6 +530,7 @@ export const AchievementHunterHub: React.FC<AchievementHunterHubProps> = ({
             ].map((t) => (
               <button
                 key={t.id}
+                data-gamepad-tab-active={tierFilter === t.id ? "true" : undefined}
                 onClick={() => setTierFilter(t.id as TierFilter)}
                 className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer backdrop-blur-md ${
                   tierFilter === t.id
@@ -535,6 +556,8 @@ export const AchievementHunterHub: React.FC<AchievementHunterHubProps> = ({
                 return (
                   <div
                     key={g.game_id}
+                    role="button"
+                    data-gamepad-atomic="true"
                     onClick={() => {
                       if (matchedGame) setInspectGame(matchedGame);
                     }}
@@ -619,6 +642,7 @@ export const AchievementHunterHub: React.FC<AchievementHunterHubProps> = ({
         >
           <div
             data-theme-part="modal-container"
+            data-gamepad-zone="modal"
             className="theme-modal-container rounded-2xl w-full max-w-4xl max-h-[85vh] flex flex-col overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
@@ -631,13 +655,17 @@ export const AchievementHunterHub: React.FC<AchievementHunterHubProps> = ({
               </div>
               <button
                 onClick={() => setInspectGame(null)}
+                data-gamepad-close="true"
                 className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="p-6 overflow-y-auto flex-1">
+            <div
+              data-gamepad-scroll="achievement-inspector"
+              className="p-6 overflow-y-auto flex-1"
+            >
               <AchievementsTab game={inspectGame} />
             </div>
           </div>

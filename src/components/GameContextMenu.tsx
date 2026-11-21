@@ -15,6 +15,7 @@ import {
   Eye,
   EyeOff,
   Layers,
+  Cloud,
 } from "lucide-react";
 
 export interface GameContextMenuProps {
@@ -23,6 +24,7 @@ export interface GameContextMenuProps {
   y: number;
   onClose: () => void;
   onLaunch?: (game: Game, actionId?: string) => void;
+  onInstall?: (game: Game) => void;
   onStop?: (game: Game) => void;
   onToggleHide?: (game: Game) => void;
   isRunning?: boolean;
@@ -35,6 +37,7 @@ export interface GameContextMenuProps {
   onRefreshGame?: (id: string) => void;
   isRefreshing?: boolean;
   onOpenEdit: (game: Game) => void;
+  onOpenSaveManager?: (game: Game) => void;
   onRemoveGame?: (game: Game) => void;
   onUnmerge?: (game: Game) => void;
   onMerge?: (game: Game, candidate: Game) => void;
@@ -47,6 +50,7 @@ export const GameContextMenu: React.FC<GameContextMenuProps> = ({
   y,
   onClose,
   onLaunch,
+  onInstall,
   onStop,
   isRunning = false,
   isLaunching = false,
@@ -55,6 +59,7 @@ export const GameContextMenu: React.FC<GameContextMenuProps> = ({
   onRefreshGame,
   isRefreshing = false,
   onOpenEdit,
+  onOpenSaveManager,
   onRemoveGame,
   onToggleHide,
   onUnmerge,
@@ -62,8 +67,30 @@ export const GameContextMenu: React.FC<GameContextMenuProps> = ({
   mergeCandidate,
 }) => {
   const menuRef = useRef<HTMLDivElement>(null);
+  const actionsSubmenuRef = useRef<HTMLDivElement>(null);
 
   const [showActionsSubmenu, setShowActionsSubmenu] = useState(false);
+
+  // Auto-open Play Actions submenu when controller focus lands on it, and close when moving to other menu items
+  useEffect(() => {
+    const menuEl = menuRef.current;
+    if (!menuEl) return;
+
+    const handleGamepadFocus = (e: Event) => {
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      if (actionsSubmenuRef.current?.contains(target)) {
+        setShowActionsSubmenu(true);
+      } else {
+        setShowActionsSubmenu(false);
+      }
+    };
+
+    menuEl.addEventListener("gamepadfocus", handleGamepadFocus);
+    return () => {
+      menuEl.removeEventListener("gamepadfocus", handleGamepadFocus);
+    };
+  }, []);
 
   // Keep menu within screen boundaries
   const menuWidth = 230;
@@ -133,6 +160,7 @@ export const GameContextMenu: React.FC<GameContextMenuProps> = ({
   return (
     <div
       ref={menuRef}
+      data-gamepad-zone="popover"
       style={{ left: `${clampedX}px`, top: `${clampedY}px` }}
       className="fixed w-56 theme-panel-surface backdrop-blur-2xl border border-white/10 rounded-2xl shadow-2xl shadow-black/80 ring-1 ring-white/5 p-1.5 z-50 text-xs space-y-0.5 animate-in fade-in zoom-in-95 duration-100 select-none"
       onClick={(e) => e.stopPropagation()}
@@ -167,12 +195,15 @@ export const GameContextMenu: React.FC<GameContextMenuProps> = ({
           {/* Play Actions Submenu */}
           {game.play_actions && game.play_actions.length > 0 && (
             <div
+              ref={actionsSubmenuRef}
               className="relative"
               onMouseEnter={() => setShowActionsSubmenu(true)}
               onMouseLeave={() => setShowActionsSubmenu(false)}
             >
               <button
                 type="button"
+                data-gamepad-submenu-trigger="true"
+                onClick={() => setShowActionsSubmenu((prev) => !prev)}
                 className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-left text-zinc-300 hover:text-white hover:bg-white/[0.08] transition-colors cursor-pointer"
               >
                 <div className="flex items-center space-x-2.5">
@@ -184,7 +215,10 @@ export const GameContextMenu: React.FC<GameContextMenuProps> = ({
 
               {/* Submenu Popover */}
               {showActionsSubmenu && (
-                <div className="absolute left-[calc(100%+4px)] top-0 w-56 theme-panel-surface backdrop-blur-2xl border border-white/10 rounded-2xl shadow-2xl p-1.5 z-50 text-xs space-y-0.5 animate-in fade-in zoom-in-95 duration-100">
+                <div
+                  data-gamepad-submenu="true"
+                  className="absolute left-[calc(100%+4px)] top-0 w-56 theme-panel-surface backdrop-blur-2xl border border-white/10 rounded-2xl shadow-2xl p-1.5 z-50 text-xs space-y-0.5 animate-in fade-in zoom-in-95 duration-100"
+                >
                   <div className="px-2.5 py-1 text-[10px] uppercase font-bold tracking-wider text-zinc-500">
                     Configurations
                   </div>
@@ -228,7 +262,11 @@ export const GameContextMenu: React.FC<GameContextMenuProps> = ({
         <button
           onClick={() => {
             onClose();
-            if (onLaunch) onLaunch(game);
+            if (onInstall) {
+              onInstall(game);
+            } else {
+              invoke("install_game", { gameId: game.id }).catch(console.error);
+            }
           }}
           className="w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl text-left theme-accent-text hover:text-white hover:bg-[var(--app-accent-color)]/20 transition-colors cursor-pointer"
         >
@@ -370,6 +408,21 @@ export const GameContextMenu: React.FC<GameContextMenuProps> = ({
         >
           <FolderOpen className="w-4 h-4 text-zinc-400 shrink-0" />
           <span>Open Game Folder</span>
+        </button>
+      )}
+
+      {/* Save Manager & Cloud Saves */}
+      {onOpenSaveManager && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpenSaveManager(game);
+            onClose();
+          }}
+          className="w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl text-left text-zinc-200 hover:text-white hover:bg-white/[0.08] transition-colors cursor-pointer"
+        >
+          <Cloud className="w-4 h-4 theme-accent-text shrink-0" />
+          <span>Save Manager &amp; Cloud Saves</span>
         </button>
       )}
 

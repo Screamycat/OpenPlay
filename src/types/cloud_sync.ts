@@ -10,6 +10,8 @@ export interface SyncSummary {
   games_pulled: number;
   games_pushed: number;
   games_deleted: number;
+  extensions_synced?: number;
+  settings_synced?: boolean;
   peer_devices_count: number;
   timestamp: string;
   message: string;
@@ -23,6 +25,9 @@ export interface CloudSyncStatus {
   last_sync_time?: string | null;
   peer_count: number;
   is_folder_valid: boolean;
+  sync_settings: boolean;
+  sync_extensions: boolean;
+  sync_api_keys: boolean;
 }
 
 export interface PeerDeviceInfo {

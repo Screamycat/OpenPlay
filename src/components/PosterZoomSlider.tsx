@@ -15,7 +15,10 @@ export const PosterZoomSlider: React.FC<PosterZoomSliderProps> = ({
   onChange,
 }) => {
   return (
-    <div className="h-8 bg-transparent px-4 flex items-center justify-center space-x-2 select-none opacity-40 hover:opacity-100 transition-opacity">
+    <div
+      data-gamepad-ignore-subtree="true"
+      className="poster-zoom-slider h-8 bg-transparent px-4 flex items-center justify-center space-x-2 select-none opacity-40 hover:opacity-100 transition-opacity"
+    >
       <button
         onClick={() => onChange(Math.max(minWidth, cardWidth - 20))}
         className="text-slate-400 hover:text-white transition-colors p-1 cursor-pointer"

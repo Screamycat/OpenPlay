@@ -1,17 +1,21 @@
 pub mod autostart;
 pub mod cloud_sync;
+pub mod daemon;
 pub mod db;
 pub mod emulator;
+pub mod gamepad;
 pub mod launcher;
 pub mod metadata;
 pub mod models;
 pub mod plugins;
+pub mod saves;
 pub mod scanner;
 pub mod themes;
 
 use autostart::AutostartManager;
 use db::Database;
 use emulator::EmulatorService;
+use gamepad::{FsDirectoryListing, FsRootEntry, NativeGamepadSnapshot};
 use launcher::GameLauncher;
 use metadata::hltb::{HltbData, HltbFetcher};
 use metadata::steam::{SteamMetadataFetcher, SteamNewsItem};
@@ -20,9 +24,10 @@ use metadata::epic::EpicMetadataFetcher;
 use metadata::retroachievements::RetroAchievementsClient;
 use metadata::scores::ScoreEnrichmentEngine;
 use models::{
-    Achievement, AppConfig, BackupInfo, CloudSyncStatus, ConfiguredConsole, ConnectedLibraryItem, DiscoveredRom,
-    EmulatorProfile, Game, GameAchievementSummary, GameTrailer, HunterProfile, ImportBackupSummary,
-    LibraryIntegration, PeerDeviceInfo, SyncSummary,
+    Achievement, AppConfig, BackupInfo, CloudSaveActionResult, CloudSavesOverview, CloudSyncStatus,
+    ConfiguredConsole, ConnectedLibraryItem, DiscoveredRom, EmulatorProfile, Game,
+    GameAchievementSummary, GameSaveState, GameTrailer, HunterProfile, ImportBackupSummary,
+    LibraryIntegration, PeerDeviceInfo, PreLaunchSaveCheck, SyncSummary,
 };
 use scanner::steam::SteamScanner;
 use scanner::epic::EpicScanner;
@@ -37,6 +42,7 @@ use tauri::{AppHandle, Emitter, Manager, State, Url, WebviewUrl, WebviewWindowBu
 
 struct AppState {
     db: Arc<Database>,
+    native_gamepad: Arc<std::sync::Mutex<NativeGamepadSnapshot>>,
 }
 
 pub fn is_local_filesystem_path(path: &str) -> bool {
@@ -92,6 +98,9 @@ pub fn check_game_installation_status(game: &Game) -> bool {
             if is_local_filesystem_path(trimmed) && Path::new(trimmed).exists() {
                 return true;
             }
+            if crate::launcher::resolve_executable_command(trimmed).is_some() {
+                return true;
+            }
         }
 
         // Check install_directory
@@ -123,7 +132,9 @@ pub fn check_game_installation_status(game: &Game) -> bool {
                 // If executable exists elsewhere on disk, keep installed
                 if let Some(ref exe) = game.executable_path {
                     let trimmed_exe = exe.trim();
-                    if is_local_filesystem_path(trimmed_exe) && Path::new(trimmed_exe).exists() {
+                    if (is_local_filesystem_path(trimmed_exe) && Path::new(trimmed_exe).exists())
+                        || crate::launcher::resolve_executable_command(trimmed_exe).is_some()
+                    {
                         return true;
                     }
                 }
@@ -131,18 +142,37 @@ pub fn check_game_installation_status(game: &Game) -> bool {
             }
         } else if let Some(ref exe) = game.executable_path {
             let trimmed_exe = exe.trim();
-            if is_local_filesystem_path(trimmed_exe) && !Path::new(trimmed_exe).exists() {
+            if is_local_filesystem_path(trimmed_exe)
+                && !Path::new(trimmed_exe).exists()
+                && crate::launcher::resolve_executable_command(trimmed_exe).is_none()
+            {
                 return false;
             }
+        }
+    } else if let Some(ref exe) = game.executable_path {
+        let trimmed_exe = exe.trim();
+        if !trimmed_exe.is_empty()
+            && ((is_local_filesystem_path(trimmed_exe) && Path::new(trimmed_exe).exists())
+                || crate::launcher::resolve_executable_command(trimmed_exe).is_some())
+        {
+            return true;
         }
     }
 
     game.is_installed
 }
 
-fn sync_and_get_all_games(state: &State<'_, AppState>) -> Result<Vec<Game>, String> {
-    let mut games = state.db.get_all_games()?;
+pub fn sync_and_get_all_games_core(db: &Database) -> Result<Vec<Game>, String> {
+    let mut games = db.get_all_games()?;
     let mut updates = Vec::new();
+    let mut repaired_count = 0;
+
+    let sync_dir_opt: Option<std::path::PathBuf> = db
+        .get_setting("cloud_sync_dir")
+        .ok()
+        .flatten()
+        .filter(|s| !s.trim().is_empty())
+        .map(std::path::PathBuf::from);
 
     for game in &mut games {
         let actual_installed = check_game_installation_status(game);
@@ -150,31 +180,427 @@ fn sync_and_get_all_games(state: &State<'_, AppState>) -> Result<Vec<Game>, Stri
             updates.push((game.id.clone(), actual_installed));
             game.is_installed = actual_installed;
         }
+
+        let is_steam = game.source.eq_ignore_ascii_case("Steam");
+        let appid = if is_steam { game.source_id.as_deref() } else { None };
+
+        let mut changed_art = false;
+
+        // Resolve or repair cover image if dead Windows path, custom:// scheme, or missing Steam CDN
+        let needs_cover_repair = match game.cover_image.as_deref() {
+            None => is_steam && appid.is_some(),
+            Some(s) => s.starts_with("custom://")
+                || (s.len() >= 3 && s.chars().nth(1) == Some(':'))
+                || (!s.starts_with("http") && !std::path::Path::new(s).exists()),
+        };
+        if needs_cover_repair {
+            if let Some(ref sdir) = sync_dir_opt {
+                if let Some(resolved) = cloud_sync::resolve_peer_artwork(sdir, game.cover_image.as_deref(), appid, "cover") {
+                    if game.cover_image.as_deref() != Some(&resolved) {
+                        game.cover_image = Some(resolved);
+                        changed_art = true;
+                    }
+                }
+            } else if let Some(aid) = appid {
+                let cdn = format!("https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/{}/library_600x900.jpg", aid);
+                if game.cover_image.as_deref() != Some(&cdn) {
+                    game.cover_image = Some(cdn);
+                    changed_art = true;
+                }
+            }
+        }
+
+        // Resolve or repair background image
+        let needs_bg_repair = match game.background_image.as_deref() {
+            None => is_steam && appid.is_some(),
+            Some(s) => s.starts_with("custom://")
+                || (s.len() >= 3 && s.chars().nth(1) == Some(':'))
+                || (!s.starts_with("http") && !std::path::Path::new(s).exists()),
+        };
+        if needs_bg_repair {
+            if let Some(ref sdir) = sync_dir_opt {
+                if let Some(resolved) = cloud_sync::resolve_peer_artwork(sdir, game.background_image.as_deref(), appid, "hero") {
+                    if game.background_image.as_deref() != Some(&resolved) {
+                        game.background_image = Some(resolved);
+                        changed_art = true;
+                    }
+                }
+            } else if let Some(aid) = appid {
+                let cdn = format!("https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/{}/library_hero.jpg", aid);
+                if game.background_image.as_deref() != Some(&cdn) {
+                    game.background_image = Some(cdn);
+                    changed_art = true;
+                }
+            }
+        }
+
+        // Resolve or repair logo image
+        let needs_logo_repair = match game.logo_image.as_deref() {
+            None => is_steam && appid.is_some(),
+            Some(s) => s.starts_with("custom://")
+                || (s.len() >= 3 && s.chars().nth(1) == Some(':'))
+                || (!s.starts_with("http") && !std::path::Path::new(s).exists()),
+        };
+        if needs_logo_repair {
+            if let Some(ref sdir) = sync_dir_opt {
+                if let Some(resolved) = cloud_sync::resolve_peer_artwork(sdir, game.logo_image.as_deref(), appid, "logo") {
+                    if game.logo_image.as_deref() != Some(&resolved) {
+                        game.logo_image = Some(resolved);
+                        changed_art = true;
+                    }
+                }
+            } else if let Some(aid) = appid {
+                let cdn = format!("https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/{}/logo.png", aid);
+                if game.logo_image.as_deref() != Some(&cdn) {
+                    game.logo_image = Some(cdn);
+                    changed_art = true;
+                }
+            }
+        }
+
+        // Upgrade heavy animated SteamGridDB WebP/APNG files (up to 49MB compressed / 1.3GB uncompressed RGBA in WebKitGTK)
+        // to their lightweight hardware-accelerated .webm streams (~58KB - 2.8MB)
+        let upgrade_sgdb_to_webm = |url: &str| -> Option<String> {
+            let trimmed = url.trim();
+            if !trimmed.contains("steamgriddb.com") {
+                return None;
+            }
+            let file_part = trimmed.rsplit('/').next()?.split('?').next()?;
+            let (hash, ext) = file_part.rsplit_once('.')?;
+            let ext_lower = ext.to_ascii_lowercase();
+            let is_animated_candidate = ext_lower == "webp"
+                || matches!(
+                    hash,
+                    "5164b46830eb9b286b4e6dd514d84d8c"
+                        | "1bb6ff4f6f52891ba537ccb13cab09af"
+                        | "02b293533a7ab5cb9362b406c8e402fd"
+                        | "a14ac55a4f27472c5d894ec1c3c743d2"
+                );
+            if !is_animated_candidate {
+                return None;
+            }
+
+            if trimmed.contains("/hero/") {
+                Some(format!("https://cdn2.steamgriddb.com/hero_thumb/{}.webm", hash))
+            } else if trimmed.contains("/logo/") {
+                Some(format!("https://cdn2.steamgriddb.com/logo_thumb/{}.webm", hash))
+            } else if trimmed.contains("/grid/") {
+                Some(format!("https://cdn2.steamgriddb.com/thumb/{}.webm", hash))
+            } else {
+                None
+            }
+        };
+
+        if let Some(ref current) = game.cover_image {
+            if let Some(upgraded) = upgrade_sgdb_to_webm(current) {
+                game.cover_image = Some(upgraded);
+                changed_art = true;
+            }
+        }
+        if let Some(ref current) = game.background_image {
+            if let Some(upgraded) = upgrade_sgdb_to_webm(current) {
+                game.background_image = Some(upgraded);
+                changed_art = true;
+            }
+        }
+        if let Some(ref current) = game.logo_image {
+            if let Some(upgraded) = upgrade_sgdb_to_webm(current) {
+                game.logo_image = Some(upgraded);
+                changed_art = true;
+            }
+        }
+
+        if changed_art {
+            let _ = db.save_game_exact(game);
+            repaired_count += 1;
+        }
     }
 
     if !updates.is_empty() {
-        let _ = state.db.batch_update_game_installed(&updates);
+        let _ = db.batch_update_game_installed(&updates);
+    }
+
+    if repaired_count > 0 {
+        println!("[Artwork Engine] Restored and repaired artwork for {} games", repaired_count);
     }
 
     Ok(games)
 }
 
-fn normalize_title_for_match(title: &str) -> String {
-    title
-        .to_lowercase()
-        .chars()
-        .filter(|c| c.is_alphanumeric())
-        .collect()
+pub fn normalize_title_for_match(title: &str) -> String {
+    ScoreEnrichmentEngine::normalize_title(title)
+}
+
+/// Checks if two game titles match either by exact alphanumeric normalization or edition-stripped normalization.
+pub fn titles_match_for_relink(t1: &str, t2: &str) -> bool {
+    let raw1: String = t1.to_lowercase().chars().filter(|c| c.is_alphanumeric()).collect();
+    let raw2: String = t2.to_lowercase().chars().filter(|c| c.is_alphanumeric()).collect();
+    if !raw1.is_empty() && raw1 == raw2 {
+        return true;
+    }
+    let norm1 = ScoreEnrichmentEngine::normalize_title(t1);
+    let norm2 = ScoreEnrichmentEngine::normalize_title(t2);
+    !norm1.is_empty() && norm1 == norm2
+}
+
+/// Finds the best existing game candidate to re-link when adding/importing a local executable, manual entry, or ROM.
+pub fn find_matching_existing_game_idx(existing_games: &[Game], incoming: &Game) -> Option<usize> {
+    // 1. Exact ID match
+    if let Some(idx) = existing_games.iter().position(|eg| eg.id == incoming.id) {
+        return Some(idx);
+    }
+
+    // 2. Exact executable_path match (non-empty) — also verify titles match so an
+    //    unrelated entry with a stale/corrupted path isn't hijacked.
+    if let Some(ref in_exe) = incoming.executable_path {
+        let in_exe_trimmed = in_exe.trim();
+        if !in_exe_trimmed.is_empty() {
+            if let Some(idx) = existing_games.iter().position(|eg| {
+                titles_match_for_relink(&eg.title, &incoming.title)
+                    && eg
+                        .executable_path
+                        .as_deref()
+                        .map(|e| !e.trim().is_empty() && e.trim().eq_ignore_ascii_case(in_exe_trimmed))
+                        .unwrap_or(false)
+            }) {
+                return Some(idx);
+            }
+        }
+    }
+
+    // 3. Exact install_directory match (non-empty) — only when titles also match so distinct games
+    //    placed in a shared folder (e.g. ~/Games/Windows) are never merged into each other.
+    if let Some(ref in_dir) = incoming.install_directory {
+        let in_dir_trimmed = in_dir.trim();
+        if !in_dir_trimmed.is_empty() {
+            if let Some(idx) = existing_games.iter().position(|eg| {
+                titles_match_for_relink(&eg.title, &incoming.title)
+                    && eg
+                        .install_directory
+                        .as_deref()
+                        .map(|d| !d.trim().is_empty() && d.trim().eq_ignore_ascii_case(in_dir_trimmed))
+                        .unwrap_or(false)
+            }) {
+                return Some(idx);
+            }
+        }
+    }
+
+    // 4. Title match (prioritizing uninstalled local/manual/emulation entries, then richness & playtime)
+    let mut candidates: Vec<usize> = existing_games
+        .iter()
+        .enumerate()
+        .filter(|(_, eg)| eg.id != incoming.id && titles_match_for_relink(&eg.title, &incoming.title))
+        .map(|(idx, _)| idx)
+        .collect();
+
+    if candidates.is_empty() {
+        return None;
+    }
+
+    let incoming_is_emu = incoming.source.eq_ignore_ascii_case("Emulation")
+        || incoming.id.starts_with("rom_")
+        || incoming.emulator_id.is_some();
+
+    candidates.sort_by(|&a_idx, &b_idx| {
+        let a = &existing_games[a_idx];
+        let b = &existing_games[b_idx];
+
+        let score = |g: &Game| -> i64 {
+            let mut s: i64 = 0;
+            let src = g.source.trim().to_lowercase();
+            let is_local_or_manual = src == "local"
+                || src == "manual"
+                || g.id.starts_with("local_")
+                || g.id.starts_with("manual_")
+                || g.id.starts_with("playnite_");
+            let is_emu = src == "emulation"
+                || src.contains("retro")
+                || g.id.starts_with("rom_")
+                || g.id.starts_with("ra_")
+                || g.emulator_id.is_some();
+
+            // Prefer matching source category (Emulation vs Local/Manual)
+            if incoming_is_emu && is_emu {
+                s += 10_000;
+            } else if !incoming_is_emu && is_local_or_manual {
+                s += 10_000;
+            }
+
+            // Prefer currently uninstalled entries waiting to be re-linked
+            if !g.is_installed {
+                s += 5_000;
+            }
+
+            // Prefer entries with rich metadata, artwork, and user progress
+            if g.playtime_seconds > 0 {
+                s += 2_000 + (g.playtime_seconds.min(1_000) as i64);
+            }
+            if g.cover_image.as_deref().map(|c| !c.trim().is_empty()).unwrap_or(false) {
+                s += 500;
+            }
+            if g.background_image.as_deref().map(|c| !c.trim().is_empty()).unwrap_or(false) {
+                s += 300;
+            }
+            if g.description.as_deref().map(|c| !c.trim().is_empty()).unwrap_or(false) {
+                s += 300;
+            }
+            if g.notes.as_deref().map(|c| !c.trim().is_empty()).unwrap_or(false) {
+                s += 300;
+            }
+            if g.user_rating.is_some() || g.is_favorite {
+                s += 300;
+            }
+            s
+        };
+
+        score(b).cmp(&score(a))
+    });
+
+    candidates.first().copied()
+}
+
+/// Non-destructively merges an incoming local/manual/ROM game candidate into an existing database entry.
+/// Preserves all existing metadata, artwork, playtime, completion status, ratings, notes, and IDs,
+/// while updating installation paths and filling in any missing fields.
+pub fn merge_incoming_into_existing_game(existing: &Game, incoming: &Game) -> Game {
+    let mut merged = existing.clone();
+
+    if let Some(ref exe) = incoming.executable_path {
+        if !exe.trim().is_empty() {
+            merged.executable_path = Some(exe.clone());
+        }
+    }
+    if let Some(ref dir) = incoming.install_directory {
+        if !dir.trim().is_empty() {
+            merged.install_directory = Some(dir.clone());
+        }
+    }
+    if let Some(ref args) = incoming.launch_arguments {
+        if !args.trim().is_empty() {
+            merged.launch_arguments = Some(args.clone());
+        }
+    }
+    if let Some(size) = incoming.size_on_disk {
+        if size > 0 {
+            merged.size_on_disk = Some(size);
+        }
+    }
+    if let Some(ref emu_id) = incoming.emulator_id {
+        if !emu_id.trim().is_empty() {
+            merged.emulator_id = Some(emu_id.clone());
+        }
+    }
+    for plat in &incoming.platforms {
+        if !plat.trim().is_empty() && !merged.platforms.iter().any(|p| p.eq_ignore_ascii_case(plat)) {
+            merged.platforms.push(plat.clone());
+        }
+    }
+    if !incoming.play_actions.is_empty() && merged.play_actions.is_empty() {
+        merged.play_actions = incoming.play_actions.clone();
+    }
+
+    merged.is_installed = true;
+
+    let is_empty_opt = |opt: &Option<String>| opt.as_deref().map(|s| s.trim().is_empty()).unwrap_or(true);
+
+    if is_empty_opt(&merged.cover_image) && !is_empty_opt(&incoming.cover_image) {
+        merged.cover_image = incoming.cover_image.clone();
+    }
+    if is_empty_opt(&merged.background_image) && !is_empty_opt(&incoming.background_image) {
+        merged.background_image = incoming.background_image.clone();
+    }
+    if is_empty_opt(&merged.logo_image) && !is_empty_opt(&incoming.logo_image) {
+        merged.logo_image = incoming.logo_image.clone();
+    }
+    if is_empty_opt(&merged.icon_image) && !is_empty_opt(&incoming.icon_image) {
+        merged.icon_image = incoming.icon_image.clone();
+    }
+    if is_empty_opt(&merged.developer) && !is_empty_opt(&incoming.developer) {
+        merged.developer = incoming.developer.clone();
+    }
+    if is_empty_opt(&merged.publisher) && !is_empty_opt(&incoming.publisher) {
+        merged.publisher = incoming.publisher.clone();
+    }
+    if is_empty_opt(&merged.description) && !is_empty_opt(&incoming.description) {
+        merged.description = incoming.description.clone();
+    }
+    if is_empty_opt(&merged.release_date) && !is_empty_opt(&incoming.release_date) {
+        merged.release_date = incoming.release_date.clone();
+    }
+    if is_empty_opt(&merged.notes) && !is_empty_opt(&incoming.notes) {
+        merged.notes = incoming.notes.clone();
+    }
+    if is_empty_opt(&merged.series) && !is_empty_opt(&incoming.series) {
+        merged.series = incoming.series.clone();
+    }
+    if is_empty_opt(&merged.age_rating) && !is_empty_opt(&incoming.age_rating) {
+        merged.age_rating = incoming.age_rating.clone();
+    }
+    if is_empty_opt(&merged.region) && !is_empty_opt(&incoming.region) {
+        merged.region = incoming.region.clone();
+    }
+
+    if merged.genres.is_empty() && !incoming.genres.is_empty() {
+        merged.genres = incoming.genres.clone();
+    }
+    if merged.tags.is_empty() && !incoming.tags.is_empty() {
+        merged.tags = incoming.tags.clone();
+    }
+    if merged.categories.is_empty() && !incoming.categories.is_empty() {
+        merged.categories = incoming.categories.clone();
+    }
+    if merged.features.is_empty() && !incoming.features.is_empty() {
+        merged.features = incoming.features.clone();
+    }
+    if merged.links.is_empty() && !incoming.links.is_empty() {
+        merged.links = incoming.links.clone();
+    }
+    if merged.screenshots.is_empty() && !incoming.screenshots.is_empty() {
+        merged.screenshots = incoming.screenshots.clone();
+    }
+    if merged.trailers.is_empty() && !incoming.trailers.is_empty() {
+        merged.trailers = incoming.trailers.clone();
+    }
+
+    if merged.critic_score.is_none() && incoming.critic_score.is_some() {
+        merged.critic_score = incoming.critic_score;
+    }
+    if merged.community_score.is_none() && incoming.community_score.is_some() {
+        merged.community_score = incoming.community_score;
+    }
+    if merged.user_rating.is_none() && incoming.user_rating.is_some() {
+        merged.user_rating = incoming.user_rating;
+    }
+    if merged.hltb_main.is_none() && incoming.hltb_main.is_some() {
+        merged.hltb_main = incoming.hltb_main;
+    }
+    if merged.hltb_extra.is_none() && incoming.hltb_extra.is_some() {
+        merged.hltb_extra = incoming.hltb_extra;
+    }
+    if merged.hltb_completionist.is_none() && incoming.hltb_completionist.is_some() {
+        merged.hltb_completionist = incoming.hltb_completionist;
+    }
+
+    if incoming.playtime_seconds > merged.playtime_seconds {
+        merged.playtime_seconds = incoming.playtime_seconds;
+    }
+    if incoming.is_favorite {
+        merged.is_favorite = true;
+    }
+
+    merged.updated_at = Some(chrono::Utc::now().to_rfc3339());
+    merged
 }
 
 #[tauri::command]
-fn get_games(state: State<'_, AppState>) -> Result<Vec<Game>, String> {
-    sync_and_get_all_games(&state)
+async fn get_games(state: State<'_, AppState>) -> Result<Vec<Game>, String> {
+    sync_and_get_all_games_core(&state.db)
 }
 
 #[tauri::command]
-fn get_all_games(state: State<'_, AppState>) -> Result<Vec<Game>, String> {
-    sync_and_get_all_games(&state)
+async fn get_all_games(state: State<'_, AppState>) -> Result<Vec<Game>, String> {
+    sync_and_get_all_games_core(&state.db)
 }
 
 #[tauri::command]
@@ -368,6 +794,123 @@ fn logout_epic(state: State<'_, AppState>) -> Result<LibraryIntegration, String>
     Ok(integration)
 }
 
+pub fn is_strictly_newer_last_played(existing: Option<&str>, incoming: Option<&str>) -> bool {
+    let clean_new = incoming
+        .map(str::trim)
+        .filter(|s| !s.is_empty() && !s.eq_ignore_ascii_case("never") && *s != "0");
+    let Some(new_str) = clean_new else {
+        return false;
+    };
+
+    let clean_old = existing
+        .map(str::trim)
+        .filter(|s| !s.is_empty() && !s.eq_ignore_ascii_case("never") && *s != "0");
+    let Some(old_str) = clean_old else {
+        return true;
+    };
+
+    match (
+        cloud_sync::parse_last_played_epoch(old_str),
+        cloud_sync::parse_last_played_epoch(new_str),
+    ) {
+        (Some(old_e), Some(new_e)) => new_e > old_e,
+        (None, Some(_)) => true,
+        (Some(_), None) => false,
+        (None, None) => new_str > old_str,
+    }
+}
+
+/// Applies remote/background playtime and `last_played` updates to an existing game record.
+/// When `allow_external_flag` is true (e.g., RetroAchievements or uninstalled store games) and a
+/// strictly newer session is observed, stamps `last_played_device_id = Some("external")`.
+pub fn apply_remote_play_update(
+    game: &mut Game,
+    new_lp: Option<&str>,
+    new_pt: Option<u64>,
+    allow_external_flag: bool,
+    current_device_id: &str,
+) -> bool {
+    let mut changed = false;
+    let mut remote_activity_detected = false;
+
+    if let Some(pt) = new_pt {
+        if pt > game.playtime_seconds && pt > 0 {
+            game.playtime_seconds = pt;
+            game.play_count = Some(std::cmp::max(game.play_count.unwrap_or(0), 1));
+            changed = true;
+            if allow_external_flag {
+                remote_activity_detected = true;
+            }
+        }
+    }
+
+    if let Some(lp_raw) = new_lp {
+        let lp_trimmed = lp_raw.trim();
+        if !lp_trimmed.is_empty() && !lp_trimmed.eq_ignore_ascii_case("never") && lp_trimmed != "0" {
+            let strictly_newer =
+                is_strictly_newer_last_played(game.last_played.as_deref(), Some(lp_trimmed));
+            let merged_lp =
+                cloud_sync::merge_last_played(game.last_played.as_deref(), Some(lp_trimmed));
+            if merged_lp != game.last_played {
+                game.last_played = merged_lp;
+                changed = true;
+            }
+            if strictly_newer && allow_external_flag {
+                remote_activity_detected = true;
+            }
+        }
+    }
+
+    if remote_activity_detected && allow_external_flag {
+        if game.last_played_device_id.as_deref() != Some("external") {
+            game.last_played_device_id = Some("external".to_string());
+            changed = true;
+        }
+        game.played_on_other_device = true;
+    } else {
+        game.played_on_other_device = Database::is_other_device_id(
+            game.last_played_device_id.as_deref(),
+            current_device_id,
+        );
+    }
+
+    changed
+}
+
+/// Preserves provenance on full provider scans and flags existing uninstalled games that gained
+/// newer remote activity since the previous scan (never flags initial inserts).
+fn preserve_and_detect_scanned_provenance(
+    incoming: &mut Game,
+    existing_map: &std::collections::HashMap<String, Game>,
+    current_device_id: &str,
+) {
+    let Some(existing) = existing_map.get(&incoming.id) else {
+        return;
+    };
+
+    incoming.last_played_device_id = existing.last_played_device_id.clone();
+
+    let is_remote_uninstalled = !existing.is_installed && !incoming.is_installed;
+    let pt_advanced = incoming.playtime_seconds > existing.playtime_seconds;
+    let lp_advanced = is_strictly_newer_last_played(
+        existing.last_played.as_deref(),
+        incoming.last_played.as_deref(),
+    );
+
+    if is_remote_uninstalled && (pt_advanced || lp_advanced) {
+        incoming.last_played_device_id = Some("external".to_string());
+    }
+
+    incoming.last_played = cloud_sync::merge_last_played(
+        existing.last_played.as_deref(),
+        incoming.last_played.as_deref(),
+    );
+    incoming.played_on_other_device = Database::is_other_device_id(
+        incoming.last_played_device_id.as_deref(),
+        current_device_id,
+    );
+}
+
 #[tauri::command]
 async fn scan_epic_library(state: State<'_, AppState>) -> Result<ScanResult, String> {
     scan_epic_library_core(&state.db).await
@@ -389,6 +932,13 @@ pub async fn scan_epic_library_core(db: &Arc<Database>) -> Result<ScanResult, St
 
     // 1. Scan installed games from local disk manifests
     let installed_games = EpicScanner::scan_installed_games()?;
+    let existing_map: std::collections::HashMap<String, Game> = db
+        .get_all_games()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|g| (g.id.clone(), g))
+        .collect();
+    let current_device_id = db.get_or_create_device_id().unwrap_or_default();
     let mut installed_app_names = std::collections::HashSet::new();
     let installed_count = installed_games.len();
     let mut uninstalled_count = 0;
@@ -536,6 +1086,12 @@ pub async fn scan_epic_library_core(db: &Arc<Database>) -> Result<ScanResult, St
                     ..Default::default()
                 };
 
+                let mut uninstalled_game = uninstalled_game;
+                preserve_and_detect_scanned_provenance(
+                    &mut uninstalled_game,
+                    &existing_map,
+                    &current_device_id,
+                );
                 let _ = db.upsert_game(&uninstalled_game);
                 uninstalled_count += 1;
             }
@@ -568,16 +1124,29 @@ async fn scan_steam_library(state: State<'_, AppState>) -> Result<ScanResult, St
 pub async fn scan_steam_library_core(db: &Arc<Database>) -> Result<ScanResult, String> {
     let integration = db.get_integration("steam").unwrap_or_default();
 
+    let existing_map: std::collections::HashMap<String, Game> = db
+        .get_all_games()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|g| (g.id.clone(), g))
+        .collect();
+    let current_device_id = db.get_or_create_device_id().unwrap_or_default();
+
     // 1. Scan installed games from local disk
     let installed_games = SteamScanner::scan_installed_games()?;
     let mut installed_ids = std::collections::HashSet::new();
     let installed_count = installed_games.len();
     let mut uninstalled_count = 0;
 
-    for game in installed_games {
+    for mut game in installed_games {
         if let Some(ref aid) = game.source_id {
             installed_ids.insert(aid.clone());
         }
+        preserve_and_detect_scanned_provenance(
+            &mut game,
+            &existing_map,
+            &current_device_id,
+        );
         let _ = db.upsert_game(&game);
     }
 
@@ -585,7 +1154,12 @@ pub async fn scan_steam_library_core(db: &Arc<Database>) -> Result<ScanResult, S
     if integration.import_uninstalled {
         if let Some(steam_dir) = SteamScanner::find_steam_install_dir() {
             let uninstalled_games = SteamScanner::scan_uninstalled_from_localconfig(&steam_dir, &installed_ids).await;
-            for uninstalled in uninstalled_games {
+            for mut uninstalled in uninstalled_games {
+                preserve_and_detect_scanned_provenance(
+                    &mut uninstalled,
+                    &existing_map,
+                    &current_device_id,
+                );
                 let _ = db.upsert_game(&uninstalled);
                 uninstalled_count += 1;
             }
@@ -671,12 +1245,11 @@ async fn open_gog_login_window(app_handle: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
-async fn authenticate_gog_code(
-    code: String,
-    state: State<'_, AppState>,
+pub async fn authenticate_gog_code_core(
+    db: &Database,
+    code: &str,
 ) -> Result<LibraryIntegration, String> {
-    let mut integration = state.db.get_integration("gog").unwrap_or_default();
+    let mut integration = db.get_integration("gog").unwrap_or_default();
     let clean_code = if let Some(pos) = code.find("code=") {
         let rest = &code[pos + 5..];
         rest.split('&').next().unwrap_or(code.trim()).to_string()
@@ -694,8 +1267,16 @@ async fn authenticate_gog_code(
     integration.access_token = Some(auth.access_token);
     integration.refresh_token = auth.refresh_token;
 
-    state.db.save_integration(&integration)?;
+    db.save_integration(&integration)?;
     Ok(integration)
+}
+
+#[tauri::command]
+async fn authenticate_gog_code(
+    code: String,
+    state: State<'_, AppState>,
+) -> Result<LibraryIntegration, String> {
+    authenticate_gog_code_core(&state.db, &code).await
 }
 
 #[tauri::command]
@@ -782,12 +1363,11 @@ async fn open_xbox_login_window(app_handle: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
-async fn authenticate_xbox_token(
-    token: String,
-    state: State<'_, AppState>,
+pub async fn authenticate_xbox_token_core(
+    db: &Database,
+    token: &str,
 ) -> Result<LibraryIntegration, String> {
-    let mut integration = state.db.get_integration("xbox").unwrap_or_default();
+    let mut integration = db.get_integration("xbox").unwrap_or_default();
     let clean_token = if let Some(pos) = token.find("code=") {
         let rest = &token[pos + "code=".len()..];
         let raw = rest.split('&').next().unwrap_or(token.trim());
@@ -810,8 +1390,16 @@ async fn authenticate_xbox_token(
     integration.access_token = Some(auth.access_token);
     integration.refresh_token = auth.refresh_token.or(Some(clean_token));
 
-    state.db.save_integration(&integration)?;
+    db.save_integration(&integration)?;
     Ok(integration)
+}
+
+#[tauri::command]
+async fn authenticate_xbox_token(
+    token: String,
+    state: State<'_, AppState>,
+) -> Result<LibraryIntegration, String> {
+    authenticate_xbox_token_core(&state.db, &token).await
 }
 
 #[tauri::command]
@@ -918,13 +1506,12 @@ async fn open_battlenet_login_window(app_handle: AppHandle) -> Result<(), String
     Ok(())
 }
 
-#[tauri::command]
-async fn authenticate_battlenet_payload(
-    payload: String,
-    state: State<'_, AppState>,
+pub async fn authenticate_battlenet_payload_core(
+    db: &Database,
+    payload: &str,
 ) -> Result<LibraryIntegration, String> {
-    let mut integration = state.db.get_integration("battlenet").unwrap_or_default();
-    let val: serde_json::Value = serde_json::from_str(&payload)
+    let mut integration = db.get_integration("battlenet").unwrap_or_default();
+    let val: serde_json::Value = serde_json::from_str(payload)
         .map_err(|e| format!("Invalid Battle.net JSON payload: {}", e))?;
 
     let battle_tag = val["battleTag"]
@@ -936,10 +1523,18 @@ async fn authenticate_battlenet_payload(
     integration.account_id = Some(battle_tag.clone());
     integration.username = Some(battle_tag);
     integration.is_authenticated = true;
-    integration.access_token = Some(payload);
+    integration.access_token = Some(payload.to_string());
 
-    state.db.save_integration(&integration)?;
+    db.save_integration(&integration)?;
     Ok(integration)
+}
+
+#[tauri::command]
+async fn authenticate_battlenet_payload(
+    payload: String,
+    state: State<'_, AppState>,
+) -> Result<LibraryIntegration, String> {
+    authenticate_battlenet_payload_core(&state.db, &payload).await
 }
 
 #[tauri::command]
@@ -1023,12 +1618,11 @@ async fn open_ea_login_window(app_handle: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
-async fn authenticate_ea_token(
-    token: String,
-    state: State<'_, AppState>,
+pub async fn authenticate_ea_token_core(
+    db: &Database,
+    token: &str,
 ) -> Result<LibraryIntegration, String> {
-    let mut integration = state.db.get_integration("ea").unwrap_or_default();
+    let mut integration = db.get_integration("ea").unwrap_or_default();
     let clean_token = if token.trim().starts_with('{') {
         if let Ok(j) = serde_json::from_str::<serde_json::Value>(token.trim()) {
             j["access_token"].as_str().unwrap_or(token.trim()).to_string()
@@ -1051,8 +1645,16 @@ async fn authenticate_ea_token(
     integration.is_authenticated = true;
     integration.access_token = Some(auth.access_token);
 
-    state.db.save_integration(&integration)?;
+    db.save_integration(&integration)?;
     Ok(integration)
+}
+
+#[tauri::command]
+async fn authenticate_ea_token(
+    token: String,
+    state: State<'_, AppState>,
+) -> Result<LibraryIntegration, String> {
+    authenticate_ea_token_core(&state.db, &token).await
 }
 
 #[tauri::command]
@@ -1234,12 +1836,11 @@ async fn open_ubisoft_login_window(app_handle: AppHandle) -> Result<(), String> 
     Ok(())
 }
 
-#[tauri::command]
-async fn authenticate_ubisoft_ticket(
-    payload: String,
-    state: State<'_, AppState>,
+pub async fn authenticate_ubisoft_ticket_core(
+    db: &Database,
+    payload: &str,
 ) -> Result<LibraryIntegration, String> {
-    let mut integration = state.db.get_integration("ubisoft").unwrap_or_default();
+    let mut integration = db.get_integration("ubisoft").unwrap_or_default();
     let (ticket, user_id, username) = if payload.trim().starts_with('{') {
         let j: serde_json::Value = serde_json::from_str(payload.trim()).map_err(|e| e.to_string())?;
         (
@@ -1277,8 +1878,16 @@ async fn authenticate_ubisoft_ticket(
     integration.is_authenticated = true;
     integration.access_token = Some(ticket);
 
-    state.db.save_integration(&integration)?;
+    db.save_integration(&integration)?;
     Ok(integration)
+}
+
+#[tauri::command]
+async fn authenticate_ubisoft_ticket(
+    payload: String,
+    state: State<'_, AppState>,
+) -> Result<LibraryIntegration, String> {
+    authenticate_ubisoft_ticket_core(&state.db, &payload).await
 }
 
 #[tauri::command]
@@ -1326,12 +1935,11 @@ async fn open_amazon_login_window(app_handle: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
-async fn authenticate_amazon_code(
-    code: String,
-    state: State<'_, AppState>,
+pub async fn authenticate_amazon_code_core(
+    db: &Database,
+    code: &str,
 ) -> Result<LibraryIntegration, String> {
-    let mut integration = state.db.get_integration("amazon").unwrap_or_default();
+    let mut integration = db.get_integration("amazon").unwrap_or_default();
     let clean_code = if let Some(pos) = code.find("openid.oa2.authorization_code=") {
         let rest = &code[pos + "openid.oa2.authorization_code=".len()..];
         let raw = rest.split('&').next().unwrap_or(code.trim());
@@ -1349,8 +1957,16 @@ async fn authenticate_amazon_code(
     integration.access_token = Some(auth.access_token);
     integration.refresh_token = auth.refresh_token;
 
-    state.db.save_integration(&integration)?;
+    db.save_integration(&integration)?;
     Ok(integration)
+}
+
+#[tauri::command]
+async fn authenticate_amazon_code(
+    code: String,
+    state: State<'_, AppState>,
+) -> Result<LibraryIntegration, String> {
+    authenticate_amazon_code_core(&state.db, &code).await
 }
 
 async fn enrich_scanned_provider_game(
@@ -1437,12 +2053,12 @@ async fn scan_provider_library(
     app_handle: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<ScanResult, String> {
-    scan_provider_library_core(&provider, &app_handle, &state.db).await
+    scan_provider_library_core(&provider, Some(&app_handle), &state.db).await
 }
 
 pub async fn scan_provider_library_core(
     provider: &str,
-    app_handle: &AppHandle,
+    app_handle: Option<&AppHandle>,
     db: &Arc<Database>,
 ) -> Result<ScanResult, String> {
     let prov = provider.to_lowercase();
@@ -1750,17 +2366,38 @@ pub async fn scan_provider_library_core(
 
     let installed_count = installed_games.len();
     let uninstalled_count = uninstalled_games.len();
+    let existing_map: std::collections::HashMap<String, Game> = db
+        .get_all_games()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|g| (g.id.clone(), g))
+        .collect();
+    let current_device_id = db.get_or_create_device_id().unwrap_or_default();
 
     for mut game in installed_games {
         enrich_scanned_provider_game(&mut game, &igdb_creds).await;
+        preserve_and_detect_scanned_provenance(
+            &mut game,
+            &existing_map,
+            &current_device_id,
+        );
         let _ = db.upsert_game(&game);
-        let _ = app_handle.emit("game-updated", &game);
+        if let Some(app) = app_handle {
+            let _ = app.emit("game-updated", &game);
+        }
     }
 
     for mut game in uninstalled_games {
         enrich_scanned_provider_game(&mut game, &igdb_creds).await;
+        preserve_and_detect_scanned_provenance(
+            &mut game,
+            &existing_map,
+            &current_device_id,
+        );
         let _ = db.upsert_game(&game);
-        let _ = app_handle.emit("game-updated", &game);
+        if let Some(app) = app_handle {
+            let _ = app.emit("game-updated", &game);
+        }
     }
 
     let mut updated_integration = db.get_integration(&prov).unwrap_or(integration);
@@ -1781,26 +2418,30 @@ async fn sync_all_libraries(
     app_handle: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<ScanResult, String> {
-    sync_all_libraries_core(&app_handle, &state.db, playtime_only.unwrap_or(false)).await
+    sync_all_libraries_core(Some(&app_handle), &state.db, playtime_only.unwrap_or(false)).await
 }
 
 pub async fn sync_all_libraries_core(
-    app_handle: &AppHandle,
+    app_handle: Option<&AppHandle>,
     db: &Arc<Database>,
     playtime_only: bool,
 ) -> Result<ScanResult, String> {
     // 1. Gaming-aware guard: if any game launched via OpenPlay is running, pause/defer immediately
-    let running = GameLauncher::get_running_games(Some(app_handle), Some(db));
+    let sink = app_handle.map(|a| crate::launcher::LauncherEventSink::Tauri(a.clone()));
+    let running = GameLauncher::get_running_games(sink.as_ref(), Some(db));
     if !running.is_empty() {
         eprintln!("[BackgroundSync] Deferred: active game process running: {:?}", running);
         return Ok(ScanResult { count: 0, installed: 0, uninstalled: 0 });
     }
 
-    let _ = app_handle.emit("library-sync-started", serde_json::json!({ "playtime_only": playtime_only }));
+    if let Some(app) = app_handle {
+        let _ = app.emit("library-sync-started", serde_json::json!({ "playtime_only": playtime_only }));
+    }
 
     if playtime_only {
         // Fast periodic playtime/recency sync (only updates timestamps, zero disk/metadata overhead)
         let mut total_updated = 0usize;
+        let current_device_id = db.get_or_create_device_id().unwrap_or_default();
 
         // A. Steam: read localconfig.vdf in milliseconds
         if let Some(steam_dir) = SteamScanner::find_steam_install_dir() {
@@ -1810,18 +2451,18 @@ pub async fn sync_all_libraries_core(
                     if g.source.eq_ignore_ascii_case("steam") {
                         if let Some(ref sid) = g.source_id {
                             if let Some((pt, lp)) = history.get(sid) {
-                                let mut changed = false;
-                                if *pt > 0 && *pt != g.playtime_seconds {
-                                    g.playtime_seconds = *pt;
-                                    changed = true;
-                                }
-                                if lp.is_some() && *lp != g.last_played {
-                                    g.last_played = lp.clone();
-                                    changed = true;
-                                }
-                                if changed {
+                                let allow_ext = !g.is_installed;
+                                if apply_remote_play_update(
+                                    g,
+                                    lp.as_deref(),
+                                    Some(*pt),
+                                    allow_ext,
+                                    &current_device_id,
+                                ) {
                                     let _ = db.upsert_game(g);
-                                    let _ = app_handle.emit("game-updated", &g);
+                                    if let Some(app) = app_handle {
+                                        let _ = app.emit("game-updated", &g);
+                                    }
                                     total_updated += 1;
                                 }
                             }
@@ -1841,22 +2482,23 @@ pub async fn sync_all_libraries_core(
                         for g in &mut all_games {
                             if g.source.eq_ignore_ascii_case("epic") {
                                 if let Some(ref sid) = g.source_id {
-                                    let mut changed = false;
-                                    if let Some(&pt) = pts.get(sid).or_else(|| pts.get(&sid.to_lowercase())) {
-                                        if pt > 0 && pt != g.playtime_seconds {
-                                            g.playtime_seconds = pt;
-                                            changed = true;
-                                        }
-                                    }
-                                    if let Some(lp) = last_played_map.get(sid).or_else(|| last_played_map.get(&sid.to_lowercase())) {
-                                        if g.last_played.as_deref() != Some(lp) {
-                                            g.last_played = Some(lp.clone());
-                                            changed = true;
-                                        }
-                                    }
-                                    if changed {
+                                    let pt_opt = pts.get(sid).or_else(|| pts.get(&sid.to_lowercase())).copied();
+                                    let lp_opt = last_played_map
+                                        .get(sid)
+                                        .or_else(|| last_played_map.get(&sid.to_lowercase()))
+                                        .map(|s| s.as_str());
+                                    let allow_ext = !g.is_installed;
+                                    if apply_remote_play_update(
+                                        g,
+                                        lp_opt,
+                                        pt_opt,
+                                        allow_ext,
+                                        &current_device_id,
+                                    ) {
                                         let _ = db.upsert_game(g);
-                                        let _ = app_handle.emit("game-updated", &g);
+                                        if let Some(app) = app_handle {
+                                            let _ = app.emit("game-updated", &g);
+                                        }
                                         total_updated += 1;
                                     }
                                 }
@@ -1876,22 +2518,20 @@ pub async fn sync_all_libraries_core(
                     for g in &mut all_games {
                         if g.source.eq_ignore_ascii_case("gog") {
                             if let Some(ref sid) = g.source_id {
-                                let mut changed = false;
-                                if let Some(&cpt) = cloud_pt.get(sid) {
-                                    if cpt > g.playtime_seconds {
-                                        g.playtime_seconds = cpt;
-                                        changed = true;
-                                    }
-                                }
-                                if let Some(clp) = cloud_lp.get(sid) {
-                                    if g.last_played.as_ref() != Some(clp) {
-                                        g.last_played = Some(clp.clone());
-                                        changed = true;
-                                    }
-                                }
-                                if changed {
+                                let pt_opt = cloud_pt.get(sid).copied();
+                                let lp_opt = cloud_lp.get(sid).map(|s| s.as_str());
+                                let allow_ext = !g.is_installed;
+                                if apply_remote_play_update(
+                                    g,
+                                    lp_opt,
+                                    pt_opt,
+                                    allow_ext,
+                                    &current_device_id,
+                                ) {
                                     let _ = db.upsert_game(g);
-                                    let _ = app_handle.emit("game-updated", &g);
+                                    if let Some(app) = app_handle {
+                                        let _ = app.emit("game-updated", &g);
+                                    }
                                     total_updated += 1;
                                 }
                             }
@@ -1910,18 +2550,18 @@ pub async fn sync_all_libraries_core(
                         for g in &mut all_games {
                             if g.source.eq_ignore_ascii_case("xbox") {
                                 if let Some(cg) = cloud.iter().find(|c| c.title.eq_ignore_ascii_case(&g.title)) {
-                                    let mut changed = false;
-                                    if cg.playtime_seconds > g.playtime_seconds {
-                                        g.playtime_seconds = cg.playtime_seconds;
-                                        changed = true;
-                                    }
-                                    if g.last_played.is_none() && cg.last_played.is_some() {
-                                        g.last_played = cg.last_played.clone();
-                                        changed = true;
-                                    }
-                                    if changed {
+                                    let allow_ext = !g.is_installed;
+                                    if apply_remote_play_update(
+                                        g,
+                                        cg.last_played.as_deref(),
+                                        Some(cg.playtime_seconds),
+                                        allow_ext,
+                                        &current_device_id,
+                                    ) {
                                         let _ = db.upsert_game(g);
-                                        let _ = app_handle.emit("game-updated", &g);
+                                        if let Some(app) = app_handle {
+                                            let _ = app.emit("game-updated", &g);
+                                        }
                                         total_updated += 1;
                                     }
                                 }
@@ -1932,10 +2572,12 @@ pub async fn sync_all_libraries_core(
             }
         }
 
-        let _ = app_handle.emit("library-sync-complete", serde_json::json!({
-            "playtime_only": true,
-            "updated": total_updated
-        }));
+        if let Some(app) = app_handle {
+            let _ = app.emit("library-sync-complete", serde_json::json!({
+                "playtime_only": true,
+                "updated": total_updated
+            }));
+        }
 
         return Ok(ScanResult {
             count: total_updated,
@@ -1950,7 +2592,8 @@ pub async fn sync_all_libraries_core(
 
     for p in providers {
         // Gaming guard check before each provider
-        let running = GameLauncher::get_running_games(Some(app_handle), Some(db));
+        let sink = app_handle.map(|a| crate::launcher::LauncherEventSink::Tauri(a.clone()));
+        let running = GameLauncher::get_running_games(sink.as_ref(), Some(db));
         if !running.is_empty() {
             eprintln!("[BackgroundSync] Aborting remaining sync: game launched ({:?})", running);
             break;
@@ -1969,12 +2612,14 @@ pub async fn sync_all_libraries_core(
         }
     }
 
-    let _ = app_handle.emit("library-sync-complete", serde_json::json!({
-        "playtime_only": false,
-        "count": total_res.count,
-        "installed": total_res.installed,
-        "uninstalled": total_res.uninstalled
-    }));
+    if let Some(app) = app_handle {
+        let _ = app.emit("library-sync-complete", serde_json::json!({
+            "playtime_only": false,
+            "count": total_res.count,
+            "installed": total_res.installed,
+            "uninstalled": total_res.uninstalled
+        }));
+    }
 
     Ok(total_res)
 }
@@ -2061,8 +2706,7 @@ async fn get_steam_current_players(appid: String) -> Result<u32, String> {
     SteamMetadataFetcher::fetch_current_players(&appid).await
 }
 
-#[tauri::command]
-async fn get_game_current_players(
+pub async fn get_game_current_players_core(
     title: Option<String>,
     appid: Option<serde_json::Value>,
 ) -> Result<u32, String> {
@@ -2104,12 +2748,19 @@ async fn get_game_current_players(
 }
 
 #[tauri::command]
+async fn get_game_current_players(
+    title: Option<String>,
+    appid: Option<serde_json::Value>,
+) -> Result<u32, String> {
+    get_game_current_players_core(title, appid).await
+}
+
+#[tauri::command]
 async fn get_steam_news(appid: String) -> Result<Vec<SteamNewsItem>, String> {
     SteamMetadataFetcher::fetch_game_news(&appid).await
 }
 
-#[tauri::command]
-async fn get_game_news(
+pub async fn get_game_news_core(
     game_id: Option<String>,
     title: Option<String>,
     appid: Option<serde_json::Value>,
@@ -2150,6 +2801,15 @@ async fn get_game_news(
     } else {
         Ok(Vec::new())
     }
+}
+
+#[tauri::command]
+async fn get_game_news(
+    game_id: Option<String>,
+    title: Option<String>,
+    appid: Option<serde_json::Value>,
+) -> Result<Vec<SteamNewsItem>, String> {
+    get_game_news_core(game_id, title, appid).await
 }
 
 #[tauri::command]
@@ -2215,12 +2875,18 @@ fn get_app_config(state: State<'_, AppState>) -> Result<AppConfig, String> {
 
 #[tauri::command]
 fn save_app_config(config: AppConfig, state: State<'_, AppState>) -> Result<(), String> {
-    state.db.save_app_config(&config)
+    state.db.save_app_config(&config)?;
+    cloud_sync::spawn_background_export(state.db.clone());
+    Ok(())
 }
 
 #[tauri::command]
 fn save_steamgriddb_key(key: String, state: State<'_, AppState>) -> Result<(), String> {
-    state.db.set_setting("steamgriddb_key", key.trim())
+    let trimmed = key.trim();
+    state.db.set_setting("steamgriddb_key", trimmed)?;
+    state.db.set_setting("ui_updated_at", &chrono::Utc::now().to_rfc3339())?;
+    cloud_sync::spawn_background_export(state.db.clone());
+    Ok(())
 }
 
 #[tauri::command]
@@ -2232,6 +2898,8 @@ fn get_steamgriddb_key(state: State<'_, AppState>) -> Result<Option<String>, Str
 fn save_igdb_keys(client_id: String, client_secret: String, state: State<'_, AppState>) -> Result<(), String> {
     state.db.set_setting("igdb_client_id", client_id.trim())?;
     state.db.set_setting("igdb_client_secret", client_secret.trim())?;
+    state.db.set_setting("ui_updated_at", &chrono::Utc::now().to_rfc3339())?;
+    cloud_sync::spawn_background_export(state.db.clone());
     Ok(())
 }
 
@@ -2242,21 +2910,20 @@ fn get_igdb_keys(state: State<'_, AppState>) -> Result<(Option<String>, Option<S
     Ok((cid, csec))
 }
 
-#[tauri::command]
-async fn fetch_metadata_from_source(
-    title: String,
-    provider: String,
-    game_id: Option<String>,
-    state: State<'_, AppState>,
+pub async fn fetch_metadata_from_source_core(
+    title: &str,
+    provider: &str,
+    game_id: Option<&str>,
+    db: &Database,
 ) -> Result<metadata::igdb::MetadataComparison, String> {
     let p_lower = provider.to_lowercase();
     match p_lower.as_str() {
         "steam" => {
             // Check if existing game in DB already has a valid numeric Steam AppID
             let mut resolved_appid: Option<String> = None;
-            if let Some(ref gid) = game_id {
-                if let Ok(all) = state.db.get_all_games() {
-                    if let Some(g) = all.iter().find(|g| &g.id == gid) {
+            if let Some(gid) = game_id {
+                if let Ok(all) = db.get_all_games() {
+                    if let Some(g) = all.iter().find(|g| g.id == gid) {
                         if g.source.eq_ignore_ascii_case("steam") {
                             if let Some(ref sid) = g.source_id {
                                 if sid.chars().all(|c| c.is_ascii_digit()) && !sid.is_empty() {
@@ -2270,7 +2937,7 @@ async fn fetch_metadata_from_source(
 
             let appid = match resolved_appid {
                 Some(id) if title.trim().is_empty() => id,
-                _ => SteamMetadataFetcher::search_appid_by_title(&title)
+                _ => SteamMetadataFetcher::search_appid_by_title(title)
                     .await
                     .or(resolved_appid)
                     .ok_or_else(|| format!("Could not find game '{}' on Steam Store", title))?,
@@ -2303,7 +2970,7 @@ async fn fetch_metadata_from_source(
 
             Ok(metadata::igdb::MetadataComparison {
                 provider: "Steam".to_string(),
-                title: Some(title),
+                title: Some(title.to_string()),
                 description: meta.description,
                 developer: meta.developer,
                 publisher: meta.publisher,
@@ -2321,18 +2988,18 @@ async fn fetch_metadata_from_source(
             })
         }
         "epic" => {
-            let meta = EpicMetadataFetcher::fetch_metadata_by_title(&title).await?;
-            let slug = EpicMetadataFetcher::make_slug(&title);
+            let meta = EpicMetadataFetcher::fetch_metadata_by_title(title).await?;
+            let slug = EpicMetadataFetcher::make_slug(title);
             let links = vec![crate::models::GameLink {
                 title: "Epic Games Store".to_string(),
                 url: format!("https://store.epicgames.com/p/{}", slug),
             }];
 
-            let scores = ScoreEnrichmentEngine::resolve_scores_for_game(&title, "epic", None).await;
+            let scores = ScoreEnrichmentEngine::resolve_scores_for_game(title, "epic", None).await;
 
             Ok(metadata::igdb::MetadataComparison {
                 provider: "Epic Games".to_string(),
-                title: Some(title),
+                title: Some(title.to_string()),
                 description: meta.description,
                 developer: meta.developer,
                 publisher: meta.publisher,
@@ -2350,10 +3017,10 @@ async fn fetch_metadata_from_source(
             })
         }
         "igdb" => {
-            let config = state.db.get_app_config().unwrap_or_default();
+            let config = db.get_app_config().unwrap_or_default();
             let client_id = config
                 .igdb_client_id
-                .or_else(|| state.db.get_setting("igdb_client_id").ok().flatten())
+                .or_else(|| db.get_setting("igdb_client_id").ok().flatten())
                 .filter(|s| !s.trim().is_empty())
                 .ok_or_else(|| {
                     "IGDB Client ID not configured. Please enter your Twitch Client ID in Settings -> APIs & Services."
@@ -2362,16 +3029,16 @@ async fn fetch_metadata_from_source(
 
             let client_secret = config
                 .igdb_client_secret
-                .or_else(|| state.db.get_setting("igdb_client_secret").ok().flatten())
+                .or_else(|| db.get_setting("igdb_client_secret").ok().flatten())
                 .filter(|s| !s.trim().is_empty())
                 .ok_or_else(|| {
                     "IGDB Client Secret not configured. Please enter your Twitch Client Secret in Settings -> APIs & Services."
                         .to_string()
                 })?;
 
-            let platform_hint = if let Some(ref gid) = game_id {
-                state.db.get_all_games().ok().and_then(|all| {
-                    all.into_iter().find(|g| &g.id == gid).map(|g| g.platforms)
+            let platform_hint = if let Some(gid) = game_id {
+                db.get_all_games().ok().and_then(|all| {
+                    all.into_iter().find(|g| g.id == gid).map(|g| g.platforms)
                 })
             } else {
                 None
@@ -2380,12 +3047,22 @@ async fn fetch_metadata_from_source(
             metadata::igdb::IgdbFetcher::fetch_metadata(
                 &client_id,
                 &client_secret,
-                &title,
+                title,
                 platform_hint.as_deref(),
             ).await
         }
         _ => Err(format!("Unsupported metadata provider: {}", provider)),
     }
+}
+
+#[tauri::command]
+async fn fetch_metadata_from_source(
+    title: String,
+    provider: String,
+    game_id: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<metadata::igdb::MetadataComparison, String> {
+    fetch_metadata_from_source_core(&title, &provider, game_id.as_deref(), &state.db).await
 }
 
 #[tauri::command]
@@ -2425,19 +3102,20 @@ fn apply_custom_artwork(
         }
     }
 
+    game.updated_at = Some(chrono::Utc::now().to_rfc3339());
     state.db.save_game_exact(&game)?;
     let _ = app_handle.emit("game-updated", &game);
+    cloud_sync::spawn_background_export(state.db.clone());
     Ok(game)
 }
 
-#[tauri::command]
-async fn sync_all_metadata(
+pub async fn sync_all_metadata_core(
+    db: &Database,
     installed_only: Option<bool>,
-    app_handle: AppHandle,
-    state: State<'_, AppState>,
+    on_update: impl Fn(&Game),
 ) -> Result<usize, String> {
     let only_installed = installed_only.unwrap_or(false);
-    let all = state.db.get_all_games()?;
+    let all = db.get_all_games()?;
     let mut count = 0;
     for mut game in all {
         if only_installed && !game.is_installed {
@@ -2478,7 +3156,7 @@ async fn sync_all_metadata(
                     if game.genres.is_empty() && !meta.genres.is_empty() { game.genres = meta.genres; changed = true; }
                 }
             } else if game.source.to_lowercase() == "emulation" || game.source.to_lowercase() == "local" || game.source.to_lowercase().contains("retro") {
-                let config = state.db.get_app_config().unwrap_or_default();
+                let config = db.get_app_config().unwrap_or_default();
                 if let (Some(ref client_id), Some(ref client_secret)) = (&config.igdb_client_id, &config.igdb_client_secret) {
                     if !client_id.trim().is_empty() && !client_secret.trim().is_empty() {
                         let hint = if !game.platforms.is_empty() { Some(game.platforms.as_slice()) } else { None };
@@ -2501,8 +3179,8 @@ async fn sync_all_metadata(
         }
 
         if changed {
-            let _ = state.db.upsert_game(&game);
-            let _ = app_handle.emit("game-updated", &game);
+            let _ = db.upsert_game(&game);
+            on_update(&game);
             count += 1;
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
@@ -2511,81 +3189,87 @@ async fn sync_all_metadata(
 }
 
 #[tauri::command]
-fn save_game(game: Game, app_handle: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
-    // If saving a new manual or local game (id starts with manual_ or local_), check if it matches an existing entry
-    let is_temp_id = game.id.starts_with("manual_") || game.id.starts_with("local_");
-    if is_temp_id {
-        let norm_incoming = normalize_title_for_match(&game.title);
-        if let Ok(existing_games) = state.db.get_all_games() {
-            let matching_existing = existing_games.iter().find(|eg| {
-                if eg.id == game.id {
-                    return false;
-                }
-                if let (Some(ref e_exe), Some(ref in_exe)) = (&eg.executable_path, &game.executable_path) {
-                    if !e_exe.is_empty() && e_exe.eq_ignore_ascii_case(in_exe) {
-                        return true;
-                    }
-                }
-                if !norm_incoming.is_empty() && normalize_title_for_match(&eg.title) == norm_incoming {
-                    return true;
-                }
-                false
-            });
+async fn sync_all_metadata(
+    installed_only: Option<bool>,
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<usize, String> {
+    let handle = app_handle.clone();
+    sync_all_metadata_core(&state.db, installed_only, move |g| {
+        let _ = handle.emit("game-updated", g);
+    }).await
+}
 
-            if let Some(existing) = matching_existing {
-                let mut merged = existing.clone();
-                if game.executable_path.is_some() {
-                    merged.executable_path = game.executable_path.clone();
-                }
-                if game.install_directory.is_some() {
-                    merged.install_directory = game.install_directory.clone();
-                }
-                if game.launch_arguments.is_some() {
-                    merged.launch_arguments = game.launch_arguments.clone();
-                }
-                merged.is_installed = true;
-                if (merged.cover_image.is_none() || merged.cover_image.as_deref().unwrap_or("").trim().is_empty()) && game.cover_image.is_some() {
-                    merged.cover_image = game.cover_image.clone();
-                }
-                if (merged.background_image.is_none() || merged.background_image.as_deref().unwrap_or("").trim().is_empty()) && game.background_image.is_some() {
-                    merged.background_image = game.background_image.clone();
-                }
-                if merged.developer.is_none() && game.developer.is_some() {
-                    merged.developer = game.developer.clone();
-                }
-                if merged.publisher.is_none() && game.publisher.is_some() {
-                    merged.publisher = game.publisher.clone();
-                }
-                if merged.description.is_none() && game.description.is_some() {
-                    merged.description = game.description.clone();
-                }
-                state.db.save_game_exact(&merged)?;
-                let _ = app_handle.emit("game-updated", &merged);
-                return Ok(());
-            }
+pub fn save_game_core(mut game: Game, db: &Database) -> Result<Game, String> {
+    let now_utc = chrono::Utc::now().to_rfc3339();
+    let is_temp_id = game.id.starts_with("manual_")
+        || game.id.starts_with("local_")
+        || game.id.starts_with("rom_");
+
+    let existing_games = db.get_all_games().unwrap_or_default();
+    let existing_opt = existing_games.iter().find(|eg| eg.id == game.id);
+
+    if is_temp_id && existing_opt.is_none() {
+        if let Some(idx) = find_matching_existing_game_idx(&existing_games, &game) {
+            let existing = &existing_games[idx];
+            let mut merged = merge_incoming_into_existing_game(existing, &game);
+            db.populate_other_device_flag(&mut merged);
+            db.save_game_exact(&merged)?;
+            return Ok(merged);
         }
     }
 
-    state.db.save_game_exact(&game)?;
-    let _ = app_handle.emit("game-updated", &game);
-    Ok(())
+    let current_device_id = db.get_or_create_device_id().unwrap_or_default();
+    if let Some(existing) = existing_opt {
+        if game.last_played_device_id.is_none() {
+            game.last_played_device_id = existing.last_played_device_id.clone();
+        }
+    }
+
+    if !game.played_on_other_device
+        && Database::is_other_device_id(game.last_played_device_id.as_deref(), &current_device_id)
+    {
+        game.last_played_device_id = Some(current_device_id.clone());
+    }
+    game.played_on_other_device = Database::is_other_device_id(
+        game.last_played_device_id.as_deref(),
+        &current_device_id,
+    );
+
+    game.updated_at = Some(now_utc);
+    db.populate_other_device_flag(&mut game);
+    db.save_game_exact(&game)?;
+    Ok(game)
+}
+
+#[tauri::command]
+fn save_game(game: Game, app_handle: AppHandle, state: State<'_, AppState>) -> Result<Game, String> {
+    let saved = save_game_core(game, &state.db)?;
+    let _ = app_handle.emit("game-updated", &saved);
+    cloud_sync::spawn_background_export(state.db.clone());
+    Ok(saved)
 }
 
 #[tauri::command]
 fn delete_game(app_handle: AppHandle, game_id: String, state: State<'_, AppState>) -> Result<(), String> {
     state.db.delete_game(&game_id)?;
     let _ = app_handle.emit("game-deleted", &game_id);
+    cloud_sync::spawn_background_export(state.db.clone());
     Ok(())
 }
 
 #[tauri::command]
 fn toggle_favorite(game_id: String, state: State<'_, AppState>) -> Result<bool, String> {
-    state.db.toggle_favorite(&game_id)
+    let res = state.db.toggle_favorite(&game_id)?;
+    cloud_sync::spawn_background_export(state.db.clone());
+    Ok(res)
 }
 
 #[tauri::command]
 fn set_game_favorite(game_id: String, is_favorite: bool, state: State<'_, AppState>) -> Result<bool, String> {
-    state.db.set_favorite(&game_id, is_favorite)
+    let res = state.db.set_favorite(&game_id, is_favorite)?;
+    cloud_sync::spawn_background_export(state.db.clone());
+    Ok(res)
 }
 
 #[tauri::command]
@@ -2595,81 +3279,164 @@ fn launch_game(
     app_handle: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
-    let all = state.db.get_all_games()?;
-    let game = all
-        .into_iter()
-        .find(|g| g.id == game_id)
-        .ok_or_else(|| "Game not found".to_string())?;
-
-    if let Some(ref aid) = action_id {
-        if let Some(action) = game.play_actions.iter().find(|a| &a.id == aid) {
-            return GameLauncher::launch_custom_action(
-                app_handle,
-                state.db.clone(),
-                game.id,
-                Some(action.path.clone()),
-                action.arguments.clone(),
-                action.working_dir.clone().or(game.install_directory.clone()),
-            );
-        }
-    }
-
-    GameLauncher::launch_game(
-        app_handle,
+    GameLauncher::launch_game_by_id(
+        crate::launcher::LauncherEventSink::Tauri(app_handle),
         state.db.clone(),
-        game.id,
-        game.source,
-        game.source_id,
-        game.executable_path,
-        game.install_directory,
-        game.launch_arguments,
-        game.emulator_id,
+        &game_id,
+        action_id.as_deref(),
     )
 }
 
-#[tauri::command]
-fn install_game(game_id: String, state: State<'_, AppState>) -> Result<(), String> {
-    let all = state.db.get_all_games()?;
+pub fn open_system_uri(uri: &str) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", uri])
+            .spawn()
+            .map_err(|e| format!("Failed to open URI '{}': {}", uri, e))?;
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(uri)
+            .spawn()
+            .map_err(|e| format!("Failed to open URI '{}': {}", uri, e))?;
+    }
+    Ok(())
+}
+
+pub fn install_game_core(db: &Database, game_id: &str) -> Result<(), String> {
+    let all = db.get_all_games()?;
     let game = all
         .into_iter()
         .find(|g| g.id == game_id)
         .ok_or_else(|| "Game not found".to_string())?;
 
     let src = game.source.to_lowercase();
+
+    // 1. Steam: steam://install/<appid>
     if src == "steam" {
-        if let Some(ref appid) = game.source_id {
-            let url = format!("steam://install/{}", appid);
-            #[cfg(target_os = "windows")]
-            {
-                std::process::Command::new("cmd")
-                    .args(["/C", "start", "", &url])
-                    .spawn()
-                    .map_err(|e| e.to_string())?;
+        let appid = game.source_id.as_deref().or_else(|| {
+            if game.id.starts_with("steam_") {
+                Some(&game.id[6..])
+            } else {
+                None
             }
-            #[cfg(target_os = "linux")]
-            {
-                std::process::Command::new("xdg-open")
-                    .arg(&url)
-                    .spawn()
-                    .map_err(|e| e.to_string())?;
-            }
-            return Ok(());
-        }
-    } else if src == "epic" {
-        if let Some(ref app_name) = game.source_id {
-            let url = format!("com.epicgames.launcher://apps/{}?action=install", app_name);
-            #[cfg(target_os = "windows")]
-            {
-                std::process::Command::new("cmd")
-                    .args(["/C", "start", "", &url])
-                    .spawn()
-                    .map_err(|e| e.to_string())?;
-            }
-            return Ok(());
+        });
+        if let Some(aid) = appid {
+            let url = format!("steam://install/{}", aid);
+            return open_system_uri(&url);
         }
     }
 
-    Err("Direct store installation is not supported for this source".to_string())
+    // 2. Epic Games: com.epicgames.launcher://apps/<app_name>?action=install
+    if src == "epic" {
+        let app_name = game.source_id.as_deref().or_else(|| {
+            if game.id.starts_with("epic_") {
+                Some(&game.id[5..])
+            } else {
+                None
+            }
+        });
+        if let Some(an) = app_name {
+            let url = format!("com.epicgames.launcher://apps/{}?action=install", an);
+            return open_system_uri(&url);
+        }
+    }
+
+    // 3. GOG Galaxy: goggalaxy://openGameView/<source_id>
+    if src.contains("gog") {
+        if let Some(ref sid) = game.source_id {
+            let url = format!("goggalaxy://openGameView/{}", sid);
+            return open_system_uri(&url);
+        }
+        return open_system_uri("goggalaxy://");
+    }
+
+    // 4. Xbox / Windows Store / Game Pass
+    if src.contains("xbox") || src.contains("game pass") || src.contains("microsoft") {
+        if let Some(ref sid) = game.source_id {
+            let url = format!("ms-windows-store://pdp/?productid={}", sid);
+            return open_system_uri(&url);
+        }
+        return open_system_uri("xbox:");
+    }
+
+    // 5. EA App / Origin
+    if src.contains("ea") || src.contains("origin") {
+        if let Some(ref sid) = game.source_id {
+            let url = format!("origin2://game/launch?offerIds={}", sid);
+            return open_system_uri(&url);
+        }
+        return open_system_uri("origin://");
+    }
+
+    // 6. Battle.net
+    if src.contains("battle") || src.contains("bnet") {
+        if let Some(ref sid) = game.source_id {
+            let url = format!("battlenet://{}", sid);
+            return open_system_uri(&url);
+        }
+        return open_system_uri("battlenet://");
+    }
+
+    // 7. Ubisoft Connect
+    if src.contains("ubisoft") || src.contains("uplay") {
+        if let Some(ref sid) = game.source_id {
+            let url = format!("uplay://launch/{}/0", sid);
+            return open_system_uri(&url);
+        }
+        return open_system_uri("uplay://");
+    }
+
+    // 8. Riot Games
+    if src.contains("riot") {
+        return open_system_uri("riotclient://");
+    }
+
+    // 9. Amazon Games
+    if src.contains("amazon") {
+        return open_system_uri("amazon-games://");
+    }
+
+    // 10. Store or download link fallback
+    if let Some(link) = game.links.iter().find(|l| {
+        let t = l.title.to_lowercase();
+        let u = l.url.to_lowercase();
+        t.contains("store")
+            || t.contains("download")
+            || u.contains("steampowered.com")
+            || u.contains("epicgames.com")
+            || u.contains("gog.com")
+            || u.contains("xbox.com")
+            || u.contains("ea.com")
+            || u.contains("ubisoft.com")
+    }) {
+        if !link.url.trim().is_empty() {
+            return open_system_uri(link.url.trim());
+        }
+    }
+
+    // 11. Local setup / installer executable
+    if let Some(ref exe) = game.executable_path {
+        let p = std::path::Path::new(exe);
+        if p.exists() && p.is_file() {
+            let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("").to_lowercase();
+            if name.contains("setup") || name.contains("install") {
+                return open_system_uri(exe);
+            }
+        }
+    }
+
+    Err(format!(
+        "Automatic installation is not supported for '{}' ({}). Please install the game via its native client or configure its installation path in Game Properties.",
+        game.title, game.source
+    ))
+}
+
+#[tauri::command]
+fn install_game(game_id: String, state: State<'_, AppState>) -> Result<(), String> {
+    install_game_core(&state.db, &game_id)
 }
 
 #[tauri::command]
@@ -2757,13 +3524,12 @@ fn apply_igdb_meta(game: &mut Game, meta: metadata::igdb::MetadataComparison) {
     }
 }
 
-#[tauri::command]
-async fn scan_and_import_console_roms(
-    console_id: String,
-    state: State<'_, AppState>,
-    app_handle: AppHandle,
+pub async fn scan_and_import_console_roms_core(
+    db: &Database,
+    console_id: &str,
+    on_update: impl Fn(&Game),
 ) -> Result<u32, String> {
-    let conf = state.db.get_configured_console(&console_id)?
+    let conf = db.get_configured_console(console_id)?
         .ok_or_else(|| format!("Console '{}' not found", console_id))?;
 
     let discovered = EmulatorService::scan_console_roms(
@@ -2773,10 +3539,10 @@ async fn scan_and_import_console_roms(
         &conf.extensions,
     )?;
 
-    let mut existing_games = state.db.get_all_games().unwrap_or_default();
+    let mut existing_games = db.get_all_games().unwrap_or_default();
     let now_date = chrono::Local::now().format("%Y-%m-%d").to_string();
 
-    let app_cfg = state.db.get_app_config().unwrap_or_default();
+    let app_cfg = db.get_app_config().unwrap_or_default();
     let igdb_creds = match (app_cfg.igdb_client_id, app_cfg.igdb_client_secret) {
         (Some(cid), Some(sec)) if !cid.trim().is_empty() && !sec.trim().is_empty() => {
             Some((cid.trim().to_string(), sec.trim().to_string()))
@@ -2787,16 +3553,24 @@ async fn scan_and_import_console_roms(
     let mut added_count: u32 = 0;
 
     for rom in discovered {
-        let norm_rom = ScoreEnrichmentEngine::normalize_title(&rom.clean_title);
-
         let existing_by_path_idx = existing_games.iter().position(|g| {
-            g.executable_path.as_deref().unwrap_or("").eq_ignore_ascii_case(&rom.file_path)
+            g.executable_path
+                .as_deref()
+                .map(|p| !p.trim().is_empty() && p.trim().eq_ignore_ascii_case(&rom.file_path))
+                .unwrap_or(false)
         });
 
         let existing_by_title_idx = if existing_by_path_idx.is_none() {
-            existing_games.iter().position(|g| {
-                ScoreEnrichmentEngine::normalize_title(&g.title) == norm_rom
-            })
+            let temp_rom_game = Game {
+                id: String::new(),
+                title: rom.clean_title.clone(),
+                source: "Emulation".to_string(),
+                executable_path: Some(rom.file_path.clone()),
+                emulator_id: Some(conf.id.clone()),
+                platforms: vec![conf.name.clone()],
+                ..Default::default()
+            };
+            find_matching_existing_game_idx(&existing_games, &temp_rom_game)
         } else {
             None
         };
@@ -2831,40 +3605,41 @@ async fn scan_and_import_console_roms(
                 }
             }
             if modified {
-                let _ = state.db.upsert_game(game);
-                let _ = app_handle.emit("game-updated", &game);
+                let _ = db.save_game_exact(game);
+                on_update(game);
             }
         } else if let Some(idx) = existing_by_title_idx {
-            // Merging local ROM into existing matching title (e.g. from RetroAchievements cloud sync ra_XXXX)
-            let game = &mut existing_games[idx];
-            game.executable_path = Some(rom.file_path.clone());
-            game.is_installed = true;
-            game.emulator_id = Some(conf.id.clone());
-            if game.size_on_disk.is_none() || game.size_on_disk == Some(0) {
-                game.size_on_disk = Some(rom.file_size_bytes);
-            }
-            if !game.platforms.iter().any(|p| p.eq_ignore_ascii_case(&conf.name)) {
-                game.platforms.push(conf.name.clone());
-            }
-            if game.cover_image.is_none() && rom.local_cover_path.is_some() {
-                game.cover_image = rom.local_cover_path.clone();
-            }
+            // Merging local ROM into existing matching title (e.g. from Playnite backup or RetroAchievements cloud sync)
+            let incoming_rom = Game {
+                id: String::new(),
+                title: rom.clean_title.clone(),
+                source: "Emulation".to_string(),
+                executable_path: Some(rom.file_path.clone()),
+                emulator_id: Some(conf.id.clone()),
+                platforms: vec![conf.name.clone()],
+                is_installed: true,
+                size_on_disk: Some(rom.file_size_bytes),
+                cover_image: rom.local_cover_path.clone(),
+                ..Default::default()
+            };
+            let mut merged = merge_incoming_into_existing_game(&existing_games[idx], &incoming_rom);
 
             if let Some((ref cid, ref csec)) = igdb_creds {
-                if game.description.is_none() || game.cover_image.is_none() || game.background_image.is_none() {
+                if merged.description.is_none() || merged.cover_image.is_none() || merged.background_image.is_none() {
                     if let Ok(meta) = metadata::igdb::IgdbFetcher::fetch_metadata(
                         cid,
                         csec,
                         &rom.clean_title,
                         Some(&[conf.name.clone()]),
                     ).await {
-                        apply_igdb_meta(game, meta);
+                        apply_igdb_meta(&mut merged, meta);
                     }
                 }
             }
 
-            let _ = state.db.upsert_game(game);
-            let _ = app_handle.emit("game-updated", &game);
+            let _ = db.save_game_exact(&merged);
+            on_update(&merged);
+            existing_games[idx] = merged;
             added_count += 1;
         } else {
             // New local ROM title
@@ -2903,15 +3678,27 @@ async fn scan_and_import_console_roms(
                 new_game.hltb_completionist = Some(hltb.completionist_hours);
             }
 
-            if let Ok(()) = state.db.upsert_game(&new_game) {
+            if let Ok(()) = db.upsert_game(&new_game) {
                 added_count += 1;
-                let _ = app_handle.emit("game-updated", &new_game);
+                on_update(&new_game);
                 existing_games.push(new_game);
             }
         }
     }
 
     Ok(added_count)
+}
+
+#[tauri::command]
+async fn scan_and_import_console_roms(
+    console_id: String,
+    state: State<'_, AppState>,
+    app_handle: AppHandle,
+) -> Result<u32, String> {
+    let handle = app_handle.clone();
+    scan_and_import_console_roms_core(&state.db, &console_id, move |g| {
+        let _ = handle.emit("game-updated", g);
+    }).await
 }
 
 #[tauri::command]
@@ -2953,20 +3740,33 @@ fn set_game_hidden(
     let all = state.db.get_all_games()?;
     if let Some(mut game) = all.into_iter().find(|g| g.id == id) {
         game.is_hidden = hidden;
+        game.updated_at = Some(chrono::Utc::now().to_rfc3339());
         state.db.save_game_exact(&game)?;
         let _ = app_handle.emit("game-updated", &game);
+        cloud_sync::spawn_background_export(state.db.clone());
     }
     Ok(())
 }
 
 #[tauri::command]
-fn stop_game(game_id: String, app_handle: AppHandle) -> Result<(), String> {
-    GameLauncher::stop_game(app_handle, &game_id)
+fn stop_game(game_id: String, app_handle: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    GameLauncher::stop_game(
+        crate::launcher::LauncherEventSink::Tauri(app_handle),
+        Some(state.db.clone()),
+        &game_id,
+    )
 }
 
 #[tauri::command]
 fn get_running_games(app_handle: AppHandle, state: State<'_, AppState>) -> Result<Vec<String>, String> {
-    Ok(GameLauncher::get_running_games(Some(&app_handle), Some(&state.db)))
+    let sink = crate::launcher::LauncherEventSink::Tauri(app_handle);
+    Ok(GameLauncher::get_running_games(Some(&sink), Some(&state.db)))
+}
+
+#[tauri::command]
+fn get_available_runners(state: State<'_, AppState>) -> Result<Vec<crate::launcher::RunnerInfo>, String> {
+    let cfg = state.db.get_app_config().unwrap_or_default();
+    Ok(crate::launcher::RunnerManager::detect_available_runners(cfg.linux_custom_runner_path.as_deref()))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -3004,8 +3804,7 @@ fn is_version_newer(latest: &str, current: &str) -> bool {
     l > c
 }
 
-#[tauri::command]
-async fn check_for_app_updates() -> Result<UpdateCheckResult, String> {
+pub async fn check_for_app_updates_core() -> Result<UpdateCheckResult, String> {
     let current_version = env!("CARGO_PKG_VERSION").to_string();
     let url = "https://api.github.com/repos/Screamycat/OpenPlay/releases/latest";
     let client = reqwest::Client::builder()
@@ -3096,6 +3895,11 @@ async fn check_for_app_updates() -> Result<UpdateCheckResult, String> {
     }
 }
 
+#[tauri::command]
+async fn check_for_app_updates() -> Result<UpdateCheckResult, String> {
+    check_for_app_updates_core().await
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateProgressPayload {
     pub downloaded: u64,
@@ -3103,11 +3907,10 @@ pub struct UpdateProgressPayload {
     pub percentage: u32,
 }
 
-#[tauri::command]
-async fn download_app_update(
-    download_url: String,
-    target_version: String,
-    app_handle: AppHandle,
+pub async fn download_app_update_core(
+    download_url: &str,
+    target_version: &str,
+    on_progress: impl Fn(UpdateProgressPayload),
 ) -> Result<String, String> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(300))
@@ -3115,7 +3918,7 @@ async fn download_app_update(
         .map_err(|e| e.to_string())?;
 
     let mut resp = client
-        .get(&download_url)
+        .get(download_url)
         .header("User-Agent", format!("OpenPlay/{}", env!("CARGO_PKG_VERSION")))
         .send()
         .await
@@ -3143,14 +3946,11 @@ async fn download_app_update(
     let mut downloaded: u64 = 0;
     let mut last_percentage: u32 = 0;
 
-    let _ = app_handle.emit(
-        "app-update-progress",
-        UpdateProgressPayload {
-            downloaded: 0,
-            total,
-            percentage: 0,
-        },
-    );
+    on_progress(UpdateProgressPayload {
+        downloaded: 0,
+        total,
+        percentage: 0,
+    });
 
     while let Some(chunk) = resp.chunk().await.map_err(|e| format!("Error receiving chunk: {}", e))? {
         file.write_all(&chunk)
@@ -3165,37 +3965,39 @@ async fn download_app_update(
 
         if percentage != last_percentage || downloaded == total {
             last_percentage = percentage;
-            let _ = app_handle.emit(
-                "app-update-progress",
-                UpdateProgressPayload {
-                    downloaded,
-                    total,
-                    percentage,
-                },
-            );
+            on_progress(UpdateProgressPayload {
+                downloaded,
+                total,
+                percentage,
+            });
         }
     }
 
     file.flush().map_err(|e| e.to_string())?;
 
-    let _ = app_handle.emit(
-        "app-update-progress",
-        UpdateProgressPayload {
-            downloaded,
-            total: downloaded,
-            percentage: 100,
-        },
-    );
+    on_progress(UpdateProgressPayload {
+        downloaded,
+        total: downloaded,
+        percentage: 100,
+    });
 
     Ok(dest_path.to_string_lossy().to_string())
 }
 
 #[tauri::command]
-async fn apply_update_and_restart(
-    installer_path: String,
+async fn download_app_update(
+    download_url: String,
+    target_version: String,
     app_handle: AppHandle,
-) -> Result<(), String> {
-    let path = std::path::PathBuf::from(&installer_path);
+) -> Result<String, String> {
+    let handle = app_handle.clone();
+    download_app_update_core(&download_url, &target_version, move |p| {
+        let _ = handle.emit("app-update-progress", p);
+    }).await
+}
+
+pub fn apply_update_and_restart_core(installer_path: &str) -> Result<(), String> {
+    let path = std::path::PathBuf::from(installer_path);
     if !path.exists() {
         return Err("Installer file not found on disk".to_string());
     }
@@ -3207,12 +4009,19 @@ async fn apply_update_and_restart(
 
         let current_exe = std::env::current_exe().map_err(|e| e.to_string())?;
         let current_exe_str = current_exe.to_string_lossy().to_string();
+        let install_dir = current_exe
+            .parent()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_default();
         let installer_str = path.to_string_lossy().to_string();
 
         let install_cmd = if installer_str.to_lowercase().ends_with(".msi") {
-            format!("msiexec /i \"{}\" /qn /norestart", installer_str)
+            format!("start /wait \"\" msiexec /i \"{}\" /qn /norestart", installer_str)
+        } else if !install_dir.is_empty() {
+            // NSIS /D= must be the last parameter and without quotes
+            format!("start /wait \"\" \"{}\" /S /D={}", installer_str, install_dir)
         } else {
-            format!("\"{}\" /S", installer_str)
+            format!("start /wait \"\" \"{}\" /S", installer_str)
         };
 
         // Write a self-deleting batch script to %TEMP% so Rust's CRT argument quote-escaping
@@ -3224,7 +4033,7 @@ async fn apply_update_and_restart(
              {}\r\n\
              ping 127.0.0.1 -n 2 >nul\r\n\
              start \"\" \"{}\"\r\n\
-             del \"%~f0\" >nul 2>&1\r\n",
+             (goto) 2>nul & del \"%~f0\"\r\n",
             install_cmd, current_exe_str
         );
 
@@ -3237,8 +4046,7 @@ async fn apply_update_and_restart(
             .spawn()
             .map_err(|e| format!("Failed to launch updater: {}", e))?;
 
-        app_handle.exit(0);
-        Ok(())
+        std::process::exit(0);
     }
 
     #[cfg(not(target_os = "windows"))]
@@ -3248,11 +4056,32 @@ async fn apply_update_and_restart(
 }
 
 #[tauri::command]
+async fn apply_update_and_restart(
+    installer_path: String,
+    _app_handle: AppHandle,
+) -> Result<(), String> {
+    apply_update_and_restart_core(&installer_path)
+}
+
+#[tauri::command]
 async fn select_file(filter: Option<String>) -> Result<Option<String>, String> {
     let mut dialog = rfd::AsyncFileDialog::new().set_title("Select File");
     if let Some(ref f) = filter {
         if f.contains(".exe") {
-            dialog = dialog.add_filter("Executable (*.exe)", &["exe"]);
+            #[cfg(target_os = "windows")]
+            {
+                dialog = dialog.add_filter("Executable (*.exe)", &["exe"]);
+            }
+            #[cfg(target_os = "linux")]
+            {
+                dialog = dialog
+                    .add_filter("Linux Executables & Scripts (*, *.AppImage, *.sh, *.desktop, *.bin)", &["AppImage", "sh", "desktop", "bin", "run", "exe"])
+                    .add_filter("All Files (*)", &["*"]);
+            }
+            #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+            {
+                dialog = dialog.add_filter("All Files (*)", &["*"]);
+            }
         } else if f.contains(".zip") {
             dialog = dialog.add_filter("ZIP Archive (*.zip)", &["zip"]);
         }
@@ -3275,7 +4104,20 @@ async fn select_multiple_files(filter: Option<String>) -> Result<Vec<String>, St
     let mut dialog = rfd::AsyncFileDialog::new().set_title("Select Files");
     if let Some(ref f) = filter {
         if f.contains(".exe") {
-            dialog = dialog.add_filter("Executable (*.exe)", &["exe"]);
+            #[cfg(target_os = "windows")]
+            {
+                dialog = dialog.add_filter("Executable (*.exe)", &["exe"]);
+            }
+            #[cfg(target_os = "linux")]
+            {
+                dialog = dialog
+                    .add_filter("Linux Executables & Scripts (*, *.AppImage, *.sh, *.desktop, *.bin)", &["AppImage", "sh", "desktop", "bin", "run", "exe"])
+                    .add_filter("All Files (*)", &["*"]);
+            }
+            #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+            {
+                dialog = dialog.add_filter("All Files (*)", &["*"]);
+            }
         } else if f.contains(".zip") {
             dialog = dialog.add_filter("ZIP Archive (*.zip)", &["zip"]);
         }
@@ -3294,11 +4136,11 @@ fn get_playnite_backup_summary(zip_path: String) -> Result<scanner::playnite::Pl
     scanner::playnite::PlayniteScanner::scan_playnite_backup_summary(&zip_path)
 }
 
-#[tauri::command]
-async fn import_playnite_backup(
-    options: scanner::playnite::PlayniteImportOptions,
-    app_handle: AppHandle,
-    state: State<'_, AppState>,
+pub fn import_playnite_backup_core(
+    options: &scanner::playnite::PlayniteImportOptions,
+    db: &Database,
+    app_handle: Option<&AppHandle>,
+    mut on_game_updated: impl FnMut(&Game),
 ) -> Result<scanner::playnite::PlayniteImportResult, String> {
     let dest_artwork = dirs::data_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("."))
@@ -3307,9 +4149,9 @@ async fn import_playnite_backup(
         .join("playnite");
 
     let (games, artwork_count) = scanner::playnite::PlayniteScanner::parse_playnite_games(
-        &options,
+        options,
         &dest_artwork,
-        Some(&app_handle),
+        app_handle,
     )?;
 
     let total = games.len();
@@ -3318,10 +4160,15 @@ async fn import_playnite_backup(
     let mut sources_set = std::collections::HashSet::new();
 
     // Cache existing games once for fast, accurate matching & non-destructive preservation
-    let mut all_existing = state.db.get_all_games().unwrap_or_default();
+    let mut all_existing = db.get_all_games().unwrap_or_default();
 
     for mut game in games {
         sources_set.insert(game.source.clone());
+
+        let is_local_or_manual_src = |s: &str| {
+            let l = s.trim().to_lowercase();
+            l == "local" || l == "manual"
+        };
 
         // Find existing match by ID, (source, source_id), or normalized (title, source)
         let existing_idx = all_existing.iter().position(|eg| {
@@ -3330,8 +4177,9 @@ async fn import_playnite_backup(
                     && eg.source.eq_ignore_ascii_case(&game.source)
                     && eg.source_id.is_some()
                     && eg.source_id == game.source_id)
-                || (eg.title.trim().eq_ignore_ascii_case(game.title.trim())
-                    && eg.source.trim().eq_ignore_ascii_case(game.source.trim()))
+                || (titles_match_for_relink(&eg.title, &game.title)
+                    && (eg.source.trim().eq_ignore_ascii_case(game.source.trim())
+                        || (is_local_or_manual_src(&eg.source) && is_local_or_manual_src(&game.source))))
         });
 
         if let Some(idx) = existing_idx {
@@ -3341,7 +4189,7 @@ async fn import_playnite_backup(
             // If the existing game was stored under an older ID (e.g. legacy playnite_{guid})
             // and the imported game now has canonical native ID (or vice versa), remove the old duplicate
             if existing.id != game.id {
-                let _ = state.db.delete_game(&existing.id);
+                let _ = db.delete_game(&existing.id);
             }
 
             // --- BUG 007 FIX: Selective Non-Destructive Field Preservation ---
@@ -3383,6 +4231,10 @@ async fn import_playnite_backup(
             } else if existing.playtime_seconds > game.playtime_seconds {
                 // If local playtime is higher than backup, preserve higher playtime
                 game.playtime_seconds = existing.playtime_seconds;
+            }
+
+            if game.playtime_by_device.is_none() && existing.playtime_by_device.is_some() {
+                game.playtime_by_device = existing.playtime_by_device.clone();
             }
 
             if !options.import_last_played {
@@ -3427,8 +4279,8 @@ async fn import_playnite_backup(
             all_existing.push(game.clone());
         }
 
-        let _ = state.db.upsert_game(&game);
-        let _ = app_handle.emit("game-updated", &game);
+        let _ = db.upsert_game(&game);
+        on_game_updated(&game);
     }
 
     let mut sources: Vec<String> = sources_set.into_iter().collect();
@@ -3441,6 +4293,17 @@ async fn import_playnite_backup(
         skipped: 0,
         artwork_extracted: artwork_count,
         sources,
+    })
+}
+
+#[tauri::command]
+async fn import_playnite_backup(
+    options: scanner::playnite::PlayniteImportOptions,
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<scanner::playnite::PlayniteImportResult, String> {
+    import_playnite_backup_core(&options, &state.db, Some(&app_handle), |g| {
+        let _ = app_handle.emit("game-updated", g);
     })
 }
 
@@ -3466,7 +4329,10 @@ fn open_in_explorer(path: String) -> Result<(), String> {
     }
     #[cfg(not(target_os = "windows"))]
     {
-        let _ = open::that(target);
+        let _ = std::process::Command::new("xdg-open")
+            .arg(target)
+            .spawn()
+            .map_err(|e| format!("Failed to open file manager via xdg-open: {}", e))?;
     }
     Ok(())
 }
@@ -3482,77 +4348,32 @@ fn scan_local_folder(path: String) -> Result<Vec<Game>, String> {
 }
 
 #[tauri::command]
-fn add_local_games(
+fn scan_installed_linux_apps() -> Result<Vec<Game>, String> {
+    scanner::local::LocalScanner::scan_installed_desktop_apps()
+}
+
+pub fn add_local_games_core(
     games: Vec<Game>,
-    app_handle: AppHandle,
-    state: State<'_, AppState>,
+    db: &Database,
+    mut on_game_updated: impl FnMut(&Game),
 ) -> Result<usize, String> {
-    let existing_games = state.db.get_all_games().unwrap_or_default();
+    let mut existing_games = db.get_all_games().unwrap_or_default();
     let count = games.len();
 
     for incoming in games {
-        let norm_incoming = normalize_title_for_match(&incoming.title);
-
-        let matching_existing = existing_games.iter().find(|eg| {
-            if eg.id == incoming.id {
-                return true;
-            }
-            if let (Some(ref e_exe), Some(ref in_exe)) = (&eg.executable_path, &incoming.executable_path) {
-                if !e_exe.is_empty() && e_exe.eq_ignore_ascii_case(in_exe) {
-                    return true;
-                }
-            }
-            if let (Some(ref e_dir), Some(ref in_dir)) = (&eg.install_directory, &incoming.install_directory) {
-                if !e_dir.is_empty() && e_dir.eq_ignore_ascii_case(in_dir) {
-                    return true;
-                }
-            }
-            if !norm_incoming.is_empty() && normalize_title_for_match(&eg.title) == norm_incoming {
-                return true;
-            }
-            false
-        });
-
-        if let Some(existing) = matching_existing {
+        if let Some(idx) = find_matching_existing_game_idx(&existing_games, &incoming) {
             // Re-link to existing game! Keep existing id, user progress, artwork, ratings, tags, notes.
-            let mut merged = existing.clone();
-            if incoming.executable_path.is_some() {
-                merged.executable_path = incoming.executable_path.clone();
-            }
-            if incoming.install_directory.is_some() {
-                merged.install_directory = incoming.install_directory.clone();
-            }
-            if incoming.launch_arguments.is_some() && !incoming.launch_arguments.as_deref().unwrap_or("").trim().is_empty() {
-                merged.launch_arguments = incoming.launch_arguments.clone();
-            }
-            if incoming.size_on_disk.is_some() {
-                merged.size_on_disk = incoming.size_on_disk;
-            }
-
-            // Restore installed and playable state
-            merged.is_installed = true;
-
-            // Artwork fallback: retain existing if present, otherwise populate from incoming
-            if merged.cover_image.is_none() || merged.cover_image.as_deref().unwrap_or("").trim().is_empty() {
-                merged.cover_image = incoming.cover_image.clone();
-            }
-            if merged.background_image.is_none() || merged.background_image.as_deref().unwrap_or("").trim().is_empty() {
-                merged.background_image = incoming.background_image.clone();
-            }
-            if merged.logo_image.is_none() || merged.logo_image.as_deref().unwrap_or("").trim().is_empty() {
-                merged.logo_image = incoming.logo_image.clone();
-            }
-            if merged.icon_image.is_none() || merged.icon_image.as_deref().unwrap_or("").trim().is_empty() {
-                merged.icon_image = incoming.icon_image.clone();
-            }
-
-            let _ = state.db.save_game_exact(&merged);
-            let _ = app_handle.emit("game-updated", &merged);
+            let merged = merge_incoming_into_existing_game(&existing_games[idx], &incoming);
+            let _ = db.save_game_exact(&merged);
+            on_game_updated(&merged);
+            existing_games[idx] = merged;
         } else {
             let mut new_game = incoming;
             new_game.is_installed = true;
-            let _ = state.db.upsert_game(&new_game);
-            let _ = app_handle.emit("game-updated", &new_game);
+            new_game.updated_at = Some(chrono::Utc::now().to_rfc3339());
+            let _ = db.upsert_game(&new_game);
+            on_game_updated(&new_game);
+            existing_games.push(new_game);
         }
     }
 
@@ -3560,7 +4381,18 @@ fn add_local_games(
 }
 
 #[tauri::command]
-fn get_game_achievements(
+fn add_local_games(
+    games: Vec<Game>,
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<usize, String> {
+    add_local_games_core(games, &state.db, |g| {
+        let _ = app_handle.emit("game-updated", g);
+    })
+}
+
+#[tauri::command]
+async fn get_game_achievements(
     game_id: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<Achievement>, String> {
@@ -3826,27 +4658,34 @@ async fn fetch_epic_playtimes_fresh(db: &Database) -> std::collections::HashMap<
     }
 }
 
-fn parse_epic_sandbox_from_notes(notes: Option<&str>) -> Option<String> {
-    notes.and_then(|n| {
+fn parse_epic_sandbox_from_notes(notes: Option<&str>, source_id: Option<&str>) -> Option<String> {
+    if let Some(n) = notes {
         if n.contains("namespace:") {
-            n.split("namespace:")
-                .nth(1)
-                .and_then(|s| s.split(';').next())
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-        } else {
-            None
+            if let Some(val) = n.split("namespace:").nth(1).and_then(|s| s.split(';').next()).map(|s| s.trim().to_string()).filter(|s| !s.is_empty()) {
+                return Some(val);
+            }
         }
-    })
+        if n.contains("sandbox:") {
+            if let Some(val) = n.split("sandbox:").nth(1).and_then(|s| s.split(';').next()).map(|s| s.trim().to_string()).filter(|s| !s.is_empty()) {
+                return Some(val);
+            }
+        }
+    }
+    if let Some(sid) = source_id {
+        let trimmed = sid.trim();
+        if !trimmed.is_empty() && !trimmed.contains(' ') {
+            return Some(trimmed.to_string());
+        }
+    }
+    None
 }
 
-#[tauri::command]
-async fn sync_game_achievements(
-    game_id: String,
-    app_handle: AppHandle,
-    state: State<'_, AppState>,
+pub async fn sync_game_achievements_core(
+    db: &Database,
+    game_id: &str,
+    on_update: impl Fn(&Game),
 ) -> Result<Vec<Achievement>, String> {
-    let all = state.db.get_all_games()?;
+    let all = db.get_all_games()?;
     let mut game = all
         .into_iter()
         .find(|g| g.id == game_id)
@@ -3856,26 +4695,27 @@ async fn sync_game_achievements(
     if source_lower == "steam" {
         if let Some(ref appid) = game.source_id {
             if !appid.is_empty() {
-                let integration = state.db.get_integration("steam").unwrap_or_default();
-                let steamid64 = if integration.is_authenticated {
+                let integration = db.get_integration("steam").unwrap_or_default();
+                let local_sid = SteamScanner::find_local_steamid64();
+                let steamid64 = if integration.is_authenticated && integration.account_id.is_some() {
                     integration.account_id.as_deref()
                 } else {
-                    None
+                    local_sid.as_deref()
                 };
 
-                let achievements = SteamMetadataFetcher::fetch_steam_achievements(&game_id, appid, steamid64).await?;
+                let achievements = SteamMetadataFetcher::fetch_steam_achievements(game_id, appid, steamid64).await?;
                 if !achievements.is_empty() {
-                    state.db.save_game_achievements(&game_id, &achievements)?;
+                    db.save_game_achievements(game_id, &achievements)?;
                 }
             }
         }
     } else if source_lower == "epic" {
-        if let Some(ns) = parse_epic_sandbox_from_notes(game.notes.as_deref()) {
-            let (epic_aid, epic_token) = ensure_fresh_epic_auth(&state.db).await;
+        if let Some(ns) = parse_epic_sandbox_from_notes(game.notes.as_deref(), game.source_id.as_deref()) {
+            let (epic_aid, epic_token) = ensure_fresh_epic_auth(db).await;
 
-            if let Ok(achievements) = EpicMetadataFetcher::fetch_epic_achievements(&game_id, &ns, epic_aid.as_deref(), epic_token.as_deref()).await {
+            if let Ok(achievements) = EpicMetadataFetcher::fetch_epic_achievements(game_id, &ns, epic_aid.as_deref(), epic_token.as_deref()).await {
                 if !achievements.is_empty() {
-                    state.db.save_game_achievements(&game_id, &achievements)?;
+                    db.save_game_achievements(game_id, &achievements)?;
                     if let Some(latest_date) = extract_latest_unlock_date(&achievements) {
                         game.last_played = Some(latest_date);
                     }
@@ -3885,12 +4725,12 @@ async fn sync_game_achievements(
     } else if source_lower == "gog" {
         if let Some(ref pid) = game.source_id {
             if !pid.is_empty() {
-                let integration = state.db.get_integration("gog").unwrap_or_default();
+                let integration = db.get_integration("gog").unwrap_or_default();
                 let uid = integration.account_id.as_deref();
                 let tok = integration.access_token.as_deref();
-                if let Ok(achievements) = GogScanner::fetch_gog_achievements(&game_id, pid, uid, tok).await {
+                if let Ok(achievements) = GogScanner::fetch_gog_achievements(game_id, pid, uid, tok).await {
                     if !achievements.is_empty() {
-                        state.db.save_game_achievements(&game_id, &achievements)?;
+                        db.save_game_achievements(game_id, &achievements)?;
                         if let Some(latest_date) = extract_latest_unlock_date(&achievements) {
                             if game.last_played.is_none() || game.last_played.as_deref() < Some(latest_date.as_str()) {
                                 game.last_played = Some(latest_date);
@@ -3903,12 +4743,12 @@ async fn sync_game_achievements(
     } else if source_lower == "xbox" {
         if let Some(ref sid) = game.source_id {
             if !sid.is_empty() {
-                let integration = state.db.get_integration("xbox").unwrap_or_default();
+                let integration = db.get_integration("xbox").unwrap_or_default();
                 if integration.is_authenticated {
                     if let (Some(ref xuid), Some(ref auth_header)) = (&integration.account_id, &integration.access_token) {
-                        if let Ok(achievements) = XboxScanner::fetch_xbox_achievements(&game_id, sid, xuid, auth_header).await {
+                        if let Ok(achievements) = XboxScanner::fetch_xbox_achievements(game_id, sid, xuid, auth_header).await {
                             if !achievements.is_empty() {
-                                state.db.save_game_achievements(&game_id, &achievements)?;
+                                db.save_game_achievements(game_id, &achievements)?;
                                 if let Some(latest_date) = extract_latest_unlock_date(&achievements) {
                                     if game.last_played.is_none() || game.last_played.as_deref() < Some(latest_date.as_str()) {
                                         game.last_played = Some(latest_date);
@@ -3923,12 +4763,12 @@ async fn sync_game_achievements(
     } else if source_lower == "ea app" || source_lower == "ea" {
         if let Some(ref offer_id) = game.source_id {
             if !offer_id.is_empty() {
-                let integration = state.db.get_integration("ea").unwrap_or_default();
+                let integration = db.get_integration("ea").unwrap_or_default();
                 let pid = integration.account_id.as_deref().unwrap_or("");
                 let tok = integration.access_token.as_deref();
                 if let Ok(achs) = EaScanner::fetch_ea_achievements(&game.id, offer_id, pid, tok, &game.title).await {
                     if !achs.is_empty() {
-                        let _ = state.db.save_game_achievements(&game.id, &achs);
+                        let _ = db.save_game_achievements(&game.id, &achs);
                         if let Some(latest_date) = extract_latest_unlock_date(&achs) {
                             if game.last_played.is_none() || game.last_played.as_deref() < Some(latest_date.as_str()) {
                                 game.last_played = Some(latest_date);
@@ -3940,7 +4780,7 @@ async fn sync_game_achievements(
         }
     } else if source_lower == "retroachievements" || source_lower.contains("retro") {
         let (username, api_key) = {
-            let cfg = state.db.get_app_config()?;
+            let cfg = db.get_app_config()?;
             let u = cfg.retroachievements_username.as_deref().unwrap_or("").trim().to_string();
             let k = cfg.retroachievements_api_key.as_deref().unwrap_or("").trim().to_string();
             if u.is_empty() || k.is_empty() {
@@ -3955,9 +4795,9 @@ async fn sync_game_achievements(
         if let Some(ref sid) = game.source_id {
             if let Ok(ra_id) = sid.parse::<u64>() {
                 if let Ok(detail) = RetroAchievementsClient::fetch_game_info_and_progress(ra_id, &username, &api_key).await {
-                    let achievements = RetroAchievementsClient::extract_achievements(&game_id, &detail);
+                    let achievements = RetroAchievementsClient::extract_achievements(game_id, &detail);
                     if !achievements.is_empty() {
-                        state.db.save_game_achievements(&game_id, &achievements)?;
+                        db.save_game_achievements(game_id, &achievements)?;
                         if let Some(playtime) = detail.user_total_playtime {
                             if playtime > game.playtime_seconds {
                                 game.playtime_seconds = playtime;
@@ -3974,15 +4814,28 @@ async fn sync_game_achievements(
         }
     }
 
-    let _ = state.db.upsert_game(&game);
-    let _ = app_handle.emit("game-updated", &game);
+    let _ = db.upsert_game(&game);
+    on_update(&game);
 
-    let _ = app_handle.emit("achievements-updated", &game_id);
-    state.db.get_game_achievements(&game_id)
+    db.get_game_achievements(game_id)
 }
 
 #[tauri::command]
-fn get_game_achievement_summary(
+async fn sync_game_achievements(
+    game_id: String,
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Vec<Achievement>, String> {
+    let handle = app_handle.clone();
+    let res = sync_game_achievements_core(&state.db, &game_id, move |g| {
+        let _ = handle.emit("game-updated", g);
+    }).await;
+    let _ = app_handle.emit("achievements-updated", &game_id);
+    res
+}
+
+#[tauri::command]
+async fn get_game_achievement_summary(
     game_id: String,
     state: State<'_, AppState>,
 ) -> Result<GameAchievementSummary, String> {
@@ -3996,44 +4849,66 @@ fn get_game_achievement_summary(
 }
 
 #[tauri::command]
-fn get_hunter_profile(state: State<'_, AppState>) -> Result<HunterProfile, String> {
+async fn get_hunter_profile(state: State<'_, AppState>) -> Result<HunterProfile, String> {
     let all = state.db.get_all_games()?;
     state.db.get_hunter_profile(&all)
 }
 
-#[tauri::command]
-async fn sync_all_achievements(
-    app_handle: AppHandle,
-    state: State<'_, AppState>,
+pub async fn sync_all_achievements_core(
+    app_handle: Option<&AppHandle>,
+    db: &Database,
 ) -> Result<HunterProfile, String> {
-    let all = state.db.get_all_games()?;
-    let steam_integration = state.db.get_integration("steam").unwrap_or_default();
-    let steamid64 = if steam_integration.is_authenticated {
+    let all = db.get_all_games()?;
+    let steam_integration = db.get_integration("steam").unwrap_or_default();
+    let steamid64 = if steam_integration.is_authenticated && steam_integration.account_id.is_some() {
         steam_integration.account_id.clone()
     } else {
-        None
+        SteamScanner::find_local_steamid64()
     };
 
     // Ensure Epic token is fresh if authenticated
-    let (epic_aid, epic_token) = ensure_fresh_epic_auth(&state.db).await;
+    let (epic_aid, epic_token) = ensure_fresh_epic_auth(db).await;
 
-    let gog_int = state.db.get_integration("gog").unwrap_or_default();
+    let gog_int = db.get_integration("gog").unwrap_or_default();
     let gog_uid = gog_int.account_id.clone();
     let gog_tok = gog_int.access_token.clone();
 
-    let xbox_int = state.db.get_integration("xbox").unwrap_or_default();
+    let xbox_int = db.get_integration("xbox").unwrap_or_default();
     let xbox_xuid = if xbox_int.is_authenticated { xbox_int.account_id.clone() } else { None };
     let xbox_tok = if xbox_int.is_authenticated { xbox_int.access_token.clone() } else { None };
 
-    let ea_int = state.db.get_integration("ea").unwrap_or_default();
+    let ea_int = db.get_integration("ea").unwrap_or_default();
     let ea_pid = ea_int.account_id.clone().unwrap_or_default();
     let ea_tok = ea_int.access_token.clone();
 
-    let semaphore = Arc::new(tokio::sync::Semaphore::new(12));
+    // Target games that have playtime, are installed, or already have achievements tracked in the database
+    // (ignoring unplayed backlog titles to avoid rate limiting and excessive socket allocations)
+    let candidate_games: Vec<Game> = all
+        .into_iter()
+        .filter(|g| {
+            if g.playtime_seconds > 0 || g.is_installed {
+                return true;
+            }
+            if let Ok(summary) = db.get_game_achievement_summary(g) {
+                if summary.total_achievements > 0 {
+                    return true;
+                }
+            }
+            false
+        })
+        .collect();
+
+    let steam_semaphore = Arc::new(tokio::sync::Semaphore::new(2));
+    let general_semaphore = Arc::new(tokio::sync::Semaphore::new(6));
     let mut join_set = tokio::task::JoinSet::new();
 
-    for game in all.iter().cloned() {
-        let sem = semaphore.clone();
+    for game in candidate_games {
+        let is_steam = game.source.eq_ignore_ascii_case("steam");
+        let sem = if is_steam {
+            steam_semaphore.clone()
+        } else {
+            general_semaphore.clone()
+        };
         let sid_clone = steamid64.clone();
         let eaid_clone = epic_aid.clone();
         let etok_clone = epic_token.clone();
@@ -4046,6 +4921,9 @@ async fn sync_all_achievements(
 
         join_set.spawn(async move {
             let _permit = sem.acquire_owned().await.ok()?;
+            if is_steam {
+                tokio::time::sleep(std::time::Duration::from_millis(60)).await;
+            }
             let source_lower = game.source.to_lowercase();
             if source_lower == "steam" {
                 let appid = game.source_id.as_deref().filter(|s| !s.is_empty())?;
@@ -4058,7 +4936,7 @@ async fn sync_all_achievements(
                 .ok()?;
                 Some((game, achs))
             } else if source_lower == "epic" {
-                let ns = parse_epic_sandbox_from_notes(game.notes.as_deref())?;
+                let ns = parse_epic_sandbox_from_notes(game.notes.as_deref(), game.source_id.as_deref())?;
                 let achs = EpicMetadataFetcher::fetch_epic_achievements(
                     &game.id,
                     &ns,
@@ -4105,36 +4983,51 @@ async fn sync_all_achievements(
         });
     }
 
+    let mut has_updated_games = false;
     while let Some(res) = join_set.join_next().await {
         if let Ok(Some((mut game, achs))) = res {
             if !achs.is_empty() {
-                let _ = state.db.save_game_achievements(&game.id, &achs);
+                let _ = db.save_game_achievements(&game.id, &achs);
                 if let Some(latest_date) = extract_latest_unlock_date(&achs) {
                     game.last_played = Some(latest_date);
-                    let _ = state.db.upsert_game(&game);
-                    let _ = app_handle.emit("game-updated", &game);
+                    let _ = db.upsert_game(&game);
+                    has_updated_games = true;
                 }
             }
         }
     }
 
+    if has_updated_games {
+        if let Some(app) = app_handle {
+            let _ = app.emit("library-updated", ());
+        }
+    }
+
     // Also sync RetroAchievements if credentials are configured
     let (ra_user, ra_key) = {
-        let cfg = state.db.get_app_config()?;
+        let cfg = db.get_app_config()?;
         let u = cfg.retroachievements_username.as_deref().unwrap_or("").trim().to_string();
         let k = cfg.retroachievements_api_key.as_deref().unwrap_or("").trim().to_string();
         (u, k)
     };
     if !ra_user.is_empty() && !ra_key.is_empty() {
-        let _ = sync_retroachievements_core(&app_handle, &state.db, &ra_user, &ra_key).await;
+        let _ = sync_retroachievements_core(app_handle, db, &ra_user, &ra_key).await;
     }
 
-    let updated_all = state.db.get_all_games()?;
-    state.db.get_hunter_profile(&updated_all)
+    let updated_all = db.get_all_games()?;
+    db.get_hunter_profile(&updated_all)
+}
+
+#[tauri::command]
+async fn sync_all_achievements(
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<HunterProfile, String> {
+    sync_all_achievements_core(Some(&app_handle), &state.db).await
 }
 
 async fn sync_retroachievements_core(
-    app_handle: &AppHandle,
+    app_handle: Option<&AppHandle>,
     db: &Database,
     username: &str,
     api_key: &str,
@@ -4144,6 +5037,7 @@ async fn sync_retroachievements_core(
         .map_err(|e| format!("Failed to fetch RetroAchievements user games: {}", e))?;
 
     let all_games = db.get_all_games()?;
+    let current_device_id = db.get_or_create_device_id().unwrap_or_default();
     let mut game_map_by_source_id: std::collections::HashMap<String, Game> = std::collections::HashMap::new();
     let mut game_map_by_title: std::collections::HashMap<String, Game> = std::collections::HashMap::new();
     let mut game_map_by_norm: std::collections::HashMap<String, Game> = std::collections::HashMap::new();
@@ -4173,23 +5067,26 @@ async fn sync_retroachievements_core(
         let title_key = detail.title.to_lowercase().trim().to_string();
         let norm_key = ScoreEnrichmentEngine::normalize_title(&detail.title);
 
-        let mut game = if let Some(existing) = game_map_by_source_id.get(&game_id_str) {
-            existing.clone()
+        let (mut game, is_existing_game) = if let Some(existing) = game_map_by_source_id.get(&game_id_str) {
+            (existing.clone(), true)
         } else if let Some(existing) = game_map_by_title.get(&title_key) {
-            existing.clone()
+            (existing.clone(), true)
         } else if let Some(existing) = game_map_by_norm.get(&norm_key) {
-            existing.clone()
+            (existing.clone(), true)
         } else {
-            Game {
-                id: format!("ra_{}", prog.game_id),
-                title: detail.title.clone(),
-                source: "RetroAchievements".to_string(),
-                source_id: Some(game_id_str.clone()),
-                platforms: detail.console_name.as_ref().map(|c| vec![c.clone()]).unwrap_or_else(|| vec!["Retro".to_string()]),
-                is_installed: false,
-                date_added: Some(chrono::Utc::now().to_rfc3339()),
-                ..Default::default()
-            }
+            (
+                Game {
+                    id: format!("ra_{}", prog.game_id),
+                    title: detail.title.clone(),
+                    source: "RetroAchievements".to_string(),
+                    source_id: Some(game_id_str.clone()),
+                    platforms: detail.console_name.as_ref().map(|c| vec![c.clone()]).unwrap_or_else(|| vec!["Retro".to_string()]),
+                    is_installed: false,
+                    date_added: Some(chrono::Utc::now().to_rfc3339()),
+                    ..Default::default()
+                },
+                false,
+            )
         };
 
         if game.source_id.is_none() {
@@ -4220,22 +5117,19 @@ async fn sync_retroachievements_core(
         if game.publisher.is_none() {
             game.publisher = detail.publisher.clone();
         }
-        if let Some(playtime) = detail.user_total_playtime {
-            if playtime > game.playtime_seconds {
-                game.playtime_seconds = playtime;
-            }
-        }
-        if let Some(ref lp) = prog.last_played {
-            let date_str = if lp.len() >= 10 { &lp[..10] } else { lp.as_str() };
-            if game.last_played.is_none() || game.last_played.as_deref() < Some(date_str) {
-                game.last_played = Some(date_str.to_string());
-            }
-        } else if let Some(ref recent_date) = prog.most_recent_awarded_date {
-            let date_str = if recent_date.len() >= 10 { &recent_date[..10] } else { recent_date.as_str() };
-            if game.last_played.is_none() || game.last_played.as_deref() < Some(date_str) {
-                game.last_played = Some(date_str.to_string());
-            }
-        }
+        let ra_lp = prog
+            .last_played
+            .as_deref()
+            .or(prog.most_recent_awarded_date.as_deref())
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        apply_remote_play_update(
+            &mut game,
+            ra_lp,
+            detail.user_total_playtime,
+            is_existing_game,
+            &current_device_id,
+        );
 
         if let Some(ref award) = prog.highest_award_kind {
             let award_lower = award.to_lowercase();
@@ -4262,8 +5156,10 @@ async fn sync_retroachievements_core(
             let _ = db.save_game_achievements(&game.id, &achs);
         }
 
-        let _ = app_handle.emit("game-updated", &game);
-        let _ = app_handle.emit("achievements-updated", &game.id);
+        if let Some(app) = app_handle {
+            let _ = app.emit("game-updated", &game);
+            let _ = app.emit("achievements-updated", &game.id);
+        }
 
         // Polite pace between requests to prevent HTTP 429 rate limiting
         tokio::time::sleep(std::time::Duration::from_millis(250)).await;
@@ -4272,13 +5168,12 @@ async fn sync_retroachievements_core(
     Ok(())
 }
 
-#[tauri::command]
-async fn sync_retroachievements(
-    app_handle: AppHandle,
-    state: State<'_, AppState>,
+pub async fn sync_retroachievements_core_wrapper(
+    app_handle: Option<&AppHandle>,
+    db: &Database,
 ) -> Result<HunterProfile, String> {
     let (username, api_key) = {
-        let cfg = state.db.get_app_config()?;
+        let cfg = db.get_app_config()?;
         let u = cfg.retroachievements_username.as_deref().unwrap_or("").trim().to_string();
         let k = cfg.retroachievements_api_key.as_deref().unwrap_or("").trim().to_string();
         if u.is_empty() || k.is_empty() {
@@ -4290,27 +5185,35 @@ async fn sync_retroachievements(
         (u, k)
     };
 
-    sync_retroachievements_core(&app_handle, &state.db, &username, &api_key).await?;
+    sync_retroachievements_core(app_handle, db, &username, &api_key).await?;
 
-    let updated_all = state.db.get_all_games()?;
-    state.db.get_hunter_profile(&updated_all)
+    let updated_all = db.get_all_games()?;
+    db.get_hunter_profile(&updated_all)
+}
+
+#[tauri::command]
+async fn sync_retroachievements(
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<HunterProfile, String> {
+    sync_retroachievements_core_wrapper(Some(&app_handle), &state.db).await
 }
 
 /// Unified per-game Refresh command (Right-Click -> Refresh):
 /// Refreshes live store playtime & last_played, Achievements, HowLongToBeat, and live store scores/missing metadata.
-#[tauri::command]
-async fn refresh_game_live_data(
-    game_id: String,
-    app_handle: AppHandle,
-    state: State<'_, AppState>,
+pub async fn refresh_game_live_data_core(
+    db: &Database,
+    game_id: &str,
 ) -> Result<Game, String> {
-    let all = state.db.get_all_games()?;
+    let all = db.get_all_games()?;
     let mut game = all
         .into_iter()
         .find(|g| g.id == game_id)
         .ok_or_else(|| "Game not found".to_string())?;
 
     let source_lower = game.source.to_lowercase();
+    let current_device_id = db.get_or_create_device_id().unwrap_or_default();
+    let allow_ext_store = !game.is_installed;
 
     // 1. Live Store Playtime, Last Played, Live Scores & Missing Store Metadata
     if source_lower == "steam" {
@@ -4318,13 +5221,13 @@ async fn refresh_game_live_data(
             let history = SteamScanner::get_user_play_history(&steam_dir);
             if let Some(ref appid) = game.source_id {
                 if let Some((pt, lp)) = history.get(appid) {
-                    if *pt > 0 {
-                        game.playtime_seconds = *pt;
-                        game.play_count = Some(1);
-                    }
-                    if lp.is_some() {
-                        game.last_played = lp.clone();
-                    }
+                    apply_remote_play_update(
+                        &mut game,
+                        lp.as_deref(),
+                        Some(*pt),
+                        allow_ext_store,
+                        &current_device_id,
+                    );
                 }
             }
         }
@@ -4363,19 +5266,14 @@ async fn refresh_game_live_data(
             }
         }
     } else if source_lower == "epic" {
-        let epic_playtimes = fetch_epic_playtimes_fresh(&state.db).await;
+        let epic_playtimes = fetch_epic_playtimes_fresh(db).await;
         let epic_last_played = EpicScanner::get_user_last_played();
 
         if let Some(ref app_name) = game.source_id {
-            if let Some(&pt) = epic_playtimes
+            let pt_opt = epic_playtimes
                 .get(app_name)
                 .or_else(|| epic_playtimes.get(&app_name.to_lowercase()))
-            {
-                if pt > 0 {
-                    game.playtime_seconds = pt;
-                    game.play_count = Some(1);
-                }
-            }
+                .copied();
 
             let lp = epic_last_played
                 .get(app_name)
@@ -4391,9 +5289,13 @@ async fn refresh_game_live_data(
                         None
                     })
                 });
-            if let Some(found_lp) = lp {
-                game.last_played = Some(found_lp.clone());
-            }
+            apply_remote_play_update(
+                &mut game,
+                lp.map(|s| s.as_str()),
+                pt_opt,
+                allow_ext_store,
+                &current_device_id,
+            );
         }
 
         if game.description.is_none() || game.genres.is_empty() || game.cover_image.is_none() {
@@ -4427,17 +5329,16 @@ async fn refresh_game_live_data(
     } else if source_lower == "gog" {
         let local_pt = GogScanner::get_local_playtimes();
         let local_lp = GogScanner::get_local_last_played();
-        if let Some(ref pid) = game.source_id {
-            if let Some(&pt) = local_pt.get(pid) {
-                if pt > game.playtime_seconds {
-                    game.playtime_seconds = pt;
-                    game.play_count = Some(1);
-                }
-            }
-            if let Some(lp) = local_lp.get(pid) {
-                game.last_played = Some(lp.clone());
-            }
-            let integration = state.db.get_integration("gog").unwrap_or_default();
+        let pid_opt = game.source_id.clone();
+        if let Some(ref pid) = pid_opt {
+            apply_remote_play_update(
+                &mut game,
+                local_lp.get(pid).map(|s| s.as_str()),
+                local_pt.get(pid).copied(),
+                allow_ext_store,
+                &current_device_id,
+            );
+            let integration = db.get_integration("gog").unwrap_or_default();
             if integration.is_authenticated {
                 if let (Some(u), Some(id), Some(tok)) = (
                     integration.username.as_deref(),
@@ -4445,23 +5346,19 @@ async fn refresh_game_live_data(
                     integration.access_token.as_deref(),
                 ) {
                     let (cloud_pt, cloud_lp) = GogScanner::fetch_cloud_stats(u, id, tok).await;
-                    if let Some(&cpt) = cloud_pt.get(pid) {
-                        if cpt > game.playtime_seconds {
-                            game.playtime_seconds = cpt;
-                            game.play_count = Some(1);
-                        }
-                    }
-                    if let Some(clp) = cloud_lp.get(pid) {
-                        if game.last_played.is_none() {
-                            game.last_played = Some(clp.clone());
-                        }
-                    }
+                    apply_remote_play_update(
+                        &mut game,
+                        cloud_lp.get(pid).map(|s| s.as_str()),
+                        cloud_pt.get(pid).copied(),
+                        allow_ext_store,
+                        &current_device_id,
+                    );
                 }
             }
         }
     } else if source_lower == "emulation" || source_lower == "local" || source_lower.contains("retro") {
         let (client_id, client_secret) = {
-            let cfg = state.db.get_app_config()?;
+            let cfg = db.get_app_config()?;
             let c = cfg.igdb_client_id.as_deref().unwrap_or("").trim().to_string();
             let s = cfg.igdb_client_secret.as_deref().unwrap_or("").trim().to_string();
             (c, s)
@@ -4478,28 +5375,35 @@ async fn refresh_game_live_data(
     if source_lower == "steam" {
         if let Some(ref appid) = game.source_id {
             if !appid.is_empty() {
-                let integration = state.db.get_integration("steam").unwrap_or_default();
-                let steamid64 = if integration.is_authenticated {
+                let integration = db.get_integration("steam").unwrap_or_default();
+                let local_sid = SteamScanner::find_local_steamid64();
+                let steamid64 = if integration.is_authenticated && integration.account_id.is_some() {
                     integration.account_id.as_deref()
                 } else {
-                    None
+                    local_sid.as_deref()
                 };
                 if let Ok(achs) = SteamMetadataFetcher::fetch_steam_achievements(&game.id, appid, steamid64).await {
                     if !achs.is_empty() {
-                        let _ = state.db.save_game_achievements(&game.id, &achs);
+                        let _ = db.save_game_achievements(&game.id, &achs);
                     }
                 }
             }
         }
     } else if source_lower == "epic" {
-        if let Some(ns) = parse_epic_sandbox_from_notes(game.notes.as_deref()) {
-            let (aid, token) = ensure_fresh_epic_auth(&state.db).await;
+        if let Some(ns) = parse_epic_sandbox_from_notes(game.notes.as_deref(), game.source_id.as_deref()) {
+            let (aid, token) = ensure_fresh_epic_auth(db).await;
 
             if let Ok(achs) = EpicMetadataFetcher::fetch_epic_achievements(&game.id, &ns, aid.as_deref(), token.as_deref()).await {
                 if !achs.is_empty() {
-                    let _ = state.db.save_game_achievements(&game.id, &achs);
+                    let _ = db.save_game_achievements(&game.id, &achs);
                     if let Some(latest_date) = extract_latest_unlock_date(&achs) {
-                        game.last_played = Some(latest_date);
+                        apply_remote_play_update(
+                            &mut game,
+                            Some(latest_date.as_str()),
+                            None,
+                            allow_ext_store,
+                            &current_device_id,
+                        );
                     }
                 }
             }
@@ -4507,16 +5411,20 @@ async fn refresh_game_live_data(
     } else if source_lower == "gog" {
         if let Some(ref pid) = game.source_id {
             if !pid.is_empty() {
-                let integration = state.db.get_integration("gog").unwrap_or_default();
+                let integration = db.get_integration("gog").unwrap_or_default();
                 let uid = integration.account_id.as_deref();
                 let tok = integration.access_token.as_deref();
-                if let Ok(achievements) = GogScanner::fetch_gog_achievements(&game_id, pid, uid, tok).await {
+                if let Ok(achievements) = GogScanner::fetch_gog_achievements(&game.id, pid, uid, tok).await {
                     if !achievements.is_empty() {
-                        state.db.save_game_achievements(&game_id, &achievements)?;
+                        db.save_game_achievements(&game.id, &achievements)?;
                         if let Some(latest_date) = extract_latest_unlock_date(&achievements) {
-                            if game.last_played.is_none() || game.last_played.as_deref() < Some(latest_date.as_str()) {
-                                game.last_played = Some(latest_date);
-                            }
+                            apply_remote_play_update(
+                                &mut game,
+                                Some(latest_date.as_str()),
+                                None,
+                                allow_ext_store,
+                                &current_device_id,
+                            );
                         }
                     }
                 }
@@ -4525,16 +5433,20 @@ async fn refresh_game_live_data(
     } else if source_lower == "xbox" {
         if let Some(ref sid) = game.source_id {
             if !sid.is_empty() {
-                let integration = state.db.get_integration("xbox").unwrap_or_default();
+                let integration = db.get_integration("xbox").unwrap_or_default();
                 if integration.is_authenticated {
                     if let (Some(ref xuid), Some(ref auth_header)) = (&integration.account_id, &integration.access_token) {
-                        if let Ok(achievements) = XboxScanner::fetch_xbox_achievements(&game_id, sid, xuid, auth_header).await {
+                        if let Ok(achievements) = XboxScanner::fetch_xbox_achievements(&game.id, sid, xuid, auth_header).await {
                             if !achievements.is_empty() {
-                                state.db.save_game_achievements(&game_id, &achievements)?;
+                                db.save_game_achievements(&game.id, &achievements)?;
                                 if let Some(latest_date) = extract_latest_unlock_date(&achievements) {
-                                    if game.last_played.is_none() || game.last_played.as_deref() < Some(latest_date.as_str()) {
-                                        game.last_played = Some(latest_date);
-                                    }
+                                    apply_remote_play_update(
+                                        &mut game,
+                                        Some(latest_date.as_str()),
+                                        None,
+                                        allow_ext_store,
+                                        &current_device_id,
+                                    );
                                 }
                             }
                         }
@@ -4545,16 +5457,20 @@ async fn refresh_game_live_data(
     } else if source_lower == "ea app" || source_lower == "ea" {
         if let Some(ref offer_id) = game.source_id {
             if !offer_id.is_empty() {
-                let integration = state.db.get_integration("ea").unwrap_or_default();
+                let integration = db.get_integration("ea").unwrap_or_default();
                 let pid = integration.account_id.as_deref().unwrap_or("");
                 let tok = integration.access_token.as_deref();
                 if let Ok(achs) = EaScanner::fetch_ea_achievements(&game.id, offer_id, pid, tok, &game.title).await {
                     if !achs.is_empty() {
-                        let _ = state.db.save_game_achievements(&game.id, &achs);
+                        let _ = db.save_game_achievements(&game.id, &achs);
                         if let Some(latest_date) = extract_latest_unlock_date(&achs) {
-                            if game.last_played.is_none() || game.last_played.as_deref() < Some(latest_date.as_str()) {
-                                game.last_played = Some(latest_date);
-                            }
+                            apply_remote_play_update(
+                                &mut game,
+                                Some(latest_date.as_str()),
+                                None,
+                                allow_ext_store,
+                                &current_device_id,
+                            );
                         }
                     }
                 }
@@ -4562,7 +5478,7 @@ async fn refresh_game_live_data(
         }
     } else if source_lower == "retroachievements" || source_lower.contains("retro") {
         let (username, api_key) = {
-            let cfg = state.db.get_app_config()?;
+            let cfg = db.get_app_config()?;
             let u = cfg.retroachievements_username.as_deref().unwrap_or("").trim().to_string();
             let k = cfg.retroachievements_api_key.as_deref().unwrap_or("").trim().to_string();
             (u, k)
@@ -4580,26 +5496,25 @@ async fn refresh_game_live_data(
                         if game.background_image.is_none() || game.background_image.as_deref().unwrap_or("").is_empty() {
                             game.background_image = RetroAchievementsClient::to_media_url(detail.image_title.as_deref());
                         }
-                        if let Some(playtime) = detail.user_total_playtime {
-                            if playtime > game.playtime_seconds {
-                                game.playtime_seconds = playtime;
-                            }
-                        }
                         let achs = RetroAchievementsClient::extract_achievements(&game.id, &detail);
-                        if !achs.is_empty() {
-                            let _ = state.db.save_game_achievements(&game.id, &achs);
-                            if let Some(latest_date) = extract_latest_unlock_date(&achs) {
-                                if game.last_played.is_none() || game.last_played.as_deref() < Some(latest_date.as_str()) {
-                                    game.last_played = Some(latest_date);
-                                }
-                            }
-                        }
+                        let latest_date = if !achs.is_empty() {
+                            let _ = db.save_game_achievements(&game.id, &achs);
+                            extract_latest_unlock_date(&achs)
+                        } else {
+                            None
+                        };
+                        apply_remote_play_update(
+                            &mut game,
+                            latest_date.as_deref(),
+                            detail.user_total_playtime,
+                            true,
+                            &current_device_id,
+                        );
                     }
                 }
             }
         }
     }
-    let _ = app_handle.emit("achievements-updated", &game.id);
 
     // 3. Refresh HowLongToBeat
     if let Some(hltb) = HltbFetcher::fetch_hltb(&game.title).await {
@@ -4635,18 +5550,30 @@ async fn refresh_game_live_data(
         game.date_added = Some(chrono::Local::now().format("%Y-%m-%d").to_string());
     }
 
-    state.db.save_game_exact(&game)?;
+    db.populate_other_device_flag(&mut game);
+    db.save_game_exact(&game)?;
+    Ok(game)
+}
+
+#[tauri::command]
+async fn refresh_game_live_data(
+    game_id: String,
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Game, String> {
+    let game = refresh_game_live_data_core(&state.db, &game_id).await?;
+    let _ = app_handle.emit("achievements-updated", &game.id);
     let _ = app_handle.emit("game-updated", &game);
+    cloud_sync::spawn_background_export(state.db.clone());
     Ok(game)
 }
 
 /// Lightweight bulk live sync (<400ms): updates playtimes and last_played across all Steam & Epic games
-#[tauri::command]
-async fn sync_live_playtimes(
-    app_handle: AppHandle,
-    state: State<'_, AppState>,
+pub async fn sync_live_playtimes_core(
+    db: &Database,
+    on_update: impl Fn(&Game),
 ) -> Result<usize, String> {
-    let mut all = state.db.get_all_games()?;
+    let mut all = db.get_all_games()?;
     if all.is_empty() {
         return Ok(0);
     }
@@ -4657,59 +5584,47 @@ async fn sync_live_playtimes(
         std::collections::HashMap::new()
     };
 
-    let epic_playtimes = fetch_epic_playtimes_fresh(&state.db).await;
+    let epic_playtimes = fetch_epic_playtimes_fresh(db).await;
     let epic_last_played = EpicScanner::get_user_last_played();
     let gog_playtimes = GogScanner::get_local_playtimes();
     let gog_last_played = GogScanner::get_local_last_played();
 
     let mut updated_count = 0;
+    let current_device_id = db.get_or_create_device_id().unwrap_or_default();
 
     for game in &mut all {
         let source_lower = game.source.to_lowercase();
         let mut changed = false;
+        let allow_ext = !game.is_installed;
 
         if source_lower == "steam" {
             if let Some(ref appid) = game.source_id {
                 if let Some((pt, lp)) = steam_history.get(appid) {
-                    if *pt > 0 && *pt != game.playtime_seconds {
-                        game.playtime_seconds = *pt;
-                        game.play_count = Some(1);
-                        changed = true;
-                    }
-                    if lp.is_some() && *lp != game.last_played {
-                        game.last_played = lp.clone();
+                    if apply_remote_play_update(
+                        game,
+                        lp.as_deref(),
+                        Some(*pt),
+                        allow_ext,
+                        &current_device_id,
+                    ) {
                         changed = true;
                     }
                 }
             }
         } else if source_lower == "gog" {
             if let Some(ref pid) = game.source_id {
-                if let Some(&pt) = gog_playtimes.get(pid) {
-                    if pt > 0 && pt != game.playtime_seconds {
-                        game.playtime_seconds = pt;
-                        game.play_count = Some(1);
-                        changed = true;
-                    }
-                }
-                if let Some(lp) = gog_last_played.get(pid) {
-                    if game.last_played.as_deref() != Some(lp.as_str()) {
-                        game.last_played = Some(lp.clone());
-                        changed = true;
-                    }
+                let pt_opt = gog_playtimes.get(pid).copied();
+                let lp_opt = gog_last_played.get(pid).map(|s| s.as_str());
+                if apply_remote_play_update(game, lp_opt, pt_opt, allow_ext, &current_device_id) {
+                    changed = true;
                 }
             }
         } else if source_lower == "epic" {
             if let Some(ref app_name) = game.source_id {
-                if let Some(&pt) = epic_playtimes
+                let pt_opt = epic_playtimes
                     .get(app_name)
                     .or_else(|| epic_playtimes.get(&app_name.to_lowercase()))
-                {
-                    if pt > 0 && pt != game.playtime_seconds {
-                        game.playtime_seconds = pt;
-                        game.play_count = Some(1);
-                        changed = true;
-                    }
-                }
+                    .copied();
 
                 let lp = epic_last_played
                     .get(app_name)
@@ -4727,15 +5642,25 @@ async fn sync_live_playtimes(
                     });
 
                 if let Some(found_lp) = lp {
-                    if game.last_played.as_deref() != Some(found_lp) {
-                        game.last_played = Some(found_lp.clone());
+                    if apply_remote_play_update(
+                        game,
+                        Some(found_lp.as_str()),
+                        pt_opt,
+                        allow_ext,
+                        &current_device_id,
+                    ) {
                         changed = true;
                     }
-                } else if game.last_played.is_none() {
-                    if let Ok(cached_achs) = state.db.get_game_achievements(&game.id) {
-                        if let Some(latest_date) = extract_latest_unlock_date(&cached_achs) {
-                            game.last_played = Some(latest_date);
-                            changed = true;
+                } else {
+                    if apply_remote_play_update(game, None, pt_opt, allow_ext, &current_device_id) {
+                        changed = true;
+                    }
+                    if game.last_played.is_none() {
+                        if let Ok(cached_achs) = db.get_game_achievements(&game.id) {
+                            if let Some(latest_date) = extract_latest_unlock_date(&cached_achs) {
+                                game.last_played = Some(latest_date);
+                                changed = true;
+                            }
                         }
                     }
                 }
@@ -4748,8 +5673,8 @@ async fn sync_live_playtimes(
         }
 
         if changed {
-            let _ = state.db.upsert_game(game);
-            let _ = app_handle.emit("game-updated", &game);
+            let _ = db.upsert_game(game);
+            on_update(game);
             updated_count += 1;
         }
     }
@@ -4757,14 +5682,28 @@ async fn sync_live_playtimes(
     Ok(updated_count)
 }
 
-/// One-time background warmup for active (installed or played) games whose achievements haven't been indexed yet
 #[tauri::command]
-async fn warmup_active_achievements(
+async fn sync_live_playtimes(
     app_handle: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<usize, String> {
-    let all = state.db.get_all_games()?;
-    let checked_raw = state.db.get_setting("checked_achievement_games_v1")?.unwrap_or_else(|| "[]".to_string());
+    let handle = app_handle.clone();
+    let count = sync_live_playtimes_core(&state.db, move |g| {
+        let _ = handle.emit("game-updated", g);
+    }).await?;
+    if count > 0 {
+        cloud_sync::spawn_background_export(state.db.clone());
+    }
+    Ok(count)
+}
+
+/// One-time background warmup for active (installed or played) games whose achievements haven't been indexed yet
+pub async fn warmup_active_achievements_core(
+    db: &Database,
+    on_achievements_saved: impl Fn(&str, Option<&Game>),
+) -> Result<usize, String> {
+    let all = db.get_all_games()?;
+    let checked_raw = db.get_setting("checked_achievement_games_v1")?.unwrap_or_else(|| "[]".to_string());
     let mut checked_set: std::collections::HashSet<String> =
         serde_json::from_str(&checked_raw).unwrap_or_default();
 
@@ -4778,7 +5717,7 @@ async fn warmup_active_achievements(
         })
         .filter(|g| {
             // Skip if achievements are already in DB unless Epic game has 0 unlocked cached
-            match state.db.get_game_achievements(&g.id) {
+            match db.get_game_achievements(&g.id) {
                 Ok(existing) => {
                     existing.is_empty()
                         || (g.source.eq_ignore_ascii_case("epic")
@@ -4793,14 +5732,14 @@ async fn warmup_active_achievements(
         return Ok(0);
     }
 
-    let steam_integration = state.db.get_integration("steam").unwrap_or_default();
-    let steamid64 = if steam_integration.is_authenticated {
+    let steam_integration = db.get_integration("steam").unwrap_or_default();
+    let steamid64 = if steam_integration.is_authenticated && steam_integration.account_id.is_some() {
         steam_integration.account_id
     } else {
-        None
+        SteamScanner::find_local_steamid64()
     };
 
-    let epic_integration = state.db.get_integration("epic").unwrap_or_default();
+    let epic_integration = db.get_integration("epic").unwrap_or_default();
     let epic_aid = if epic_integration.is_authenticated {
         epic_integration.account_id
     } else {
@@ -4812,15 +5751,15 @@ async fn warmup_active_achievements(
         None
     };
 
-    let gog_int = state.db.get_integration("gog").unwrap_or_default();
+    let gog_int = db.get_integration("gog").unwrap_or_default();
     let gog_uid = gog_int.account_id;
     let gog_tok = gog_int.access_token;
 
-    let xbox_int = state.db.get_integration("xbox").unwrap_or_default();
+    let xbox_int = db.get_integration("xbox").unwrap_or_default();
     let xbox_xuid = if xbox_int.is_authenticated { xbox_int.account_id } else { None };
     let xbox_tok = if xbox_int.is_authenticated { xbox_int.access_token } else { None };
 
-    let ea_int = state.db.get_integration("ea").unwrap_or_default();
+    let ea_int = db.get_integration("ea").unwrap_or_default();
     let ea_pid = ea_int.account_id.unwrap_or_default();
     let ea_tok = ea_int.access_token;
 
@@ -4853,7 +5792,7 @@ async fn warmup_active_achievements(
                 .ok()?;
                 Some((game, achs))
             } else if src == "epic" {
-                let ns = parse_epic_sandbox_from_notes(game.notes.as_deref())?;
+                let ns = parse_epic_sandbox_from_notes(game.notes.as_deref(), game.source_id.as_deref())?;
                 let achs = EpicMetadataFetcher::fetch_epic_achievements(
                     &game.id,
                     &ns,
@@ -4905,158 +5844,122 @@ async fn warmup_active_achievements(
         if let Ok(Some((mut game, achs))) = res {
             checked_set.insert(game.id.clone());
             if !achs.is_empty() {
-                let _ = state.db.save_game_achievements(&game.id, &achs);
-                let _ = app_handle.emit("achievements-updated", &game.id);
+                let _ = db.save_game_achievements(&game.id, &achs);
+                let mut updated_game_opt = None;
                 if game.source.eq_ignore_ascii_case("epic") && game.last_played.is_none() {
                     if let Some(latest_date) = extract_latest_unlock_date(&achs) {
                         game.last_played = Some(latest_date);
-                        let _ = state.db.upsert_game(&game);
-                        let _ = app_handle.emit("game-updated", &game);
+                        let _ = db.upsert_game(&game);
+                        updated_game_opt = Some(&game);
                     }
                 }
+                on_achievements_saved(&game.id, updated_game_opt);
                 indexed += 1;
             }
         }
     }
 
     if let Ok(serialized) = serde_json::to_string(&checked_set) {
-        let _ = state.db.set_setting("checked_achievement_games_v1", &serialized);
+        let _ = db.set_setting("checked_achievement_games_v1", &serialized);
     }
 
     Ok(indexed)
 }
 
-fn extract_sgdb_candidate_hash(url: &str) -> Option<String> {
-    let trimmed = url.trim();
-    let is_sgdb_raw = trimmed.starts_with("https://cdn2.steamgriddb.com/grid/")
-        || trimmed.starts_with("https://cdn2.steamgriddb.com/hero/")
-        || trimmed.starts_with("https://cdn2.steamgriddb.com/logo/")
-        || trimmed.starts_with("https://cdn2.steamgriddb.com/icon/");
-    if !is_sgdb_raw {
-        return None;
-    }
-
-    let file_part = trimmed.rsplit('/').next()?.split('?').next()?;
-    let (hash, ext) = file_part.rsplit_once('.')?;
-    let ext_lower = ext.to_ascii_lowercase();
-    if matches!(ext_lower.as_str(), "png" | "webp" | "gif") && !hash.is_empty() {
-        Some(hash.to_string())
-    } else {
-        None
-    }
-}
-
-/// Upgrades heavy raw SteamGridDB APNG / Animated WebP URLs (often 10–32 MB CPU-decoded)
-/// to their official hardware-accelerated VP9 `.webm` stream (`cdn2.steamgriddb.com/thumb/<hash>.webm`)
-/// while leaving static PNG/JPG covers untouched.
 #[tauri::command]
-async fn optimize_animated_artwork(
+async fn warmup_active_achievements(
     app_handle: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<usize, String> {
-    let mut all = state.db.get_all_games()?;
+    let handle = app_handle.clone();
+    warmup_active_achievements_core(&state.db, move |gid, updated_g| {
+        let _ = handle.emit("achievements-updated", gid);
+        if let Some(g) = updated_g {
+            let _ = handle.emit("game-updated", g);
+        }
+    }).await
+}
+
+
+/// Upgrades heavy animated SteamGridDB WebP/APNG files (often 15–49 MB compressed / 1.3 GB uncompressed RGBA in WebKitGTK)
+/// to their lightweight hardware-accelerated .webm streams (~58 KB - 2.8 MB).
+pub fn optimize_animated_artwork_core(
+    db: &Database,
+    on_update: impl Fn(&Game),
+) -> Result<usize, String> {
+    let mut all = db.get_all_games()?;
     if all.is_empty() {
         return Ok(0);
     }
 
-    let checked_raw = state
-        .db
-        .get_setting("checked_sgdb_webm_hashes_v1")?
-        .unwrap_or_else(|| "{}".to_string());
-    let mut checked_map: std::collections::HashMap<String, bool> =
-        serde_json::from_str(&checked_raw).unwrap_or_default();
-
-    let mut to_probe = std::collections::HashSet::new();
-    for g in &all {
-        for opt_url in [
-            g.cover_image.as_deref(),
-            g.background_image.as_deref(),
-            g.logo_image.as_deref(),
-            g.icon_image.as_deref(),
-        ] {
-            if let Some(h) = opt_url.and_then(extract_sgdb_candidate_hash) {
-                if !checked_map.contains_key(&h) {
-                    to_probe.insert(h);
-                }
-            }
+    let upgrade_url = |val: &str| -> Option<String> {
+        let trimmed = val.trim();
+        if !trimmed.contains("steamgriddb.com") {
+            return None;
         }
-    }
-
-    if !to_probe.is_empty() {
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(6))
-            .user_agent(format!("OpenPlay/{}", env!("CARGO_PKG_VERSION")))
-            .build()
-            .map_err(|e| e.to_string())?;
-
-        let sem = Arc::new(tokio::sync::Semaphore::new(8));
-        let mut join_set = tokio::task::JoinSet::new();
-
-        for hash in to_probe {
-            let client_clone = client.clone();
-            let sem_clone = sem.clone();
-            join_set.spawn(async move {
-                let _permit = sem_clone.acquire_owned().await.ok()?;
-                let webm_url = format!("https://cdn2.steamgriddb.com/thumb/{}.webm", hash);
-                let resp = client_clone.head(&webm_url).send().await.ok()?;
-                if resp.status().is_success() {
-                    Some((hash, true))
-                } else if resp.status() == reqwest::StatusCode::NOT_FOUND {
-                    Some((hash, false))
-                } else {
-                    None
-                }
-            });
+        let file_part = trimmed.rsplit('/').next()?.split('?').next()?;
+        let (hash, ext) = file_part.rsplit_once('.')?;
+        let ext_lower = ext.to_ascii_lowercase();
+        let is_animated_candidate = ext_lower == "webp"
+            || matches!(
+                hash,
+                "5164b46830eb9b286b4e6dd514d84d8c"
+                    | "1bb6ff4f6f52891ba537ccb13cab09af"
+                    | "02b293533a7ab5cb9362b406c8e402fd"
+                    | "a14ac55a4f27472c5d894ec1c3c743d2"
+            );
+        if !is_animated_candidate {
+            return None;
         }
 
-        while let Some(res) = join_set.join_next().await {
-            if let Ok(Some((hash, has_webm))) = res {
-                checked_map.insert(hash, has_webm);
-            }
+        if trimmed.contains("/hero/") {
+            Some(format!("https://cdn2.steamgriddb.com/hero_thumb/{}.webm", hash))
+        } else if trimmed.contains("/logo/") {
+            Some(format!("https://cdn2.steamgriddb.com/logo_thumb/{}.webm", hash))
+        } else if trimmed.contains("/grid/") {
+            Some(format!("https://cdn2.steamgriddb.com/thumb/{}.webm", hash))
+        } else {
+            None
         }
-
-        if let Ok(serialized) = serde_json::to_string(&checked_map) {
-            let _ = state.db.set_setting("checked_sgdb_webm_hashes_v1", &serialized);
-        }
-    }
+    };
 
     let mut upgraded_games = 0;
     for game in &mut all {
         let mut changed = false;
 
-        let try_upgrade = |field: &mut Option<String>| -> bool {
+        let try_clean = |field: &mut Option<String>| -> bool {
             if let Some(ref current) = field {
-                if let Some(hash) = extract_sgdb_candidate_hash(current) {
-                    if checked_map.get(&hash).copied() == Some(true) {
-                        *field = Some(format!("https://cdn2.steamgriddb.com/thumb/{}.webm", hash));
-                        return true;
-                    }
+                if let Some(upgraded) = upgrade_url(current) {
+                    *field = Some(upgraded);
+                    return true;
                 }
             }
             false
         };
 
-        if try_upgrade(&mut game.cover_image) {
-            changed = true;
-        }
-        if try_upgrade(&mut game.background_image) {
-            changed = true;
-        }
-        if try_upgrade(&mut game.logo_image) {
-            changed = true;
-        }
-        if try_upgrade(&mut game.icon_image) {
-            changed = true;
-        }
+        if try_clean(&mut game.cover_image) { changed = true; }
+        if try_clean(&mut game.background_image) { changed = true; }
+        if try_clean(&mut game.logo_image) { changed = true; }
 
         if changed {
-            let _ = state.db.save_game_exact(game);
-            let _ = app_handle.emit("game-updated", &game);
+            let _ = db.save_game_exact(game);
+            on_update(game);
             upgraded_games += 1;
         }
     }
 
     Ok(upgraded_games)
+}
+
+#[tauri::command]
+async fn optimize_animated_artwork(
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<usize, String> {
+    let handle = app_handle.clone();
+    optimize_animated_artwork_core(&state.db, move |g| {
+        let _ = handle.emit("game-updated", g);
+    })
 }
 
 #[tauri::command]
@@ -5107,7 +6010,7 @@ async fn enrich_missing_scores(
 // ==========================================
 
 #[tauri::command]
-fn get_connected_libraries(state: State<'_, AppState>) -> Result<Vec<ConnectedLibraryItem>, String> {
+async fn get_connected_libraries(state: State<'_, AppState>) -> Result<Vec<ConnectedLibraryItem>, String> {
     let mut items = Vec::new();
 
     let providers = [
@@ -5211,7 +6114,7 @@ async fn create_database_backup(
 }
 
 #[tauri::command]
-fn list_database_backups(state: State<'_, AppState>) -> Result<Vec<BackupInfo>, String> {
+async fn list_database_backups(state: State<'_, AppState>) -> Result<Vec<BackupInfo>, String> {
     state.db.list_backups()
 }
 
@@ -5231,17 +6134,16 @@ fn delete_database_backup(filename: String, state: State<'_, AppState>) -> Resul
     state.db.delete_backup(&filename)
 }
 
-#[tauri::command]
-async fn export_portable_backup(
-    target_path: String,
-    state: State<'_, AppState>,
+pub async fn export_portable_backup_core(
+    db: &Database,
+    target_path: &str,
 ) -> Result<String, String> {
-    let all_games = state.db.get_all_games()?;
-    let configured_consoles = state.db.get_configured_consoles().unwrap_or_default();
-    let app_config = state.db.get_app_config().unwrap_or_default();
-    let achievements = state.db.get_all_achievements().unwrap_or_default();
+    let all_games = db.get_all_games()?;
+    let configured_consoles = db.get_configured_consoles().unwrap_or_default();
+    let app_config = db.get_app_config().unwrap_or_default();
+    let achievements = db.get_all_achievements().unwrap_or_default();
 
-    let file = std::fs::File::create(&target_path)
+    let file = std::fs::File::create(target_path)
         .map_err(|e| format!("Failed to create portable backup file: {}", e))?;
     let mut zip = zip::ZipWriter::new(file);
     let options = zip::write::SimpleFileOptions::default()
@@ -5304,21 +6206,28 @@ async fn export_portable_backup(
     }
 
     zip.finish().map_err(|e| format!("Failed to finalize backup archive: {}", e))?;
-    Ok(target_path)
+    Ok(target_path.to_string())
 }
 
 #[tauri::command]
-async fn import_portable_backup(
-    file_path: String,
-    app_handle: AppHandle,
+async fn export_portable_backup(
+    target_path: String,
     state: State<'_, AppState>,
+) -> Result<String, String> {
+    export_portable_backup_core(&state.db, &target_path).await
+}
+
+pub async fn import_portable_backup_core(
+    db: &Database,
+    file_path: &str,
+    on_update: impl Fn(&Game),
 ) -> Result<ImportBackupSummary, String> {
-    let file = std::fs::File::open(&file_path)
+    let file = std::fs::File::open(file_path)
         .map_err(|e| format!("Failed to open backup archive: {}", e))?;
     let mut archive = zip::ZipArchive::new(file)
         .map_err(|e| format!("Invalid zip archive: {}", e))?;
 
-    let _ = state.db.create_backup(Some("pre_portable_import".to_string()), false);
+    let _ = db.create_backup(Some("pre_portable_import".to_string()), false);
 
     let games_entry = archive
         .by_name("games.json")
@@ -5350,7 +6259,7 @@ async fn import_portable_backup(
         }
     }
 
-    let mut existing_games = state.db.get_all_games().unwrap_or_default();
+    let mut existing_games = db.get_all_games().unwrap_or_default();
     let total_games = imported_games.len();
     let mut imported_count = 0;
     let mut updated_count = 0;
@@ -5412,14 +6321,14 @@ async fn import_portable_backup(
             existing_games.push(new_game.clone());
         }
 
-        let _ = state.db.upsert_game(&new_game);
-        let _ = app_handle.emit("game-updated", &new_game);
+        let _ = db.upsert_game(&new_game);
+        on_update(&new_game);
     }
 
     if let Ok(consoles_entry) = archive.by_name("consoles.json") {
         if let Ok(consoles) = serde_json::from_reader::<_, Vec<ConfiguredConsole>>(consoles_entry) {
             for c in consoles {
-                let _ = state.db.save_configured_console(&c);
+                let _ = db.save_configured_console(&c);
             }
         }
     }
@@ -5433,38 +6342,98 @@ async fn import_portable_backup(
 }
 
 #[tauri::command]
-fn get_cloud_sync_status(state: State<'_, AppState>) -> Result<CloudSyncStatus, String> {
-    cloud_sync::get_cloud_sync_status(&state.db)
+async fn import_portable_backup(
+    file_path: String,
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<ImportBackupSummary, String> {
+    let handle = app_handle.clone();
+    import_portable_backup_core(&state.db, &file_path, move |g| {
+        let _ = handle.emit("game-updated", g);
+    }).await
 }
 
 #[tauri::command]
-fn configure_cloud_sync(
+async fn get_cloud_sync_status(state: State<'_, AppState>) -> Result<CloudSyncStatus, String> {
+    let db = state.db.clone();
+    tokio::task::spawn_blocking(move || cloud_sync::get_cloud_sync_status(&db))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn configure_cloud_sync(
     folder_path: Option<String>,
     enabled: bool,
+    sync_settings: Option<bool>,
+    sync_extensions: Option<bool>,
+    sync_api_keys: Option<bool>,
     state: State<'_, AppState>,
 ) -> Result<CloudSyncStatus, String> {
-    if let Some(ref path) = folder_path {
-        state.db.set_setting("cloud_sync_folder_path", path.trim())?;
-    }
-    state.db.set_setting("cloud_sync_enabled", if enabled { "1" } else { "0" })?;
-    cloud_sync::get_cloud_sync_status(&state.db)
-}
-
-#[tauri::command]
-fn set_sync_device_name(name: String, state: State<'_, AppState>) -> Result<(), String> {
-    state.db.set_device_name(name.trim())
-}
-
-#[tauri::command]
-fn get_sync_peer_devices(state: State<'_, AppState>) -> Result<Vec<PeerDeviceInfo>, String> {
-    let status = cloud_sync::get_cloud_sync_status(&state.db)?;
-    if let Some(ref path_str) = status.folder_path {
-        let p = std::path::Path::new(path_str);
-        if p.exists() {
-            return cloud_sync::get_peer_devices(&state.db, p);
+    let db = state.db.clone();
+    tokio::task::spawn_blocking(move || {
+        if let Some(ref path) = folder_path {
+            db.set_setting("cloud_sync_folder_path", path.trim())?;
         }
-    }
-    Ok(Vec::new())
+        db.set_setting("cloud_sync_enabled", if enabled { "1" } else { "0" })?;
+
+        let now_utc = chrono::Utc::now().to_rfc3339();
+        if let Some(ss) = sync_settings {
+            db.set_setting("cloud_sync_settings_enabled", if ss { "1" } else { "0" })?;
+            if ss {
+                let _ = db.set_setting("ui_updated_at", &now_utc);
+            }
+        }
+        if let Some(se) = sync_extensions {
+            db.set_setting("cloud_sync_extensions_enabled", if se { "1" } else { "0" })?;
+            if se {
+                let _ = db.set_setting("extensions_updated_at", &now_utc);
+            }
+        }
+        if let Some(sak) = sync_api_keys {
+            db.set_setting("cloud_sync_api_keys_enabled", if sak { "1" } else { "0" })?;
+            if sak {
+                let _ = db.set_setting("ui_updated_at", &now_utc);
+            }
+        }
+
+        if enabled {
+            cloud_sync::spawn_background_export(db.clone());
+        }
+
+        cloud_sync::get_cloud_sync_status(&db)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn set_sync_device_name(name: String, state: State<'_, AppState>) -> Result<(), String> {
+    let db = state.db.clone();
+    tokio::task::spawn_blocking(move || {
+        db.set_device_name(name.trim())?;
+        cloud_sync::spawn_background_export(db.clone());
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn get_sync_peer_devices(state: State<'_, AppState>) -> Result<Vec<PeerDeviceInfo>, String> {
+    let db = state.db.clone();
+    tokio::task::spawn_blocking(move || {
+        let status = cloud_sync::get_cloud_sync_status(&db)?;
+        if let Some(ref path_str) = status.folder_path {
+            let p = std::path::Path::new(path_str);
+            if p.exists() {
+                return cloud_sync::get_peer_devices(&db, p);
+            }
+        }
+        Ok(Vec::new())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -5472,7 +6441,8 @@ async fn trigger_cloud_sync(
     app_handle: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<SyncSummary, String> {
-    let status = cloud_sync::get_cloud_sync_status(&state.db)?;
+    let db = state.db.clone();
+    let status = cloud_sync::get_cloud_sync_status(&db)?;
     let folder_path = status
         .folder_path
         .ok_or_else(|| "Cloud sync folder path is not configured".to_string())?;
@@ -5482,10 +6452,125 @@ async fn trigger_cloud_sync(
         return Err("Configured cloud sync folder path does not exist".to_string());
     }
 
-    let summary = cloud_sync::sync_cloud_directory(&state.db, &p)?;
+    let summary = tokio::task::spawn_blocking(move || {
+        cloud_sync::sync_cloud_directory(&db, &p)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+
     let _ = app_handle.emit("cloud-sync-completed", &summary);
     let _ = app_handle.emit("library-updated", ());
     Ok(summary)
+}
+
+// -------------------------------------------------------------
+// Save Location & Cloud Save Versioning Commands
+// -------------------------------------------------------------
+
+#[tauri::command]
+async fn get_game_save_state(
+    game_id: String,
+    force_refresh_detection: Option<bool>,
+    state: State<'_, AppState>,
+) -> Result<GameSaveState, String> {
+    let db = state.db.clone();
+    saves::get_game_save_state(&db, &game_id, force_refresh_detection.unwrap_or(false)).await
+}
+
+#[tauri::command]
+async fn save_custom_save_paths(
+    game_id: String,
+    save_paths: Vec<String>,
+    config_paths: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<GameSaveState, String> {
+    let db = state.db.clone();
+    saves::save_custom_save_paths(&db, &game_id, save_paths, config_paths).await
+}
+
+#[tauri::command]
+async fn set_game_cloud_save_settings(
+    game_id: String,
+    enabled: bool,
+    retention_override: Option<u32>,
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<GameSaveState, String> {
+    let db = state.db.clone();
+    let res = saves::set_game_cloud_save_settings(&db, &game_id, enabled, retention_override).await?;
+    if let Ok(Some(updated_game)) = db.get_game_by_id(&game_id) {
+        let _ = app_handle.emit("game-updated", &updated_game);
+    }
+    Ok(res)
+}
+
+#[tauri::command]
+async fn force_push_cloud_save(
+    game_id: String,
+    note: Option<String>,
+    allow_oversized: Option<bool>,
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<CloudSaveActionResult, String> {
+    let db = state.db.clone();
+    let res = saves::force_push_cloud_save(&db, &game_id, note, allow_oversized.unwrap_or(false)).await?;
+    if !res.skipped {
+        let _ = app_handle.emit("save-backup-completed", &serde_json::json!({ "game_id": game_id }));
+    }
+    Ok(res)
+}
+
+#[tauri::command]
+async fn restore_cloud_save_snapshot(
+    game_id: String,
+    snapshot_id: String,
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<CloudSaveActionResult, String> {
+    let db = state.db.clone();
+    let res = saves::restore_cloud_save_snapshot(&db, &game_id, &snapshot_id).await?;
+    let _ = app_handle.emit("save-backup-completed", &serde_json::json!({ "game_id": game_id }));
+    Ok(res)
+}
+
+#[tauri::command]
+async fn delete_cloud_save_snapshot(
+    game_id: String,
+    snapshot_id: String,
+    state: State<'_, AppState>,
+) -> Result<GameSaveState, String> {
+    let db = state.db.clone();
+    saves::delete_cloud_save_snapshot(&db, &game_id, &snapshot_id).await
+}
+
+#[tauri::command]
+async fn restore_local_safety_backup(
+    game_id: String,
+    backup_id: String,
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<GameSaveState, String> {
+    let db = state.db.clone();
+    let res = saves::restore_local_safety_backup(&db, &game_id, &backup_id).await?;
+    let _ = app_handle.emit("save-backup-completed", &serde_json::json!({ "game_id": game_id }));
+    Ok(res)
+}
+
+#[tauri::command]
+async fn check_pre_launch_cloud_save(
+    game_id: String,
+    state: State<'_, AppState>,
+) -> Result<PreLaunchSaveCheck, String> {
+    let db = state.db.clone();
+    saves::check_pre_launch_cloud_save(&db, &game_id).await
+}
+
+#[tauri::command]
+async fn get_cloud_saves_overview(state: State<'_, AppState>) -> Result<CloudSavesOverview, String> {
+    let db = state.db.clone();
+    tokio::task::spawn_blocking(move || saves::get_cloud_saves_overview(&db))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 // -------------------------------------------------------------
@@ -5493,18 +6578,22 @@ async fn trigger_cloud_sync(
 // -------------------------------------------------------------
 
 #[tauri::command]
-fn get_installed_themes(state: State<'_, AppState>) -> Result<Vec<themes::ThemeInfo>, String> {
+async fn get_installed_themes(state: State<'_, AppState>) -> Result<Vec<themes::ThemeInfo>, String> {
     themes::list_themes(&state.db)
 }
 
 #[tauri::command]
 fn import_theme_zip(zip_path: String, state: State<'_, AppState>) -> Result<themes::ThemeInfo, String> {
-    themes::import_theme_zip(&state.db, &zip_path)
+    let info = themes::import_theme_zip(&state.db, &zip_path)?;
+    cloud_sync::spawn_background_export(state.db.clone());
+    Ok(info)
 }
 
 #[tauri::command]
 fn delete_theme(theme_id: String, state: State<'_, AppState>) -> Result<(), String> {
-    themes::delete_theme(&state.db, &theme_id)
+    themes::delete_theme(&state.db, &theme_id)?;
+    cloud_sync::spawn_background_export(state.db.clone());
+    Ok(())
 }
 
 #[tauri::command]
@@ -5514,7 +6603,9 @@ fn get_active_theme_id(state: State<'_, AppState>) -> Result<String, String> {
 
 #[tauri::command]
 fn set_active_theme(theme_id: String, state: State<'_, AppState>) -> Result<(), String> {
-    themes::set_active_theme(&state.db, &theme_id)
+    themes::set_active_theme(&state.db, &theme_id)?;
+    cloud_sync::spawn_background_export(state.db.clone());
+    Ok(())
 }
 
 #[tauri::command]
@@ -5524,7 +6615,9 @@ fn get_theme_config(theme_id: String, state: State<'_, AppState>) -> Result<std:
 
 #[tauri::command]
 fn save_theme_config(theme_id: String, config_json: String, state: State<'_, AppState>) -> Result<(), String> {
-    themes::save_theme_config(&state.db, &theme_id, &config_json)
+    themes::save_theme_config(&state.db, &theme_id, &config_json)?;
+    cloud_sync::spawn_background_export(state.db.clone());
+    Ok(())
 }
 
 #[tauri::command]
@@ -5543,6 +6636,13 @@ fn open_themes_folder() -> Result<(), String> {
             .spawn()
             .map_err(|e| e.to_string())?;
     }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = std::process::Command::new("xdg-open")
+            .arg(dir)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
     Ok(())
 }
 
@@ -5551,23 +6651,29 @@ fn open_themes_folder() -> Result<(), String> {
 // -------------------------------------------------------------
 
 #[tauri::command]
-fn get_installed_plugins(state: State<'_, AppState>) -> Result<Vec<plugins::PluginInfo>, String> {
+async fn get_installed_plugins(state: State<'_, AppState>) -> Result<Vec<plugins::PluginInfo>, String> {
     plugins::list_plugins(&state.db)
 }
 
 #[tauri::command]
 fn import_plugin_zip(zip_path: String, state: State<'_, AppState>) -> Result<plugins::PluginInfo, String> {
-    plugins::import_plugin_zip(&state.db, &zip_path)
+    let info = plugins::import_plugin_zip(&state.db, &zip_path)?;
+    cloud_sync::spawn_background_export(state.db.clone());
+    Ok(info)
 }
 
 #[tauri::command]
 fn delete_plugin(plugin_id: String, state: State<'_, AppState>) -> Result<(), String> {
-    plugins::delete_plugin(&state.db, &plugin_id)
+    plugins::delete_plugin(&state.db, &plugin_id)?;
+    cloud_sync::spawn_background_export(state.db.clone());
+    Ok(())
 }
 
 #[tauri::command]
 fn toggle_plugin(plugin_id: String, enabled: bool, state: State<'_, AppState>) -> Result<(), String> {
-    plugins::toggle_plugin(&state.db, &plugin_id, enabled)
+    plugins::toggle_plugin(&state.db, &plugin_id, enabled)?;
+    cloud_sync::spawn_background_export(state.db.clone());
+    Ok(())
 }
 
 #[tauri::command]
@@ -5577,7 +6683,9 @@ fn get_plugin_config(plugin_id: String, state: State<'_, AppState>) -> Result<st
 
 #[tauri::command]
 fn save_plugin_config(plugin_id: String, config_json: String, state: State<'_, AppState>) -> Result<(), String> {
-    plugins::save_plugin_config(&state.db, &plugin_id, &config_json)
+    plugins::save_plugin_config(&state.db, &plugin_id, &config_json)?;
+    cloud_sync::spawn_background_export(state.db.clone());
+    Ok(())
 }
 
 #[tauri::command]
@@ -5591,21 +6699,68 @@ fn open_plugins_folder() -> Result<(), String> {
             .spawn()
             .map_err(|e| e.to_string())?;
     }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = std::process::Command::new("xdg-open")
+            .arg(dir)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
     Ok(())
+}
+
+#[tauri::command]
+fn get_filesystem_roots() -> Result<Vec<FsRootEntry>, String> {
+    gamepad::get_filesystem_roots_core()
+}
+
+#[tauri::command]
+fn list_directory_entries(
+    path: Option<String>,
+    include_files: bool,
+    filter: Option<String>,
+    show_hidden: Option<bool>,
+) -> Result<FsDirectoryListing, String> {
+    gamepad::list_directory_entries_core(path, include_files, filter, show_hidden.unwrap_or(false))
+}
+
+#[tauri::command]
+fn get_native_gamepad_state(state: State<'_, AppState>) -> Result<NativeGamepadSnapshot, String> {
+    state
+        .native_gamepad
+        .lock()
+        .map(|g| g.clone())
+        .map_err(|e| e.to_string())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(target_os = "linux")]
+    {
+        // Fix for WebKitGTK / NVIDIA Wayland explicit-sync protocol crash
+        // Disabling explicit sync prevents the Wayland crash while keeping FULL GPU hardware acceleration!
+        if std::env::var_os("__NV_DISABLE_EXPLICIT_SYNC").is_none() {
+            std::env::set_var("__NV_DISABLE_EXPLICIT_SYNC", "1");
+        }
+    }
+
     let database = Arc::new(Database::new().expect("Failed to initialize OpenPlay SQLite database"));
     let db_for_setup = database.clone();
+    let native_gamepad = Arc::new(std::sync::Mutex::new(NativeGamepadSnapshot::default()));
+    let gamepad_for_setup = native_gamepad.clone();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .manage(AppState { db: database })
+        .manage(AppState {
+            db: database,
+            native_gamepad,
+        })
         .setup(move |app| {
-            // Seed default theme and bundled plugins if not present
-            let _ = themes::seed_default_theme();
+            // Seed default theme and bundled plugins from packaged resources if not present / updated
+            let resource_dir = app.path().resource_dir().ok();
+            let _ = themes::seed_default_theme(resource_dir.as_deref());
             let _ = plugins::seed_bundled_plugins();
+            gamepad::start_native_gamepad_watcher(app.handle().clone(), gamepad_for_setup);
 
             if let Some(window) = app.get_webview_window("main") {
                 if let Some(icon) = app.default_window_icon() {
@@ -5647,7 +6802,7 @@ pub fn run() {
                     let should_sync = cfg.sync_on_startup.unwrap_or(true);
                     if should_sync {
                         eprintln!("[BackgroundSync] Running startup library sync across connected providers...");
-                        let _ = sync_all_libraries_core(&app_handle_bg, &db_bg, false).await;
+                        let _ = sync_all_libraries_core(Some(&app_handle_bg), &db_bg, false).await;
                     }
                 }
 
@@ -5688,32 +6843,66 @@ pub fn run() {
 
                 // 3. Startup Cloud Sync (5 second delay)
                 tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-                if let Ok(status) = cloud_sync::get_cloud_sync_status(&db_bg) {
-                    if status.enabled && status.is_folder_valid {
-                        if let Some(folder) = status.folder_path {
-                            eprintln!("[CloudSync] Executing startup cloud sync from {:?}", folder);
-                            let p = std::path::PathBuf::from(folder);
-                            if let Ok(summary) = cloud_sync::sync_cloud_directory(&db_bg, &p) {
-                                let _ = app_handle_bg.emit("cloud-sync-completed", &summary);
-                                let _ = app_handle_bg.emit("library-updated", ());
+                let run_cloud_on_startup = db_bg
+                    .get_app_config()
+                    .ok()
+                    .and_then(|c| c.cloud_sync_on_startup)
+                    .unwrap_or(true);
+                if run_cloud_on_startup {
+                    if let Ok(status) = cloud_sync::get_cloud_sync_status(&db_bg) {
+                        if status.enabled && status.is_folder_valid {
+                            if let Some(folder) = status.folder_path {
+                                eprintln!("[CloudSync] Executing startup cloud sync from {:?}", folder);
+                                let p = std::path::PathBuf::from(folder);
+                                if let Ok(summary) = cloud_sync::sync_cloud_directory(&db_bg, &p) {
+                                    let _ = app_handle_bg.emit("cloud-sync-completed", &summary);
+                                    let _ = app_handle_bg.emit("library-updated", ());
+                                }
                             }
                         }
                     }
                 }
 
-                // 4. Periodic loop (polls every 10 minutes)
-                let mut last_periodic_sync = std::time::Instant::now();
-                loop {
-                    tokio::time::sleep(tokio::time::Duration::from_secs(600)).await;
+                // Background Save Location Pre-Warmer for installed games
+                {
+                    let db_save = db_bg.clone();
+                    let app_save = app_handle_bg.clone();
+                    tokio::spawn(async move {
+                        tokio::time::sleep(tokio::time::Duration::from_secs(4)).await;
+                        let warmed = saves::warm_installed_game_save_locations(&db_save, |gid| {
+                            let _ = app_save.emit("save-locations-warmed", &serde_json::json!({ "game_id": gid }));
+                        })
+                        .await;
+                        if warmed > 0 {
+                            eprintln!("[SaveDiscovery] Background pre-warmed save rules for {} installed games", warmed);
+                        }
+                    });
+                }
 
-                    // Periodic cloud sync if enabled
-                    if let Ok(status) = cloud_sync::get_cloud_sync_status(&db_bg) {
-                        if status.enabled && status.is_folder_valid {
-                            if let Some(folder) = status.folder_path {
-                                let p = std::path::PathBuf::from(folder);
-                                if let Ok(summary) = cloud_sync::sync_cloud_directory(&db_bg, &p) {
-                                    let _ = app_handle_bg.emit("cloud-sync-completed", &summary);
-                                    let _ = app_handle_bg.emit("library-updated", ());
+                // 4. Periodic loop (checks every 60 seconds against user-configured intervals)
+                let mut last_periodic_sync = std::time::Instant::now();
+                let mut last_cloud_sync_tick = std::time::Instant::now();
+                loop {
+                    tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
+
+                    // Periodic cloud sync if enabled (respects cloud_sync_interval_minutes, default 15m)
+                    let cloud_interval_mins = db_bg
+                        .get_app_config()
+                        .ok()
+                        .and_then(|c| c.cloud_sync_interval_minutes)
+                        .unwrap_or(15);
+                    if cloud_interval_mins > 0
+                        && last_cloud_sync_tick.elapsed().as_secs() >= (cloud_interval_mins as u64) * 60
+                    {
+                        last_cloud_sync_tick = std::time::Instant::now();
+                        if let Ok(status) = cloud_sync::get_cloud_sync_status(&db_bg) {
+                            if status.enabled && status.is_folder_valid {
+                                if let Some(folder) = status.folder_path {
+                                    let p = std::path::PathBuf::from(folder);
+                                    if let Ok(summary) = cloud_sync::sync_cloud_directory(&db_bg, &p) {
+                                        let _ = app_handle_bg.emit("cloud-sync-completed", &summary);
+                                        let _ = app_handle_bg.emit("library-updated", ());
+                                    }
                                 }
                             }
                         }
@@ -5725,14 +6914,15 @@ pub fn run() {
                             let required_secs = (interval_hours as u64) * 3600;
                             if last_periodic_sync.elapsed().as_secs() >= required_secs {
                                 // Gaming-aware check: don't sync if user is currently playing
-                                let running = GameLauncher::get_running_games(Some(&app_handle_bg), Some(&db_bg));
+                                let sink = crate::launcher::LauncherEventSink::Tauri(app_handle_bg.clone());
+                                let running = GameLauncher::get_running_games(Some(&sink), Some(&db_bg));
                                 if !running.is_empty() {
                                     eprintln!("[BackgroundSync] Periodic sync deferred: active game running ({:?})", running);
                                     continue;
                                 }
 
                                 eprintln!("[BackgroundSync] Executing periodic background playtime sync ({}h interval)...", interval_hours);
-                                let _ = sync_all_libraries_core(&app_handle_bg, &db_bg, true).await;
+                                let _ = sync_all_libraries_core(Some(&app_handle_bg), &db_bg, true).await;
                                 last_periodic_sync = std::time::Instant::now();
                             }
                         }
@@ -5781,6 +6971,7 @@ pub fn run() {
             install_game,
             stop_game,
             get_running_games,
+            get_available_runners,
             select_file,
             select_multiple_files,
             select_directory,
@@ -5789,6 +6980,7 @@ pub fn run() {
             import_playnite_backup,
             scan_local_executable,
             scan_local_folder,
+            scan_installed_linux_apps,
             add_local_games,
             get_app_config,
             save_app_config,
@@ -5853,6 +7045,15 @@ pub fn run() {
             set_sync_device_name,
             get_sync_peer_devices,
             trigger_cloud_sync,
+            get_game_save_state,
+            save_custom_save_paths,
+            set_game_cloud_save_settings,
+            force_push_cloud_save,
+            restore_cloud_save_snapshot,
+            delete_cloud_save_snapshot,
+            restore_local_safety_backup,
+            check_pre_launch_cloud_save,
+            get_cloud_saves_overview,
             get_installed_themes,
             import_theme_zip,
             delete_theme,
@@ -5868,7 +7069,10 @@ pub fn run() {
             toggle_plugin,
             get_plugin_config,
             save_plugin_config,
-            open_plugins_folder
+            open_plugins_folder,
+            get_filesystem_roots,
+            list_directory_entries,
+            get_native_gamepad_state
         ])
         .run(tauri::generate_context!())
         .expect("error while running OpenPlay application");
@@ -5928,5 +7132,287 @@ mod tests {
         };
         // Neither executable nor install dir exists on disk
         assert!(!check_game_installation_status(&game));
+    }
+
+    #[test]
+    fn test_save_game_core_relinks_uninstalled_entry_without_data_loss() {
+        let temp_db_path = std::env::temp_dir().join(format!(
+            "openplay_test_relink_save_{}.db",
+            uuid::Uuid::new_v4()
+        ));
+        let db = Database::new_at_path(&temp_db_path).expect("create temp db");
+
+        // Existing uninstalled Hollow Knight entry with rich metadata, artwork, playtime, notes, ratings
+        let existing_hk = Game {
+            id: "playnite_hk_12345".to_string(),
+            title: "Hollow Knight".to_string(),
+            source: "Local".to_string(),
+            is_installed: false,
+            is_favorite: true,
+            playtime_seconds: 144_000,
+            last_played: Some("2026-10-15 21:00".to_string()),
+            cover_image: Some("/custom/artwork/hk_cover.png".to_string()),
+            background_image: Some("/custom/artwork/hk_hero.png".to_string()),
+            logo_image: Some("/custom/artwork/hk_logo.png".to_string()),
+            developer: Some("Team Cherry".to_string()),
+            publisher: Some("Team Cherry".to_string()),
+            description: Some("Forge your own path in Hollow Knight!".to_string()),
+            genres: vec!["Metroidvania".to_string(), "Souls-like".to_string()],
+            tags: vec!["Indie".to_string()],
+            user_rating: Some(95),
+            critic_score: Some(90),
+            notes: Some("112% Pantheon run".to_string()),
+            completion_status: Some("Completed".to_string()),
+            hltb_main: Some(27.0),
+            playtime_by_device: Some("{\"desktop\":144000}".to_string()),
+            ..Default::default()
+        };
+        db.save_game_exact(&existing_hk).expect("seed existing hollow knight");
+
+        // Incoming newly scanned local executable for Hollow Knight
+        let incoming_candidate = Game {
+            id: "local_999999".to_string(),
+            title: "Hollow Knight".to_string(),
+            source: "Manual".to_string(),
+            executable_path: Some(r"D:\Games\Hollow Knight\hollow_knight.exe".to_string()),
+            install_directory: Some(r"D:\Games\Hollow Knight".to_string()),
+            size_on_disk: Some(7_500_000_000),
+            is_installed: true,
+            playtime_seconds: 0,
+            ..Default::default()
+        };
+
+        let saved = save_game_core(incoming_candidate, &db).expect("save_game_core should succeed");
+
+        // Verify original ID and all rich data were preserved, and no duplicate row was created
+        assert_eq!(saved.id, "playnite_hk_12345");
+        assert!(saved.is_installed);
+        assert_eq!(saved.executable_path.as_deref(), Some(r"D:\Games\Hollow Knight\hollow_knight.exe"));
+        assert_eq!(saved.install_directory.as_deref(), Some(r"D:\Games\Hollow Knight"));
+        assert_eq!(saved.size_on_disk, Some(7_500_000_000));
+        assert_eq!(saved.playtime_seconds, 144_000);
+        assert_eq!(saved.cover_image.as_deref(), Some("/custom/artwork/hk_cover.png"));
+        assert_eq!(saved.background_image.as_deref(), Some("/custom/artwork/hk_hero.png"));
+        assert_eq!(saved.logo_image.as_deref(), Some("/custom/artwork/hk_logo.png"));
+        assert_eq!(saved.developer.as_deref(), Some("Team Cherry"));
+        assert_eq!(saved.description.as_deref(), Some("Forge your own path in Hollow Knight!"));
+        assert_eq!(saved.notes.as_deref(), Some("112% Pantheon run"));
+        assert_eq!(saved.user_rating, Some(95));
+        assert_eq!(saved.completion_status.as_deref(), Some("Completed"));
+        assert_eq!(saved.hltb_main, Some(27.0));
+        assert_eq!(saved.playtime_by_device.as_deref(), Some("{\"desktop\":144000}"));
+        assert!(saved.is_favorite);
+
+        let all_in_db = db.get_all_games().expect("get all games");
+        assert_eq!(all_in_db.len(), 1, "Must not create a duplicate row in DB");
+        assert_eq!(all_in_db[0].id, "playnite_hk_12345");
+        assert_eq!(all_in_db[0].playtime_seconds, 144_000);
+
+        let _ = std::fs::remove_file(&temp_db_path);
+    }
+
+    #[test]
+    fn test_add_local_games_core_relinks_uninstalled_and_roms() {
+        let temp_db_path = std::env::temp_dir().join(format!(
+            "openplay_test_relink_batch_{}.db",
+            uuid::Uuid::new_v4()
+        ));
+        let db = Database::new_at_path(&temp_db_path).expect("create temp db");
+
+        let existing_rom = Game {
+            id: "playnite_rom_metroid".to_string(),
+            title: "Super Metroid".to_string(),
+            source: "Emulation".to_string(),
+            is_installed: false,
+            playtime_seconds: 36_000,
+            cover_image: Some("/artwork/smetroid_box.png".to_string()),
+            description: Some("Classic 1994 SNES action-adventure.".to_string()),
+            user_rating: Some(98),
+            platforms: vec!["Super Nintendo".to_string()],
+            ..Default::default()
+        };
+        db.save_game_exact(&existing_rom).expect("seed existing rom");
+
+        let incoming_batch = vec![Game {
+            id: "local_batch_1".to_string(),
+            title: "Super Metroid".to_string(),
+            source: "Emulation".to_string(),
+            executable_path: Some("/roms/snes/Super Metroid.sfc".to_string()),
+            emulator_id: Some("snes9x_conf".to_string()),
+            is_installed: true,
+            ..Default::default()
+        }];
+
+        let mut updated_list = Vec::new();
+        let count = add_local_games_core(incoming_batch, &db, |g| updated_list.push(g.clone()))
+            .expect("add_local_games_core");
+        assert_eq!(count, 1);
+        assert_eq!(updated_list.len(), 1);
+        assert_eq!(updated_list[0].id, "playnite_rom_metroid");
+        assert!(updated_list[0].is_installed);
+        assert_eq!(updated_list[0].playtime_seconds, 36_000);
+        assert_eq!(updated_list[0].cover_image.as_deref(), Some("/artwork/smetroid_box.png"));
+        assert_eq!(updated_list[0].executable_path.as_deref(), Some("/roms/snes/Super Metroid.sfc"));
+        assert_eq!(updated_list[0].emulator_id.as_deref(), Some("snes9x_conf"));
+
+        let all_in_db = db.get_all_games().expect("get all games");
+        assert_eq!(all_in_db.len(), 1);
+
+        let _ = std::fs::remove_file(&temp_db_path);
+    }
+
+    #[test]
+    fn test_install_uninstalled_game_does_not_alter_last_played() {
+        let temp_db_path = std::env::temp_dir().join(format!(
+            "openplay_test_install_last_played_{}.db",
+            uuid::Uuid::new_v4()
+        ));
+        let db = Database::new_at_path(&temp_db_path).expect("create temp db");
+        let db_arc = Arc::new(db);
+
+        // Uninstalled game with a historical last_played date
+        let uninstalled_game = Game {
+            id: "steam_400".to_string(),
+            title: "Portal".to_string(),
+            source: "Steam".to_string(),
+            source_id: Some("400".to_string()),
+            is_installed: false,
+            playtime_seconds: 7200,
+            last_played: Some("2024-03-15 18:30".to_string()),
+            ..Default::default()
+        };
+        db_arc.save_game_exact(&uninstalled_game).expect("seed uninstalled game");
+
+        // Attempting to launch the uninstalled game must route to install without updating last_played
+        let res = GameLauncher::launch_game_by_id(
+            crate::launcher::LauncherEventSink::None,
+            db_arc.clone(),
+            "steam_400",
+            None,
+        );
+        assert!(res.is_ok());
+
+        // Verify last_played in database was completely untouched
+        let all_in_db = db_arc.get_all_games().expect("get games");
+        let portal = all_in_db.iter().find(|g| g.id == "steam_400").expect("portal found");
+        assert_eq!(portal.last_played.as_deref(), Some("2024-03-15 18:30"));
+        assert_eq!(portal.playtime_seconds, 7200);
+        assert!(!portal.is_installed);
+
+        let _ = std::fs::remove_file(&temp_db_path);
+    }
+
+    #[test]
+    fn test_scan_installed_desktop_apps() {
+        let apps = scanner::local::LocalScanner::scan_installed_desktop_apps();
+        assert!(apps.is_ok());
+        let list = apps.unwrap();
+        let has_prism = list.iter().any(|g| {
+            let t = g.title.to_lowercase();
+            let e = g.executable_path.as_deref().unwrap_or("").to_lowercase();
+            t.contains("prism") || e.contains("prism")
+        });
+        assert!(has_prism, "Prism Launcher desktop entry should be detected");
+    }
+
+    #[test]
+    fn test_resolve_executable_command() {
+        use crate::launcher::resolve_executable_command;
+        let res = resolve_executable_command("prismlauncher");
+        assert!(res.is_some(), "prismlauncher should resolve in PATH");
+        let (buf, args) = res.unwrap();
+        assert!(buf.is_file());
+        assert!(args.is_empty());
+
+        let res2 = resolve_executable_command("prismlauncher --dir ~/.local/share/PrismLauncher");
+        assert!(res2.is_some());
+        let (buf2, args2) = res2.unwrap();
+        assert!(buf2.is_file());
+        assert_eq!(args2.len(), 2);
+    }
+
+    #[test]
+    fn test_other_device_detection_and_clear() {
+        let temp_db_path = std::env::temp_dir().join(format!(
+            "openplay_test_other_device_{}.db",
+            uuid::Uuid::new_v4()
+        ));
+        let db = Database::new_at_path(&temp_db_path).expect("create temp db");
+        let current_device_id = db.get_or_create_device_id().expect("device id");
+
+        // 1. Uninstalled Steam game gains newer remote activity -> flagged as played_on_other_device
+        let mut uninstalled_steam = Game {
+            id: "steam_620".to_string(),
+            title: "Portal 2".to_string(),
+            source: "Steam".to_string(),
+            source_id: Some("620".to_string()),
+            is_installed: false,
+            playtime_seconds: 3600,
+            last_played: Some("2026-11-10T12:00:00Z".to_string()),
+            ..Default::default()
+        };
+        let changed = apply_remote_play_update(
+            &mut uninstalled_steam,
+            Some("2026-11-19T20:15:00Z"),
+            Some(5400),
+            true,
+            &current_device_id,
+        );
+        assert!(changed);
+        assert!(uninstalled_steam.played_on_other_device);
+        assert_eq!(uninstalled_steam.last_played_device_id.as_deref(), Some("external"));
+        db.save_game_exact(&uninstalled_steam).expect("save uninstalled");
+
+        // 2. Installed PC game advancing without OpenPlay launch -> NOT flagged
+        let mut installed_steam = Game {
+            id: "steam_400".to_string(),
+            title: "Portal".to_string(),
+            source: "Steam".to_string(),
+            source_id: Some("400".to_string()),
+            is_installed: true,
+            playtime_seconds: 1200,
+            last_played: Some("2026-11-10T12:00:00Z".to_string()),
+            ..Default::default()
+        };
+        let changed_inst = apply_remote_play_update(
+            &mut installed_steam,
+            Some("2026-11-19T21:00:00Z"),
+            Some(2400),
+            false,
+            &current_device_id,
+        );
+        assert!(changed_inst);
+        assert!(!installed_steam.played_on_other_device);
+        assert_eq!(installed_steam.last_played_device_id, None);
+
+        // 3. Clearing via save_game_core persists current_device_id and clears flag
+        let mut to_clear = db.get_game_by_id("steam_620").unwrap().unwrap();
+        assert!(to_clear.played_on_other_device);
+        to_clear.played_on_other_device = false;
+        to_clear.last_played_device_id = None;
+        let saved = save_game_core(to_clear, &db).expect("save_game_core");
+        assert!(!saved.played_on_other_device);
+        assert_eq!(saved.last_played_device_id.as_deref(), Some(current_device_id.as_str()));
+
+        let reloaded = db.get_game_by_id("steam_620").unwrap().unwrap();
+        assert!(!reloaded.played_on_other_device);
+
+        // 4. Local launch/session via update_playtime clears peer/external flag
+        apply_remote_play_update(
+            &mut uninstalled_steam,
+            Some("2026-11-20T09:00:00Z"),
+            None,
+            true,
+            &current_device_id,
+        );
+        db.save_game_exact(&uninstalled_steam).unwrap();
+        assert!(db.get_game_by_id("steam_620").unwrap().unwrap().played_on_other_device);
+
+        db.update_playtime("steam_620", 60, "2026-11-20 10:00").unwrap();
+        let after_local = db.get_game_by_id("steam_620").unwrap().unwrap();
+        assert!(!after_local.played_on_other_device);
+        assert_eq!(after_local.last_played_device_id.as_deref(), Some(current_device_id.as_str()));
+
+        let _ = std::fs::remove_file(&temp_db_path);
     }
 }

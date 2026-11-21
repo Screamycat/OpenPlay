@@ -56,6 +56,8 @@ export const LeftDrawer: React.FC<LeftDrawerProps> = ({
   const [connectedLibs, setConnectedLibs] = useState<ConnectedLibraryItem[]>([]);
   const [appVersion, setAppVersion] = useState("0.1.4");
   const hoverTimeoutRef = useRef<number | null>(null);
+  const drawerRef = useRef<HTMLElement | null>(null);
+  const refreshContainerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     getVersion()
@@ -68,7 +70,33 @@ export const LeftDrawer: React.FC<LeftDrawerProps> = ({
       invoke<ConnectedLibraryItem[]>("get_connected_libraries")
         .then((items) => setConnectedLibs(items || []))
         .catch((err) => console.warn("Failed to load connected libraries:", err));
+    } else {
+      if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+      setIsRefreshHovered(false);
+      setIsRefreshExpanded(false);
     }
+  }, [isOpen]);
+
+  // Auto-open Refresh flyout when controller focus lands on Refresh, and auto-close when focus moves to another main drawer item
+  useEffect(() => {
+    const drawerEl = drawerRef.current;
+    if (!drawerEl || !isOpen) return;
+
+    const handleGamepadFocus = (e: Event) => {
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      if (refreshContainerRef.current?.contains(target)) {
+        setIsRefreshExpanded(true);
+      } else {
+        setIsRefreshExpanded(false);
+        setIsRefreshHovered(false);
+      }
+    };
+
+    drawerEl.addEventListener("gamepadfocus", handleGamepadFocus);
+    return () => {
+      drawerEl.removeEventListener("gamepadfocus", handleGamepadFocus);
+    };
   }, [isOpen]);
 
   const handleMouseEnterRefresh = () => {
@@ -82,7 +110,7 @@ export const LeftDrawer: React.FC<LeftDrawerProps> = ({
     }, 250);
   };
 
-  const isFlyoutVisible = isRefreshHovered || isRefreshExpanded;
+  const isFlyoutVisible = isOpen && (isRefreshHovered || isRefreshExpanded);
 
   return (
     <>
@@ -96,7 +124,9 @@ export const LeftDrawer: React.FC<LeftDrawerProps> = ({
 
       {/* Sliding Drawer Container: Smoked Neutral Dark Glass */}
       <aside
+        ref={drawerRef}
         data-theme-part="drawer"
+        data-gamepad-zone={isOpen ? "left-drawer" : undefined}
         className={`fixed top-0 left-0 bottom-0 w-64 theme-panel-surface backdrop-blur-2xl border-r border-white/10 z-50 flex flex-col shadow-[0_20px_60px_rgba(0,0,0,0.85)] transition-transform duration-250 ease-out select-none ${
           isOpen ? "translate-x-0" : "-translate-x-full"
         }`}
@@ -116,6 +146,7 @@ export const LeftDrawer: React.FC<LeftDrawerProps> = ({
 
           <button
             onClick={onClose}
+            data-gamepad-close="true"
             className="w-7 h-7 rounded-full bg-white/5 hover:bg-white/15 text-zinc-400 hover:text-white flex items-center justify-center transition-colors cursor-pointer border border-white/5"
           >
             <X className="w-4 h-4 text-zinc-400" />
@@ -177,11 +208,13 @@ export const LeftDrawer: React.FC<LeftDrawerProps> = ({
 
           {/* Refresh Menu Item with Hover Flyout */}
           <div
+            ref={refreshContainerRef}
             className="relative"
             onMouseEnter={handleMouseEnterRefresh}
             onMouseLeave={handleMouseLeaveRefresh}
           >
             <button
+              data-gamepad-submenu-trigger="true"
               onClick={() => setIsRefreshExpanded((prev) => !prev)}
               className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl transition-all font-medium cursor-pointer group ${
                 isFlyoutVisible
@@ -213,7 +246,10 @@ export const LeftDrawer: React.FC<LeftDrawerProps> = ({
 
             {/* Submenu Flyout (Neutral Smoked Dark Glass) */}
             {isFlyoutVisible && (
-              <div className="absolute left-full top-0 ml-2 w-72 theme-panel-surface backdrop-blur-2xl border border-white/10 rounded-2xl shadow-[0_16px_48px_rgba(0,0,0,0.8)] p-2.5 z-50 flex flex-col space-y-1 text-zinc-200 animate-in fade-in slide-in-from-left-2 duration-150">
+              <div
+                data-gamepad-submenu="true"
+                className="absolute left-full top-0 ml-2 w-72 theme-panel-surface backdrop-blur-2xl border border-white/10 rounded-2xl shadow-[0_16px_48px_rgba(0,0,0,0.8)] p-2.5 z-50 flex flex-col space-y-1 text-zinc-200 animate-in fade-in slide-in-from-left-2 duration-150"
+              >
                 <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-zinc-500 flex items-center justify-between">
                   <span>Refresh Options</span>
                   {(isScanning || isSyncingMetadata || isFullRefreshing) && (

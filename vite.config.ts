@@ -3,11 +3,21 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 // @ts-expect-error type error without @types/node package
 import process from "node:process";
+import path from "node:path";
 const host = process.env.TAURI_DEV_HOST;
 
 // https://vite.dev/config/
 export default defineConfig(() => ({
   plugins: [react(), tailwindcss()],
+  resolve: {
+    alias: {
+      "@tauri-apps/api/core": path.resolve(import.meta.dirname || process.cwd(), "src/utils/ipc.ts"),
+      "@tauri-apps/api/event": path.resolve(import.meta.dirname || process.cwd(), "src/utils/ipc.ts"),
+      "@tauri-apps/api/window": path.resolve(import.meta.dirname || process.cwd(), "src/utils/ipc.ts"),
+      "@tauri-apps/api/app": path.resolve(import.meta.dirname || process.cwd(), "src/utils/ipc.ts"),
+      "@tauri-apps/plugin-opener": path.resolve(import.meta.dirname || process.cwd(), "src/utils/ipc.ts"),
+    },
+  },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
@@ -26,8 +36,8 @@ export default defineConfig(() => ({
         }
       : undefined,
     watch: {
-      // 3. tell Vite to ignore watching `src-tauri`
-      ignored: ["**/src-tauri/**"],
+      // 3. tell Vite to ignore watching `src-tauri` and documentation files like `ROADMAP.md`
+      ignored: ["**/src-tauri/**", "**/ROADMAP.md"],
     },
   },
 }));

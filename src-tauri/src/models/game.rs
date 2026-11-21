@@ -87,4 +87,12 @@ pub struct Game {
     pub updated_at: Option<String>,
     #[serde(default)]
     pub playtime_by_device: Option<String>,
+    #[serde(default)]
+    pub cloud_save_enabled: bool,
+    #[serde(default)]
+    pub cloud_save_retention_override: Option<u32>,
+    #[serde(default)]
+    pub last_played_device_id: Option<String>,
+    #[serde(default)]
+    pub played_on_other_device: bool,
 }

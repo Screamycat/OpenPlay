@@ -41,6 +41,12 @@ pub struct AppConfig {
     pub trailer_autoplay: Option<bool>,
     pub trailer_muted: Option<bool>,
 
+    // Linux Compatibility & Runner Settings
+    pub linux_preferred_runner_id: Option<String>,
+    pub linux_custom_runner_path: Option<String>,
+    pub enable_gamemode: Option<bool>,
+    pub enable_mangohud: Option<bool>,
+
     // APIs & Services
     pub steamgriddb_api_key: Option<String>,
     pub steamgriddb_nsfw: Option<bool>,
@@ -69,6 +75,15 @@ pub struct AppConfig {
     pub cloud_sync_on_startup: Option<bool>,
     pub cloud_sync_on_game_exit: Option<bool>,
     pub last_cloud_sync_time: Option<String>,
+    pub cloud_save_retention_count: Option<u32>,
+
+    // Controller & Gamepad Navigation
+    pub controller_enabled: Option<bool>,
+    pub controller_glyph_style: Option<String>,
+    pub controller_nintendo_swap: Option<bool>,
+    pub controller_deadzone: Option<f64>,
+    pub controller_suspend_in_game: Option<bool>,
+    pub controller_bindings: Option<std::collections::HashMap<String, String>>,
 }
 
 impl Default for AppConfig {
@@ -103,6 +118,10 @@ impl Default for AppConfig {
             panel_tint: Some("#0e0e11".to_string()),
             trailer_autoplay: Some(true),
             trailer_muted: Some(true),
+            linux_preferred_runner_id: None,
+            linux_custom_runner_path: None,
+            enable_gamemode: Some(true),
+            enable_mangohud: Some(false),
             steamgriddb_api_key: None,
             steamgriddb_nsfw: Some(false),
             retroachievements_username: None,
@@ -122,6 +141,13 @@ impl Default for AppConfig {
             cloud_sync_on_startup: Some(true),
             cloud_sync_on_game_exit: Some(true),
             last_cloud_sync_time: None,
+            cloud_save_retention_count: Some(5),
+            controller_enabled: Some(true),
+            controller_glyph_style: Some("auto".to_string()),
+            controller_nintendo_swap: Some(false),
+            controller_deadzone: Some(0.18),
+            controller_suspend_in_game: Some(true),
+            controller_bindings: None,
         }
     }
 }

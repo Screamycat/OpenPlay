@@ -133,6 +133,7 @@ export const AddGameModal: React.FC<AddGameModalProps> = ({
       <div
         onClick={(e) => e.stopPropagation()}
         data-theme-part="modal-container"
+        data-gamepad-zone="modal"
         className="theme-modal-container rounded-2xl w-full max-w-xl overflow-hidden flex flex-col text-zinc-200"
       >
         {/* Header */}
@@ -152,6 +153,7 @@ export const AddGameModal: React.FC<AddGameModalProps> = ({
           </div>
           <button
             onClick={onClose}
+            data-gamepad-close="true"
             className="p-1.5 text-zinc-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />

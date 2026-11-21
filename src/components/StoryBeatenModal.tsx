@@ -37,6 +37,7 @@ export const StoryBeatenModal: React.FC<StoryBeatenModalProps> = ({
     >
       <div
         data-theme-part="modal-container"
+        data-gamepad-zone="modal"
         className="w-full max-w-md theme-modal-container rounded-3xl p-6 relative animate-in zoom-in-95 duration-150 overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
@@ -50,6 +51,7 @@ export const StoryBeatenModal: React.FC<StoryBeatenModalProps> = ({
         {/* Close Button */}
         <button
           onClick={onClose}
+          data-gamepad-close="true"
           className="absolute top-4 right-4 p-1.5 rounded-full text-zinc-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
           title="Close (Ask later)"
         >

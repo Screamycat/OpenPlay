@@ -6,7 +6,7 @@
 **Native Windows & Linux • Moving Cover Art • Built-in Superpowers • Zero Bloat**
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![Tauri v2](https://img.shields.io/badge/Tauri-v2.0-24C8DB?logo=tauri&logoColor=white)](https://tauri.app)
+[![Electron](https://img.shields.io/badge/Desktop-Electron-47848F?logo=electron&logoColor=white)](https://www.electronjs.org/)
 [![Rust](https://img.shields.io/badge/Backend-Rust-DEA584?logo=rust&logoColor=white)](https://www.rust-lang.org)
 [![React 19](https://img.shields.io/badge/Frontend-React_19-61DAFB?logo=react&logoColor=black)](https://react.dev)
 [![Platform](https://img.shields.io/badge/Platforms-Windows_%7C_Linux-555555?logo=linux&logoColor=white)](#the-cross-platform--linux-advantage)
@@ -30,7 +30,7 @@ However, as gaming setups evolve across Windows desktops and Linux handhelds (li
 - **Heroic is a store client, not a unified library aggregator**: Heroic is designed primarily for downloading and playing Epic, GOG, and Amazon titles. It does not aggregate full Steam libraries, emulated retro legacy, or unified multi-store collections.
 
 **OpenPlay is engineered to bridge these worlds:**
-A blazing-fast, cross-platform sanctuary for your entire game collection built on **Tauri v2** and **Rust**. It eliminates setup fatigue by delivering the features players care about most—animated video covers, an integrated achievement hub, live Steam player counts, HowLongToBeat completion metrics, YouTube trailers, duplicate collapsing, and full retro support—**built directly into its core with zero plugins required.**
+A blazing-fast, cross-platform sanctuary for your entire game collection built on **Electron (Chromium GPU Skia)** and a high-performance **Rust Core Daemon** (`openplay-core`). It eliminates setup fatigue by delivering the features players care about most—animated video covers, an integrated achievement hub, live Steam player counts, HowLongToBeat completion metrics, YouTube trailers, duplicate collapsing, and full retro support—**built directly into its core with zero plugins required.**
 
 ---
 
@@ -69,6 +69,11 @@ A blazing-fast, cross-platform sanctuary for your entire game collection built o
 
 ---
 
+### 🎮 Native Desktop Controller & Gamepad Navigation
+*Full keyboard-and-mouse parity from your controller in Desktop Mode. Navigate the 2D game grid, details pane, top bar, context menus, and multi-tab modals using Spatial + Zone navigation with seamless edge-crossing. Includes auto-detected Xbox, PlayStation, and Nintendo button glyphs, an auto-hiding contextual prompt bar, a built-in On-Screen Virtual Keyboard, an in-app Controller File & Folder Browser, automatic input suspension during gameplay, and full button remapping in Settings.*
+
+---
+
 ### 🎮 Fullscreen Couch Mode *(In Active Development)*
 *Designed for living-room TVs, handhelds (Steam Deck, ROG Ally, Legion Go), and seamless gamepad navigation.*
 
@@ -87,8 +92,8 @@ Every launcher has its own design philosophy and purpose. Here is how they compa
 | *Platform & Architecture* | | | | |
 | **Windows Support** | ✅ **Native** | ✅ **Native** | ❌ *No* | ✅ **Native** |
 | **Linux & SteamOS / Steam Deck** | ✅ **Native** | ❌ *Windows Only* | ✅ **Native** | ✅ **Native** |
-| **Technology Stack** | **Tauri v2 + Rust + React 19** | C# / WPF (.NET) | Python + GTK | Electron (Chromium + Node.js) |
-| **Memory Footprint (Idle)** | 🟢 **Ultra-Low (<100MB)** | 🟡 Moderate (~180–300MB) | 🟢 Low (~120–200MB) | 🔴 Higher (~350–600MB) |
+| **Technology Stack** | **Electron + Rust Core Daemon + React 19** | C# / WPF (.NET) | Python + GTK | Electron (Chromium + Node.js) |
+| **Memory Footprint (Idle)** | 🟢 **Optimized (~180–240MB with Skia GPU)** | 🟡 Moderate (~180–300MB) | 🟢 Low (~120–200MB) | 🔴 Higher (~350–600MB) |
 | **100% Offline-First (Local SQLite)** | ✅ **Yes (Zero Telemetry)** | ✅ **Yes** | ✅ **Yes** | ✅ **Yes** |
 | **Setup Experience** | ⚡ **All-in-One Out of Box** | 🔌 Requires 10+ Plugins | ⚙️ Runner / Script Setup | ⚡ Store Login Out of Box |
 | *Library Unification & Management* | | | | |
@@ -98,6 +103,7 @@ Every launcher has its own design philosophy and purpose. Here is how they compa
 | **Playnite Backup Importer (.zip)** | ✅ **Built-in (1-Click Migration)** | ✅ Native Export | ❌ N/A | ❌ N/A |
 | **Zero-Downtime Snapshots & Backups** | ✅ **Built-in (Auto-rotation & portable .openplaybackup)** | 🔌 Extensions / Manual | ❌ Manual file copy | ❌ N/A |
 | **Cross-Device Cloud Sync (Folder Sync)** | ✅ **Built-in (Multi-Leader CRDT & PN-Counter)** | 🔌 Third-party scripts | ❌ Manual rsync | ❌ N/A |
+| **Save Location Discovery & Cloud Save Versioning** | ✅ **Built-in (Cross-OS Auto-Detect, Manual Routing & Latest-X Snapshots)** | 🔌 Third-party (Ludusavi plugin) | ❌ Manual | ✅ Built-in (Store Cloud Saves) |
 | **Direct Store Downloading & Cloud Saves** | ⚠️ Directs to Store / Native Launch | ⚠️ Directs to Store Client | 🔌 Custom Scripts | 👑 **Built-in (Legendary/Nile)** |
 | **Wine / Proton Prefix Tuning** | ⚠️ Direct Execution / Steam Proton | ❌ N/A | 👑 **Advanced Deep Runner Tuning** | ✅ Integrated Wine/Proton Tools |
 | **Visuals, Media & Metadata** | | | | |
@@ -115,6 +121,7 @@ Every launcher has its own design philosophy and purpose. Here is how they compa
 | **Cross-Store Achievement Switching** | ✅ **Built-in (Per-Platform Tabs)** | ❌ *No* | ❌ *No* | ❌ *No* |
 | *Power Features* | | | | |
 | **Dual Launch / Multi-Action Play** | ✅ **Built-in (Action Menu)** | ✅ Built-in (Play Actions) | ✅ Runner Arguments | ⚠️ Basic Alternate Exe |
+| **Native Desktop Controller Navigation** | ✅ **Built-in (2D Spatial + Zone Nav, Auto Glyphs, Virtual Keyboard, File Browser & Keybind Remapping)** | ⚠️ Fullscreen Mode Only | ❌ *No* | ✅ Built-in (Gamepad UI) |
 | **In-App Patch Notes & News Feed** | ✅ **Built-in** | 🔌 Requires Plugin | ❌ *No* | ❌ *No* |
 | **Non-Intrusive Background Library Sync** | ✅ **Built-in (Startup & multi-device periodic sync with gameplay pause)** | 🔌 Requires Plugins / Scripts | ❌ Manual Refresh | ⚠️ Manual Store Refresh |
 
@@ -128,10 +135,12 @@ Every launcher has its own design philosophy and purpose. Here is how they compa
 
 ## 🐧 The Cross-Platform & Linux Advantage
 
-OpenPlay is built on top of **Tauri v2** and **Rust**, eschewing heavy Electron runtimes and Windows-only WPF frameworks:
+OpenPlay is powered by a high-performance **Rust Core Daemon** (`openplay-core`) communicating seamlessly with an **Electron** front-end shell utilizing Chromium's hardware-accelerated Skia 2D/3D rasterizer:
 
-- **Ultra-Low Memory Footprint**: Idles at a fraction of Chromium-based launchers (<100MB RAM).
+- **Stable, Predictable Memory Footprint**: Isolated GPU texture processing and native media streaming (<250MB RAM).
+- **Flawless 144Hz Video & Artwork**: Smooth native playback for animated WebM, WebP, APNG, and MP4 cover art with zero external codecs or GStreamer configuration.
 - **Native Wayland & X11 Compatibility**: Runs cleanly across Arch, Ubuntu, Fedora, Nobara, and SteamOS.
+- **Standalone Linux Game Execution**: Run Windows (`.exe`) games directly via Wine or Proton with isolated per-game prefixes, DXVK/VKD3D translation, optional Feral GameMode (`gamemoderun`), and MangoHud overlay without requiring external frontends like Lutris or Heroic.
 - **Seamless Steam Deck Experience**: Built to look stunning on both high-DPI desktop monitors and portable handheld screens.
 - **Respects User Privacy**: 100% offline-first. Your library database (`SQLite`) lives strictly on your machine. Zero telemetry, zero tracking, zero mandatory accounts.
 
@@ -156,10 +165,12 @@ OpenPlay is designed from the ground up to respect user sovereignty and privacy:
 ### 🔄 Multi-Leader Offline-First Cloud Sync
 - **Zero Proprietary Cloud Lock-In**: Sync seamlessly across your desktop PC, Steam Deck, or handheld using your own cloud folder (OneDrive, Syncthing, Dropbox, Google Drive, Nextcloud, or a local network NAS).
 - **No SQLite File Corruption**: Avoids raw database file syncing over cloud drives. Each device writes exclusively to its own state file (`devices/<device_id>.json`) via atomic temporary writes.
-- **PN-Counter Playtime CRDT**: Tracks session playtimes as monotonic per-device maps. Offline playtime on your Steam Deck and desktop never overwrite each other; playtimes accumulate conflict-free.
-- **Two-Pass Tombstones & Metadata LWW**: Deletions cleanly propagate across peer devices while user metadata edits take precedence over stale state.
+- **PN-Counter Playtime & Monotonic Last Played CRDTs**: Tracks session playtimes as monotonic per-device maps and merges `last_played` dates monotonically across formats—retaining accurate play history even on devices without connected third-party store clients.
+- **Two-Pass Tombstones & Curated Metadata LWW**: Deletions cleanly propagate across peer devices while completion states (`Beaten`, Auto Story Beaten), favorites, ratings, tags, and notes take precedence over uncurated local scanner passes.
+- **Themes, Plugins & Portable Settings Sync**: Automatically packages and syncs custom installed `.zip` themes and plugins, active theme/plugin states, per-extension settings, and portable UI/app preferences (plus optional opt-in metadata API keys).
 - **Content-Addressed Artwork Sync**: Local custom artwork is deduplicated and hashed using SHA-256 (`custom://<sha256>.<ext>`) so every device in the cluster shares artwork with zero duplicate bandwidth.
-- **Physical vs. Logical Isolation**: Syncs ratings, tags, notes, playtimes, and UI themes across devices while keeping physical install directories and executable paths strictly device-local.
+- **Physical vs. Logical Isolation**: Storefront OAuth logins, physical install directories, executable paths, and per-device custom save paths remain strictly device-local.
+- **Cross-OS Save Discovery & Versioned Cloud Saves**: Automatically detects save & config directories across Windows, Linux XDG, Steam `userdata` / Proton `compatdata`, OpenPlay Wine prefixes, and configured emulators (with cached PCGamingWiki lookup and manual multi-folder routing). Games opted in per-title automatically push SHA-256 deduplicated `.zip` snapshots on Play and Exit while keeping the latest `X` versions, checking for newer peer saves before launch, and creating local pre-restore safety backups.
 
 ### 🛡️ Live Snapshots & Portable Bundles
 - **Live `VACUUM INTO` Snapshots**: Creates consistent, zero-downtime database snapshots with configurable rotation and retention limits.
@@ -172,25 +183,25 @@ OpenPlay is designed from the ground up to respect user sovereignty and privacy:
 ```mermaid
 graph TD
     UI[Frontend: React 19 + TypeScript + Tailwind CSS]
-    TAURI[Tauri v2 IPC Bridge]
-    CORE[Backend: Rust Core Engine]
+    SHELL[Desktop Shell: Electron + Hardware Skia 2D/3D]
+    DAEMON[Backend Daemon: openplay-core Rust Engine]
     DB[(SQLite: Local Storage)]
     EXT[External APIs & Scanners: Steam / Epic / GOG / Xbox / Battle.net / EA / Ubisoft / Riot / Amazon / Google Play / Roblox / RetroAchievements / IGDB / SteamGridDB / HLTB]
     PROC[OS Process Lifecycle Monitor]
 
-    UI <-->|JSON IPC| TAURI
-    TAURI <--> CORE
-    CORE <--> DB
-    CORE <--> EXT
-    CORE <--> PROC
+    UI <--> SHELL
+    SHELL <-->|Fast JSON-RPC stdio| DAEMON
+    DAEMON <--> DB
+    DAEMON <--> EXT
+    DAEMON <--> PROC
 ```
 
-- **Runtime & Desktop Shell**: [Tauri v2](https://tauri.app/)
-- **Backend Systems**: [Rust](https://www.rust-lang.org/) with asynchronous process tracking and `sysinfo`
-- **Database**: Embedded local SQLite via `rusqlite`
+- **Runtime & Desktop Shell**: [Electron](https://www.electronjs.org/) with Chromium GPU hardware acceleration and zero-copy custom protocol streaming (`openplay://file/...`)
+- **Backend Core**: [Rust](https://www.rust-lang.org/) daemon (`openplay-core`) managing multi-store scrapers, ChaCha20-Poly1305 sync, emulation engines, and background tasks
+- **Database**: Embedded local SQLite via `rusqlite` with offline-first indexing
 - **Frontend Framework**: [React 19](https://react.dev/) + [TypeScript](https://www.typescriptlang.org/)
-- **Styling**: [Tailwind CSS v4](https://tailwindcss.com/) with custom glassmorphism design tokens
-- **Media Pipeline**: Native HTML5 Video engine for looping video covers and YouTube embeds
+- **Styling**: [Tailwind CSS v4](https://tailwindcss.com/) with decoupled custom themes and Anti-Softlock immunity safeguards
+- **Media Pipeline**: Native hardware-accelerated video/animation pipeline for looping WebM, WebP, APNG, and YouTube trailers
 
 ---
 
@@ -202,7 +213,7 @@ Ensure you have the following installed on your machine:
 - **Node.js** (v18+ recommended) & `npm`
 - **Rust & Cargo** ([rustup.rs](https://rustup.rs/))
 - **Windows**: [Visual Studio C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/)
-- **Linux**: Standard Tauri dependencies (`libwebkit2gtk-4.1-dev`, `build-essential`, `curl`, `wget`, `file`, `libssl-dev`, `libgtk-3-dev`, `libayatana-appindicator3-dev`, `librsvg2-dev`)
+- **Linux**: Standard build tools (`build-essential`, `curl`, `wget`, `file`, `libssl-dev`)
 
 ### Installation & Run
 

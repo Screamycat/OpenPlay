@@ -87,6 +87,7 @@ export const SortDropdown: React.FC<SortDropdownProps> = ({
       {/* Trigger Button */}
       <button
         type="button"
+        data-gamepad-popover-trigger="true"
         onClick={() => setIsOpen((prev) => !prev)}
         className={`flex items-center space-x-2 px-2.5 py-1.5 rounded-lg border transition-all text-xs cursor-pointer select-none ${
           isOpen
@@ -112,7 +113,10 @@ export const SortDropdown: React.FC<SortDropdownProps> = ({
 
       {/* Floating Glassmorphic Popover Menu */}
       {isOpen && (
-        <div className="absolute left-0 top-full mt-2 w-64 theme-panel-surface backdrop-blur-2xl border border-white/10 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.85)] p-2.5 z-50 text-xs text-zinc-200 animate-in fade-in slide-in-from-top-2 duration-150 select-none space-y-3">
+        <div
+          data-gamepad-zone="popover"
+          className="absolute left-0 top-full mt-2 w-64 theme-panel-surface backdrop-blur-2xl border border-white/10 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.85)] p-2.5 z-50 text-xs text-zinc-200 animate-in fade-in slide-in-from-top-2 duration-150 select-none space-y-3"
+        >
           {/* Section 1: Sort Criteria */}
           <div>
             <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-zinc-500">

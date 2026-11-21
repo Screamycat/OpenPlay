@@ -4,10 +4,10 @@ import { Minus, Square, Copy, X } from "lucide-react";
 
 export const WindowControls: React.FC<{ className?: string }> = ({ className = "" }) => {
   const [isMaximized, setIsMaximized] = useState(false);
-  const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+  const isNative = typeof window !== "undefined" && ("openplayAPI" in window || "__TAURI_INTERNALS__" in window);
 
   useEffect(() => {
-    if (!isTauri) return;
+    if (!isNative) return;
 
     let isMounted = true;
     let unlisten: (() => void) | null = null;
@@ -21,17 +21,19 @@ export const WindowControls: React.FC<{ className?: string }> = ({ className = "
         })
         .catch(() => {});
 
-      appWindow
-        .onResized(async () => {
-          try {
-            const max = await appWindow.isMaximized();
-            if (isMounted) setIsMaximized(max);
-          } catch (e) {}
-        })
-        .then((fn) => {
-          unlisten = fn;
-        })
-        .catch(() => {});
+      if ("onResized" in appWindow && typeof (appWindow as any).onResized === "function") {
+        (appWindow as any)
+          .onResized(async () => {
+            try {
+              const max = await appWindow.isMaximized();
+              if (isMounted) setIsMaximized(max);
+            } catch (e) {}
+          })
+          .then((fn: any) => {
+            unlisten = fn;
+          })
+          .catch(() => {});
+      }
     } catch (e) {
       console.warn("Failed to initialize window controls:", e);
     }
@@ -40,11 +42,11 @@ export const WindowControls: React.FC<{ className?: string }> = ({ className = "
       isMounted = false;
       if (unlisten) unlisten();
     };
-  }, [isTauri]);
+  }, [isNative]);
 
   const handleMinimize = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!isTauri) return;
+    if (!isNative) return;
     try {
       await getCurrentWindow().minimize();
     } catch (err) {
@@ -54,7 +56,7 @@ export const WindowControls: React.FC<{ className?: string }> = ({ className = "
 
   const handleToggleMaximize = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!isTauri) return;
+    if (!isNative) return;
     try {
       const appWindow = getCurrentWindow();
       await appWindow.toggleMaximize();
@@ -67,7 +69,7 @@ export const WindowControls: React.FC<{ className?: string }> = ({ className = "
 
   const handleClose = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!isTauri) return;
+    if (!isNative) return;
     try {
       await getCurrentWindow().close();
     } catch (err) {
@@ -77,6 +79,8 @@ export const WindowControls: React.FC<{ className?: string }> = ({ className = "
 
   return (
     <div
+      id="window-controls"
+      data-theme-part="window-controls"
       className={`flex items-center space-x-1 shrink-0 ${className}`}
       onMouseDown={(e) => e.stopPropagation()}
     >

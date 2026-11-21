@@ -5,7 +5,6 @@ Welcome to the central tracking document for **OpenPlay**. Use this document to 
 
 ## ⚡ Quick Inbox (Jot & Dump)
 > *For raw thoughts, ideas, or things noticed while working, before organizing them below.*
-- League of legends from riot games library says uninstalled even when on disk. 
 
 ---
 
@@ -22,28 +21,29 @@ Welcome to the central tracking document for **OpenPlay**. Use this document to 
 - [x] **Auto status**: In the completionist status it should feature statuses like,"Untouched", "Forgotten", "In Progress", "Hunting", "Beaten", "Mastered" and "Auto". Auto should auto assign these statuses based on time played and last played and achivements.
 - [x] **Duplicate merger**: owning the same game on differ,0ent platforms should not create two slots. Rather, they should conbine and it should be notable by the user that they own it on those platforms. (like duplicate hider in playnite)
 - [x] **Side menu refresh** All connected libraries should appear in this menu.
+- [x] **Save location**: Add support for finding out where it stores save files and config files.
+- [x] **Controller**: Full gamepad navigation support in desktop mode.
+- [x] **Steam other device**: Right now if you play the a steam game on another device it will update your OpenPlay library to say you recently played it. To avoid confusion an indication could be implemented, like a subtle icon thats only visible o that game was not recently played on the device youre currently on. (Maybe its the same for other integrations like epic?)
 
 ### 🟡 Medium Priority / Future Enhancements
 - [x] **Custom Theme Tinting**: Option in Settings to choose primary accent color
 - [x] **Trailer Autoplay Controls in Settings**: Option to toggle video trailer autoplay on/off or mute by default.
 - [x] **Hide**: Be able to hide and unhide a game.
-- [ ] **Controller**: Full gamepad navigation support in desktop mode.
-- [ ] **Custom installer**: Replace the native wizard with a sleek and modern installer. A chance to prepare settings and so on.
+- [ ] **Console Mode**: Much like fullscreen mode, only that its main focus is making your pc into a console (big picture mode if you will).
 
 ### 🟢 Backlog & Wishlist
-- [ ] **Save location**: Add support for finding out where it stores save files and config files.
-- [ ] **Console Mode**: Much like fullscreen mode, only that its main focus is making your pc into a console (big picture mode if you will).
-- [ ] **Steam other device**: Right now if you play the a steam game on another device it will update your OpenPlay library to say you recently played it. To avoid confusion an indication could be implemented, like a subtle icon thats only visible o that game was not recently played on the device youre currently on. (Maybe its the same for other integrations like epic?)
+- [ ] **Custom installer**: Replace the native wizard with a sleek and modern installer. A chance to prepare settings and so on.
 - [ ] **Feedback button**: A button that lets users send feedback.
 - [ ] **Android Support**: An android apk, to view all data on mobile.
 - [ ] **Stats & Analytics Dashboard**: Charts showing playtime trends, most played genres, and monthly play history.
 
 ### ⚙️ Implemented but Non-Tested Features
+- [ ] **Cloud save**: Optionally store game saves on your own cloud.
 - [ ] **Dual launch**: Make it possible to choose on play what exe to launch. (for mod managers or something other) Much Like playnite actions.
 - [ ] **Update in app**: Updating should not open a installer, it should update within the app.
 - [ ] **Launch option on start up (Settings)**: An option in settings to enable start OpenPLay on device boot.
 - [x] **Custom Game Integrations (Epic Games / GOG / Xbox)**: Connect accounts or import local installed libraries automatically.
-- [ ] **Online saving**: Store all configs, metadata and settnigs online. So it's accessible from all devices.
+- [x] **Online saving**: Store all configs, metadata and settnigs online. So it's accessible from all devices.
 - [ ] **Extention / Theme support**: Open up the application for custom plugins (extention) and themes.
 
 ### ❓ Ignored Features at This Time
@@ -73,7 +73,10 @@ Welcome to the central tracking document for **OpenPlay**. Use this document to 
 - [x] **Platform Icons**: Xbox, Epic, GOG, Battle.net are in need of a upgraded, high res icon. Ubisoft, EA, Riot Games all says Local PC with defualt icon, they should recive similar treatment.
 - [x] **Title image percentage**: Instead of the title image being confined  to pixels, it should be confiend to a max of 50% of the heros width and 65% of the heros height.
 - [x] **Ontouched games in hub**: Untouched games in the achivement hub should not be in calcualtion for things like avarege completion and unlocked count etc.
-- [x] **Sidebar version number** The version number in the bottom sidebar is not automatically synced.
+- [x] **Sidebar version number**: The version number in the bottom sidebar is not automatically synced.
+- [ ] **Double clicking to maximize**: Double clicking various UI element ssuch as the dropdown menu panel for filters, dropdown menu panel for sorting maximizes the same way it would do when double clicking the window bar. THis is not a feature and should be removed. Double clicking anywhere should never have this behaviour. This goes for all the othe possible places this would also occur.
+- [ ] **Missing refresh button**: Retroachivements are missing in the refresh menu when logged in.
+- [ ] **Missing icon on linux**: Running OpenPlay on linux is displaying the wayland icon isntead of the OpenPlay icon.
 ---
 
 ## 🐛 Bug Tracker

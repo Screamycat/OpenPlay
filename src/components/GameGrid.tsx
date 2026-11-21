@@ -1,11 +1,11 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { Game } from "../types/game";
 import { resolveGridCoverSrc, isVideoSrc, getStaticFallbackCover } from "../utils/image";
-import { Star, Cloud, Loader2 } from "lucide-react";
+import { Star, Cloud, Loader2, MonitorSmartphone } from "lucide-react";
 import { PlatformIcon } from "./icons/PlatformIcons";
 import { GroupByOption } from "./TopNav";
 import { getEffectiveCompletionStatus } from "../utils/completionStatus";
-import { formatReleaseYear } from "../utils/date";
+import { formatReleaseYear, parseLastPlayedMs } from "../utils/date";
 
 interface GameGridProps {
   games: Game[];
@@ -18,6 +18,7 @@ interface GameGridProps {
   onContextMenu?: (game: Game, x: number, y: number) => void;
   groupBy?: GroupByOption;
   achievementSummaryMap?: Record<string, { total_achievements: number; unlocked_achievements: number; is_perfect: boolean }>;
+  statusFilter?: "all" | "installed" | "uninstalled";
 }
 
 interface GameGroup {
@@ -36,8 +37,10 @@ function getGroupKey(
   switch (groupBy) {
     case "source":
       return game.source || "Manual";
-    case "status":
-      return game.is_installed ? "Installed" : "Uninstalled";
+    case "status": {
+      const hasInstalled = game.is_installed || (game.sibling_games && game.sibling_games.some((s) => s.is_installed));
+      return hasInstalled ? "Installed" : "Uninstalled";
+    }
     case "first_letter": {
       const char = (game.sorting_title || game.title || "#")[0].toUpperCase();
       return /[A-Z]/.test(char) ? char : "#";
@@ -92,6 +95,7 @@ interface GameCardProps {
   isRunning: boolean;
   isFlashActive: boolean;
   isBelowFold: boolean;
+  statusFilter?: "all" | "installed" | "uninstalled";
   onSelect: (game: Game) => void;
   onDoubleClick: (game: Game) => void;
   onContextMenu: (game: Game, x: number, y: number) => void;
@@ -107,6 +111,7 @@ const GameCard = React.memo<GameCardProps>(
     isRunning,
     isFlashActive,
     isBelowFold,
+    statusFilter = "all",
     onSelect,
     onDoubleClick,
     onContextMenu,
@@ -115,6 +120,24 @@ const GameCard = React.memo<GameCardProps>(
     const cardRef = useRef<HTMLDivElement>(null);
     const videoRef = useRef<HTMLVideoElement>(null);
     const cardHeight = Math.round(cardWidth * 1.5);
+
+    const hasInstalled = game.is_installed || (game.sibling_games && game.sibling_games.some((s) => s.is_installed));
+    const hasUninstalled = !game.is_installed || (game.sibling_games && game.sibling_games.some((s) => !s.is_installed));
+    const isCardUninstalled = statusFilter === "uninstalled" ? hasUninstalled : !hasInstalled;
+
+    const isOtherDevice = useMemo(() => {
+      const candidates = game.sibling_games?.length ? [game, ...game.sibling_games] : [game];
+      let latest = game;
+      let latestMs = parseLastPlayedMs(game.last_played);
+      for (const candidate of candidates) {
+        const ms = parseLastPlayedMs(candidate.last_played);
+        if (ms > latestMs || (ms === latestMs && candidate.played_on_other_device && !latest.played_on_other_device)) {
+          latest = candidate;
+          latestMs = ms;
+        }
+      }
+      return Boolean(latest.played_on_other_device);
+    }, [game]);
 
     const [imgError, setImgError] = useState(false);
     const [videoFailed, setVideoFailed] = useState(false);
@@ -137,51 +160,27 @@ const GameCard = React.memo<GameCardProps>(
       setStaticSrc(staticPosterSrc);
     }, [coverSrc, staticPosterSrc]);
 
-    // Pause offscreen <video> covers via contentvisibilityautostatechange (for deferred below-the-fold cards)
-    // paired with shared IntersectionObserver (for above-the-fold cards scrolled out of view & fallback)
+    // Shared IntersectionObserver (with viewport root) to pause offscreen <video> covers
+    // and resume only visible cards, preventing GPU hardware decoder exhaustion.
     useEffect(() => {
       if (!isVideoCover || videoFailed) return;
       const cardEl = cardRef.current;
       const videoEl = videoRef.current;
       if (!cardEl || !videoEl) return;
 
-      const handleCvStateChange = (event: Event) => {
-        const skipped = (event as Event & { skipped?: boolean }).skipped;
-        if (skipped) {
-          if (!videoEl.paused) {
-            videoEl.pause();
-          }
-        } else {
-          if (videoEl.paused) {
-            videoEl.play().catch(() => {});
-          }
-        }
-      };
-
-      if (isBelowFold) {
-        cardEl.addEventListener(
-          "contentvisibilityautostatechange",
-          handleCvStateChange
-        );
-      }
-
       registerVideoCard?.(cardEl, videoEl);
 
       return () => {
-        if (isBelowFold) {
-          cardEl.removeEventListener(
-            "contentvisibilityautostatechange",
-            handleCvStateChange
-          );
-        }
         registerVideoCard?.(cardEl, null);
       };
-    }, [isVideoCover, videoFailed, isBelowFold, coverSrc, registerVideoCard]);
+    }, [isVideoCover, videoFailed, registerVideoCard]);
 
     return (
       <div
         ref={cardRef}
         data-theme-part="game-card"
+        data-gamepad-card-id={game.id}
+        data-gamepad-atomic="true"
         onClick={() => onSelect(game)}
         onDoubleClick={() => onDoubleClick(game)}
         onContextMenu={(e) => {
@@ -190,7 +189,7 @@ const GameCard = React.memo<GameCardProps>(
           onContextMenu(game, e.clientX, e.clientY);
         }}
         style={
-          isBelowFold
+          isBelowFold && !isVideoCover
             ? {
                 minHeight: `${cardHeight}px`,
                 containIntrinsicSize: `auto ${cardWidth}px auto ${cardHeight}px`,
@@ -204,7 +203,7 @@ const GameCard = React.memo<GameCardProps>(
               }
         }
         className={`group relative overflow-hidden cursor-pointer transition-[box-shadow,opacity,transform] duration-200 bg-black/30 border-0 ${
-          isBelowFold ? "game-card-deferred" : "game-card-isolated"
+          isBelowFold && !isVideoCover ? "game-card-deferred" : "game-card-isolated"
         } ${
           isLaunching
             ? "ring-2 ring-white shadow-[0_0_25px_rgba(255,255,255,0.7)] z-20 scale-[0.98]"
@@ -213,7 +212,7 @@ const GameCard = React.memo<GameCardProps>(
             : isSelected
             ? "ring-2 ring-white shadow-2xl shadow-black/90 z-10"
             : "hover:ring-1 hover:ring-white/40 hover:shadow-2xl hover:shadow-black/70"
-        } ${!game.is_installed ? "opacity-50 hover:opacity-100" : ""}`}
+        } ${isCardUninstalled ? "opacity-50 hover:opacity-100" : ""}`}
       >
         {/* Playnite FusionX Corner-to-Corner Card Shine Overlay */}
         <div className="card-shine-container">
@@ -229,43 +228,71 @@ const GameCard = React.memo<GameCardProps>(
         {coverSrc && !imgError ? (
           isVideoCover && !videoFailed ? (
             <video
-              ref={videoRef}
+              ref={(el) => {
+                videoRef.current = el;
+                if (el) {
+                  el.defaultMuted = true;
+                  el.muted = true;
+                  if (!isBelowFold && el.paused) {
+                    el.play().catch(() => {});
+                  }
+                }
+              }}
               src={coverSrc}
               poster={staticSrc}
               autoPlay={!isBelowFold}
-              preload={isBelowFold ? "metadata" : "auto"}
+              preload={isBelowFold ? "none" : "metadata"}
               loop
               muted
               playsInline
               width={600}
               height={900}
+              onLoadedData={(e) => {
+                const el = e.currentTarget;
+                el.defaultMuted = true;
+                el.muted = true;
+                if (el.dataset.inView !== "false" && el.paused) {
+                  el.play().catch(() => {});
+                }
+              }}
               onError={(e) => {
                 const mediaErr = e.currentTarget.error;
-                // Ignore MEDIA_ERR_ABORTED (code 1) - harmless abort when pausing or scrolling
+                // Ignore MEDIA_ERR_ABORTED (code 1)
                 if (!mediaErr || mediaErr.code === 1) return;
                 setVideoFailed(true);
               }}
               className={`w-full h-full object-cover pointer-events-none ${
-                !game.is_installed ? "grayscale brightness-75" : ""
+                isCardUninstalled ? "grayscale brightness-75" : ""
               }`}
             />
           ) : (
             <img
-              src={isVideoCover ? (staticSrc || coverSrc) : coverSrc}
+              src={
+                videoFailed
+                  ? (game.cover_image && !isVideoSrc(game.cover_image)
+                      ? game.cover_image
+                      : game.cover_image?.replace(/\.webm$/i, ".webp") || staticSrc || coverSrc)
+                  : (isVideoCover ? (staticSrc || game.cover_image || coverSrc) : coverSrc)
+              }
               alt={game.title}
               width={600}
               height={900}
               loading={isBelowFold ? "lazy" : "eager"}
               decoding="async"
               className={`w-full h-full object-cover ${
-                !game.is_installed ? "grayscale brightness-75" : ""
+                isCardUninstalled ? "grayscale brightness-75" : ""
               }`}
-              onError={() => {
-                if (isVideoCover && staticSrc && staticSrc.includes(".png")) {
-                  setStaticSrc(staticSrc.replace(/\.png/i, ".jpg"));
-                } else {
-                  setImgError(true);
+              onError={(e) => {
+                const target = e.currentTarget;
+                if (target.src.includes(".webp")) {
+                  target.src = target.src.replace(/\.webp$/i, ".png");
+                  return;
                 }
+                if (target.src.includes(".png") && !target.src.includes(".jpg")) {
+                  target.src = target.src.replace(/\.png$/i, ".jpg");
+                  return;
+                }
+                setImgError(true);
               }}
             />
           )
@@ -304,13 +331,25 @@ const GameCard = React.memo<GameCardProps>(
           </div>
         )}
 
-        {/* Uninstalled Cloud Indicator */}
-        {!game.is_installed && (
-          <div
-            title="Not installed (Cloud Library)"
-            className="absolute top-1.5 left-1.5 bg-[#0a0c12]/90 p-1 rounded-full text-zinc-400 shadow-md z-10 border border-white/10"
-          >
-            <Cloud className="w-3 h-3" />
+        {/* Uninstalled Cloud & Other-Device Indicators */}
+        {(isCardUninstalled || isOtherDevice) && (
+          <div className="absolute top-1.5 left-1.5 flex items-center gap-1 z-10">
+            {isCardUninstalled && (
+              <div
+                title="Not installed (Cloud Library)"
+                className="bg-[#0a0c12]/90 p-1 rounded-full text-zinc-400 shadow-md border border-white/10"
+              >
+                <Cloud className="w-3 h-3" />
+              </div>
+            )}
+            {isOtherDevice && (
+              <div
+                title="Last played on another device"
+                className="bg-[#0a0c12]/90 p-1 rounded-full text-zinc-300 shadow-md border border-white/10"
+              >
+                <MonitorSmartphone className="w-3 h-3" />
+              </div>
+            )}
           </div>
         )}
 
@@ -336,6 +375,7 @@ export const GameGrid: React.FC<GameGridProps> = ({
   onContextMenu,
   groupBy = "none",
   achievementSummaryMap,
+  statusFilter = "all",
 }) => {
   const [justLaunchedId, setJustLaunchedId] = useState<string | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -346,7 +386,6 @@ export const GameGrid: React.FC<GameGridProps> = ({
   const observerRef = useRef<IntersectionObserver | null>(null);
 
   useEffect(() => {
-    const rootEl = scrollContainerRef.current;
     if (typeof IntersectionObserver === "undefined") return;
 
     const obs = new IntersectionObserver(
@@ -355,10 +394,14 @@ export const GameGrid: React.FC<GameGridProps> = ({
           const video = videoMapRef.current.get(entry.target);
           if (!video) continue;
           if (entry.isIntersecting) {
+            video.dataset.inView = "true";
+            video.defaultMuted = true;
+            video.muted = true;
             if (video.paused) {
               video.play().catch(() => {});
             }
           } else {
+            video.dataset.inView = "false";
             if (!video.paused) {
               video.pause();
             }
@@ -366,7 +409,7 @@ export const GameGrid: React.FC<GameGridProps> = ({
         }
       },
       {
-        root: rootEl,
+        root: null,
         rootMargin: "250px 0px",
       }
     );
@@ -472,6 +515,8 @@ export const GameGrid: React.FC<GameGridProps> = ({
       ref={scrollContainerRef}
       onScroll={handleScroll}
       data-theme-part="game-grid-container"
+      data-gamepad-zone="game-grid"
+      data-gamepad-scroll="game-grid"
       className="game-grid-scroll flex-1 overflow-y-auto p-3 bg-transparent select-none space-y-4"
     >
       {groups.map((group) => (
@@ -517,6 +562,7 @@ export const GameGrid: React.FC<GameGridProps> = ({
                   isRunning={runningSet.has(game.id)}
                   isFlashActive={justLaunchedId === game.id}
                   isBelowFold={currentIdx >= ABOVE_FOLD_CARD_COUNT}
+                  statusFilter={statusFilter}
                   onSelect={handleSelectStable}
                   onDoubleClick={handleDoubleClickStable}
                   onContextMenu={handleContextMenuStable}

@@ -318,8 +318,7 @@ impl GogScanner {
                         let trimmed = date_str.trim();
                         if !trimmed.is_empty() {
                             if let Some(gog_id) = key.strip_prefix("gog_") {
-                                let clean_date = trimmed.get(..10).unwrap_or(trimmed).to_string();
-                                map.insert(gog_id.to_string(), clean_date);
+                                map.insert(gog_id.to_string(), trimmed.to_string());
                             }
                         }
                     }
@@ -405,9 +404,9 @@ impl GogScanner {
                             }
                         }
                         if let Some(ls) = st["last_session"].as_str().or_else(|| st["lastSession"].as_str()) {
-                            if !ls.trim().is_empty() && !ls.starts_with("000") {
-                                let clean_date = ls.get(..10).unwrap_or(ls).to_string();
-                                last_played.insert(gid, clean_date);
+                            let trimmed = ls.trim();
+                            if !trimmed.is_empty() && !trimmed.starts_with("000") && !trimmed.starts_with("1970") {
+                                last_played.insert(gid, trimmed.to_string());
                             }
                         }
                     }
@@ -577,7 +576,7 @@ impl GogScanner {
     /// Scans locally installed GOG games via Windows Registry, `goggame-*.info` files, and Galaxy 2.0 DB
     pub fn scan_installed_games() -> Result<Vec<Game>, String> {
         let mut games = Vec::new();
-        let mut seen_ids = HashSet::new();
+        let mut seen_ids: HashSet<String> = HashSet::new();
         let now_str = chrono::Local::now().format("%Y-%m-%d").to_string();
         let playtimes = Self::get_local_playtimes();
         let last_played_map = Self::get_local_last_played();
@@ -1295,7 +1294,7 @@ impl XboxScanner {
     /// Scans locally installed Xbox / Microsoft Store PC games via PowerShell AppxPackage + MicrosoftGame.config
     pub fn scan_installed_games() -> Result<Vec<Game>, String> {
         let mut games = Vec::new();
-        let mut seen_ids = HashSet::new();
+        let mut seen_ids: HashSet<String> = HashSet::new();
         let now_str = chrono::Local::now().format("%Y-%m-%d").to_string();
 
         #[cfg(target_os = "windows")]
@@ -1554,7 +1553,8 @@ $results | ConvertTo-Json -Compress
                     .map(|s| s.to_string());
                 let last_played = t["titleHistory"]["lastTimePlayed"]
                     .as_str()
-                    .and_then(|d| d.get(..10))
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty() && !s.starts_with("000") && !s.starts_with("1970"))
                     .map(|s| s.to_string());
 
                 cloud_games.push(Game {
@@ -1742,9 +1742,10 @@ $results | ConvertTo-Json -Compress
 pub struct BattleNetScanner;
 
 impl BattleNetScanner {
+    #[allow(unused_variables, unused_mut)]
     pub fn scan_installed_games() -> Result<Vec<Game>, String> {
         let mut games = Vec::new();
-        let mut seen_dirs = HashSet::new();
+        let mut seen_dirs: HashSet<String> = HashSet::new();
         let now_str = chrono::Local::now().format("%Y-%m-%d").to_string();
 
         #[cfg(target_os = "windows")]
@@ -2259,8 +2260,9 @@ impl EaScanner {
                                     .unwrap_or(0);
                                 let last_played = item["lastSessionEndDate"]
                                     .as_str()
+                                    .map(str::trim)
                                     .filter(|s| !s.is_empty() && !s.starts_with("1970") && !s.starts_with("000"))
-                                    .map(|s| s.get(..10).unwrap_or(s).to_string());
+                                    .map(|s| s.to_string());
                                 if !gslug.is_empty() {
                                     slug_stats.insert(gslug, (pt_secs, last_played));
                                 }
@@ -2378,9 +2380,10 @@ impl EaScanner {
         None
     }
 
+    #[allow(unused_variables, unused_mut)]
     pub fn scan_installed_games() -> Result<Vec<Game>, String> {
         let mut games = Vec::new();
-        let mut seen_dirs = HashSet::new();
+        let mut seen_dirs: HashSet<String> = HashSet::new();
         let now_str = chrono::Local::now().format("%Y-%m-%d").to_string();
 
         #[cfg(target_os = "windows")]
@@ -2462,6 +2465,7 @@ $results | ConvertTo-Json -Compress
         Ok(games)
     }
 
+    #[allow(dead_code)]
     fn parse_ea_installer_xml(install_dir: &Path) -> Option<(String, Option<String>)> {
         let xml_path = install_dir.join("__Installer").join("installerdata.xml");
         let xml = fs::read_to_string(xml_path).ok()?;
@@ -2699,9 +2703,10 @@ $results | ConvertTo-Json -Compress
 pub struct UbisoftScanner;
 
 impl UbisoftScanner {
+    #[allow(unused_variables, unused_mut)]
     pub fn scan_installed_games() -> Result<Vec<Game>, String> {
         let mut games = Vec::new();
-        let mut seen_ids = HashSet::new();
+        let mut seen_ids: HashSet<String> = HashSet::new();
         let now_str = chrono::Local::now().format("%Y-%m-%d").to_string();
 
         #[cfg(target_os = "windows")]
@@ -2911,8 +2916,9 @@ $results | ConvertTo-Json -Compress
                 let pt_secs = node["viewer"]["meta"]["playTime"].as_u64().unwrap_or(0);
                 let last_played = node["viewer"]["meta"]["lastPlayedDate"]
                     .as_str()
-                    .filter(|s| !s.is_empty() && !s.starts_with("1970"))
-                    .map(|s| s.get(..10).unwrap_or(s).to_string());
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty() && !s.starts_with("1970") && !s.starts_with("000"))
+                    .map(|s| s.to_string());
 
                 cloud_games.push(Game {
                     id: format!("ubisoft_{}", sanitize_id(&gid)),
@@ -3559,6 +3565,7 @@ fn sanitize_id(raw: &str) -> String {
         .to_string()
 }
 
+#[allow(dead_code)]
 fn extract_xml_tag(xml: &str, tag: &str) -> Option<String> {
     let open = format!("<{}>", tag);
     let close = format!("</{}>", tag);

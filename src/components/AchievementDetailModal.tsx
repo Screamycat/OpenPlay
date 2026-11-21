@@ -90,6 +90,7 @@ export const AchievementDetailModal: React.FC<AchievementDetailModalProps> = ({
     >
       <div
         data-theme-part="modal-container"
+        data-gamepad-zone="modal"
         className="w-full max-w-md theme-modal-container rounded-2xl overflow-hidden flex flex-col relative animate-in zoom-in-95 duration-150"
         onClick={(e) => e.stopPropagation()}
       >
@@ -123,6 +124,7 @@ export const AchievementDetailModal: React.FC<AchievementDetailModalProps> = ({
 
           <button
             onClick={onClose}
+            data-gamepad-close="true"
             className="p-1 rounded-lg text-zinc-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
             title="Close"
           >

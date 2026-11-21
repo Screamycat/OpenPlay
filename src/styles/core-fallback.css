@@ -1,0 +1,99 @@
+/**
+ * OpenPlay Core Fallback Stylesheet & Anti-Softlock Immunity System
+ * 
+ * Purpose:
+ * Provides essential structural layout, typography fallbacks, and safeguards
+ * critical system controls (Window Controls, Settings, Themes Manager)
+ * so that no broken or experimental custom community theme can ever softlock the user.
+ */
+
+/* 1. Base Variables Fallback (in case active theme doesn't define them) */
+:root {
+  --openplay-fallback-bg: #07080c;
+  --openplay-fallback-fg: #f8fafc;
+  --openplay-fallback-accent: #783efe;
+  --openplay-fallback-border: rgba(255, 255, 255, 0.08);
+}
+
+/* 2. Drag Region for Electron Frameless Window */
+.titlebar-drag-region {
+  -webkit-app-region: drag;
+  user-select: none;
+}
+
+.titlebar-no-drag,
+button,
+input,
+select,
+textarea,
+a {
+  -webkit-app-region: no-drag;
+}
+
+/* 3. Anti-Softlock Immunity for Critical System Controls */
+/* These rules cannot be overridden by theme.css, ensuring emergency access is ALWAYS available */
+#window-controls,
+[data-theme-part="window-controls"] {
+  display: flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  z-index: 99999 !important;
+}
+
+#window-controls button,
+[data-theme-part="window-controls"] button {
+  display: flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
+
+/* 4. Safeguard System Dialogs (Settings, Themes Manager, Emergency Hotkey Toast) */
+.openplay-system-modal,
+#openplay-settings-modal,
+#openplay-themes-modal {
+  position: fixed !important;
+  z-index: 99990 !important;
+}
+
+.openplay-system-modal-close {
+  display: flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  z-index: 99995 !important;
+}
+
+/* 5. Emergency Recovery Notification Banner */
+#openplay-emergency-toast {
+  position: fixed !important;
+  bottom: 24px !important;
+  right: 24px !important;
+  background: #18181b !important;
+  color: #fafafa !important;
+  border: 1px solid #783efe !important;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8) !important;
+  border-radius: 8px !important;
+  padding: 12px 18px !important;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  z-index: 100000 !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  pointer-events: auto !important;
+  animation: openplay-fade-in 0.2s ease-out;
+}
+
+@keyframes openplay-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

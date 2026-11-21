@@ -123,7 +123,7 @@ export const SteamGridDBModal: React.FC<SteamGridDBModalProps> = ({
   const handleApply = async (asset: SteamGridDBAsset) => {
     try {
       setApplyingUrl(asset.url);
-      // For animated assets, prefer SteamGridDB's hardware-decoded .webm stream over 10-32MB CPU-decoded APNG/WebP
+      // For animated assets, save SteamGridDB's lightweight .webm stream instead of 15-49MB raw WebP/APNG
       const isAnimatedVideoThumb =
         asset.is_animated &&
         (asset.thumb.endsWith(".webm") || asset.thumb.endsWith(".mp4"));
@@ -213,6 +213,7 @@ export const SteamGridDBModal: React.FC<SteamGridDBModalProps> = ({
       <div
         onClick={(e) => e.stopPropagation()}
         data-theme-part="modal-container"
+        data-gamepad-zone="modal"
         className="theme-modal-container rounded-2xl w-full max-w-5xl h-[720px] flex flex-col overflow-hidden"
       >
         {/* Modal Header */}
@@ -229,6 +230,7 @@ export const SteamGridDBModal: React.FC<SteamGridDBModalProps> = ({
 
           <button
             onClick={onClose}
+            data-gamepad-close="true"
             className="p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-[#1a1f2e] transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
@@ -284,9 +286,13 @@ export const SteamGridDBModal: React.FC<SteamGridDBModalProps> = ({
           <div className="flex-1 flex flex-col overflow-hidden">
             {/* Asset Type Selector Bar */}
             <div className="px-6 py-3 border-b border-white/10 bg-black/20 flex items-center justify-between gap-3">
-              <div className="flex items-center space-x-2 bg-black/40 p-1 rounded-xl border border-white/10">
+              <div
+                data-gamepad-tabs="true"
+                className="flex items-center space-x-2 bg-black/40 p-1 rounded-xl border border-white/10"
+              >
                 <button
                   onClick={() => setAssetType("grids")}
+                  data-gamepad-tab-active={assetType === "grids" ? "true" : undefined}
                   className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                     assetType === "grids"
                       ? "theme-accent-btn font-bold"
@@ -298,6 +304,7 @@ export const SteamGridDBModal: React.FC<SteamGridDBModalProps> = ({
 
                 <button
                   onClick={() => setAssetType("heroes")}
+                  data-gamepad-tab-active={assetType === "heroes" ? "true" : undefined}
                   className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                     assetType === "heroes"
                       ? "theme-accent-btn font-bold"
@@ -309,6 +316,7 @@ export const SteamGridDBModal: React.FC<SteamGridDBModalProps> = ({
 
                 <button
                   onClick={() => setAssetType("logos")}
+                  data-gamepad-tab-active={assetType === "logos" ? "true" : undefined}
                   className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                     assetType === "logos"
                       ? "theme-accent-btn font-bold"
@@ -320,6 +328,7 @@ export const SteamGridDBModal: React.FC<SteamGridDBModalProps> = ({
 
                 <button
                   onClick={() => setAssetType("icons")}
+                  data-gamepad-tab-active={assetType === "icons" ? "true" : undefined}
                   className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                     assetType === "icons"
                       ? "theme-accent-btn font-bold"
@@ -395,19 +404,41 @@ export const SteamGridDBModal: React.FC<SteamGridDBModalProps> = ({
                     return (
                       <div
                         key={asset.id}
-                        className="group relative rounded-xl overflow-hidden border border-[#23293e] hover:border-[var(--app-accent-color)] bg-[#141826] flex flex-col transition-all hover:scale-[1.02] shadow-md"
+                        role="button"
+                        data-gamepad-atomic="true"
+                        onClick={() => {
+                          if (applyingUrl !== asset.url) handleApply(asset);
+                        }}
+                        className="group relative rounded-xl overflow-hidden border border-[#23293e] hover:border-[var(--app-accent-color)] bg-[#141826] flex flex-col transition-all hover:scale-[1.02] shadow-md cursor-pointer"
                       >
                         <div
                           className={`relative ${getAspectClass()} overflow-hidden bg-black/40 flex items-center justify-center`}
                         >
-                          {/* Live Video Preview for Animated WebM Thumbnails */}
                           {asset.is_animated && isVideoThumb ? (
                             <video
+                              ref={(el) => {
+                                if (el) {
+                                  el.defaultMuted = true;
+                                  el.muted = true;
+                                  if (el.paused) {
+                                    el.play().catch(() => {});
+                                  }
+                                }
+                              }}
                               src={asset.thumb}
                               autoPlay
                               loop
                               muted
                               playsInline
+                              preload="metadata"
+                              onLoadedData={(e) => {
+                                const el = e.currentTarget;
+                                el.defaultMuted = true;
+                                el.muted = true;
+                                if (el.paused) {
+                                  el.play().catch(() => {});
+                                }
+                              }}
                               className={`w-full h-full ${
                                 assetType === "logos" || assetType === "icons"
                                   ? "object-contain p-3"
@@ -425,8 +456,9 @@ export const SteamGridDBModal: React.FC<SteamGridDBModalProps> = ({
                               }`}
                               loading="lazy"
                               onError={(e) => {
-                                const target = e.target as HTMLImageElement;
-                                if (target.src !== asset.url) {
+                                const target = e.currentTarget;
+                                if (target.src !== asset.url && !target.dataset.triedUrl) {
+                                  target.dataset.triedUrl = "1";
                                   target.src = asset.url;
                                 }
                               }}
