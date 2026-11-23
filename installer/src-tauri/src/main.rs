@@ -722,6 +722,17 @@ fn launch_installed_app(exe_path: String, app: AppHandle) -> Result<(), String> 
 }
 
 fn main() {
+    #[cfg(target_os = "linux")]
+    {
+        // Prevent WebKitGTK + NVIDIA/Wayland "Error 71 (Protocol error) dispatching to Wayland display"
+        if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+            std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+        }
+        if std::env::var_os("__NV_DISABLE_EXPLICIT_SYNC").is_none() {
+            std::env::set_var("__NV_DISABLE_EXPLICIT_SYNC", "1");
+        }
+    }
+
     let args: Vec<String> = std::env::args().collect();
     let silent = args.iter().any(|a| a == "--silent" || a == "/S");
 
