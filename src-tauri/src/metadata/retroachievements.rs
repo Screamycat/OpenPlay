@@ -141,10 +141,7 @@ pub struct RetroAchievementsClient;
 
 impl RetroAchievementsClient {
     fn build_client() -> Result<reqwest::Client, String> {
-        reqwest::Client::builder()
-            .timeout(Duration::from_secs(12))
-            .build()
-            .map_err(|e| e.to_string())
+        Ok(crate::http::client().clone())
     }
 
     pub fn to_media_url(path: Option<&str>) -> Option<String> {

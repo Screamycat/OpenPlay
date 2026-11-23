@@ -64,8 +64,8 @@ A blazing-fast, cross-platform sanctuary for your entire game collection built o
 
 ---
 
-### 🎨 Modular Theme Engine & In-App Customization
-*Personalize OpenPlay with live stylesheet hot-reloading and modular theme extensions. Tweak geometry (poster corner radius, card aspect ratios, logo scaling constraints), smoke tints, and accent colors with real-time CSS variable bindings, or drop in custom `.zip` theme packages that overhaul the interface into console-inspired layouts (like a Nintendo Switch UI).*
+### 🎨 Dual-Mode Theme Engine (Desktop & Console Themes)
+*Personalize Desktop Mode and Console Mode independently with live stylesheet hot-reloading, dedicated Desktop & Console tabs in the Themes Manager, and an immutable built-in **OpenPlay Console** Theme (`console-default`). Tweak geometry (poster corner radius, card scale, ultrawide content safe-zone, background dim/blur), smoke tints, and accent colors with real-time CSS variable bindings, or drop in custom `.zip` Desktop or Console theme packages.*
 
 ---
 
@@ -74,10 +74,10 @@ A blazing-fast, cross-platform sanctuary for your entire game collection built o
 
 ---
 
-### 🎮 Fullscreen Couch Mode *(In Active Development)*
-*Designed for living-room TVs, handhelds (Steam Deck, ROG Ally, Legion Go), and seamless gamepad navigation.*
-
-*(Screenshot placeholder: `./docs/screenshots/fullscreen-couch-mode.png`)*
+### 📺 Fullscreen Console Mode (`F12`)
+*A dedicated fullscreen TV & ultrawide console interface built to look crisp on both standard 16:9 TVs and 32:9 ultrawide monitors. Toggle anytime with `F12` or from the Sidebar, or start directly into Console Mode:*
+- **Custom Boot Splash & Local Profile Screen**: Built-in OpenPlay boot animation (swappable with any `.mp4`/`.webm` video), offline local profiles with an ambient moving backdrop (also customizable to any looping video), and a **Game-Aware Profile Icon Picker** pulling icons and covers from your installed games & ROMs.
+- **Horizontal Carousel & Expanded 2:3 Cover Grid**: Full-bleed crossfading Hero Artwork paired with standard 2:3 vertical Steam-ratio game cards, `LB`/`RB` filter presets, cinematic fullscreen Game Details (`Overview`, `Achievements`, `Trailers`, `News`), subtle synthesized UI audio cues, and a Console System Menu (`Start`) with OS power controls.
 
 </div>
 
@@ -112,7 +112,7 @@ Every launcher has its own design philosophy and purpose. Here is how they compa
 | **In-App Video Trailers** | ✅ **Built-in (Store / YouTube / Video files)** | 🔌 Requires Plugin | ❌ *No* | ❌ *No* |
 | **HowLongToBeat Completion Metrics** | ✅ **Built-in** | 🔌 Requires Plugin | ❌ *No* | ✅ Built-in (HLTB API) |
 | **Live Concurrent Player Counts** | ✅ **Built-in (All platforms via title matching)** | 🔌 Requires Plugin | ❌ *No* | ❌ *No* |
-| **Theme & Visual Customization** | ✅ **Built-in (Dedicated Themes Manager, 3+ Screenshot Gallery, .zip Import & In-App Config)** | 🔌 Requires Custom Themes | ❌ GTK Theme only | ⚠️ Fixed Palettes |
+| **Theme & Visual Customization** | ✅ **Built-in (Dual-Mode Desktop & Console Themes Manager, 3+ Screenshot Gallery, .zip Import & In-App Config)** | 🔌 Requires Custom Themes | ❌ GTK Theme only | ⚠️ Fixed Palettes |
 | **Plugin & Extension Architecture** | ✅ **Built-in (Dedicated Plugins Manager, .zip Import & In-App Config)** | 🔌 Extensive Plugins | ⚠️ Community Scripts | ❌ *No* |
 | **Critic & User Review Scores** | ✅ **Built-in (OpenCritic & Steam)** | 🔌 Requires Plugin | ❌ *No* | ❌ *No* |
 | *Trophies & Achievements* | | | | |
@@ -122,6 +122,7 @@ Every launcher has its own design philosophy and purpose. Here is how they compa
 | *Power Features* | | | | |
 | **Dual Launch / Multi-Action Play** | ✅ **Built-in (Action Menu)** | ✅ Built-in (Play Actions) | ✅ Runner Arguments | ⚠️ Basic Alternate Exe |
 | **Native Desktop Controller Navigation** | ✅ **Built-in (2D Spatial + Zone Nav, Auto Glyphs, Virtual Keyboard, File Browser & Keybind Remapping)** | ⚠️ Fullscreen Mode Only | ❌ *No* | ✅ Built-in (Gamepad UI) |
+| **Fullscreen Console Mode (TV & Ultrawide)** | ✅ **Built-in (`F12` Toggle, Boot Video, Local Profiles, Horizontal Carousel + 2:3 Grid, Console Themes & Power Menu)** | ✅ Built-in (Windows Only) | ❌ *No* | ❌ *No* |
 | **In-App Patch Notes & News Feed** | ✅ **Built-in** | 🔌 Requires Plugin | ❌ *No* | ❌ *No* |
 | **Non-Intrusive Background Library Sync** | ✅ **Built-in (Startup & multi-device periodic sync with gameplay pause)** | 🔌 Requires Plugins / Scripts | ❌ Manual Refresh | ⚠️ Manual Store Refresh |
 
@@ -215,7 +216,13 @@ Ensure you have the following installed on your machine:
 - **Windows**: [Visual Studio C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/)
 - **Linux**: Standard build tools (`build-essential`, `curl`, `wget`, `file`, `libssl-dev`)
 
-### Installation & Run
+### Installation (Windows & Linux)
+
+Download the latest release from **[GitHub Releases](https://github.com/Screamycat/OpenPlay/releases)**:
+- **Windows**: Run `OpenPlay-Setup-<version>-win-x64.exe` (custom OpenPlay installer wizard with optional quick-setup for Cloud Sync & API keys).
+- **Linux**: Run `OpenPlay-Setup-<version>-linux-x64.bin` (custom OpenPlay installer wizard), or grab the standalone `.AppImage` or `.deb` package.
+
+### Development Setup
 
 1. **Clone the repository:**
    ```bash
@@ -228,14 +235,14 @@ Ensure you have the following installed on your machine:
    npm install
    ```
 
-3. **Launch in development mode:**
+3. **Launch in development mode (Vite + Electron + `openplay-core`):**
    ```bash
-   npm run tauri dev
+   npm run dev
    ```
 
-4. **Build production binaries:**
+4. **Build production frontend & Electron shell:**
    ```bash
-   npm run tauri build
+   npm run build:all
    ```
 
 ---

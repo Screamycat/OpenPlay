@@ -36,8 +36,16 @@ export default defineConfig(() => ({
         }
       : undefined,
     watch: {
-      // 3. tell Vite to ignore watching `src-tauri` and documentation files like `ROADMAP.md`
-      ignored: ["**/src-tauri/**", "**/ROADMAP.md"],
+      // 3. tell Vite to ignore watching `src-tauri`, build outputs, and documentation files
+      ignored: [
+        "**/src-tauri/**",
+        "**/target/**",
+        "**/dist/**",
+        "**/dist-electron/**",
+        "**/node_modules/**",
+        "**/.git/**",
+        "**/ROADMAP.md",
+      ],
     },
   },
 }));

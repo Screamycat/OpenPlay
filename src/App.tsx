@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWindow } from "./utils/ipc";
 import { listen } from "@tauri-apps/api/event";
 import { Game, GameTrailer } from "./types/game";
 import { LibraryIntegration } from "./types/integration";
@@ -37,10 +37,11 @@ import { Gamepad2, Loader2, Sparkles, RefreshCw } from "lucide-react";
 import { resolveImageSrc } from "./utils/image";
 import { parseLastPlayedMs } from "./utils/date";
 import { applyTheme, removeCustomTheme } from "./utils/themeEngine";
-import { ThemeInfo } from "./types/themes";
+import { ThemeInfo, ThemeMode } from "./types/themes";
 import { UpdateCheckResult } from "./types/update";
 import { pluginRuntime } from "./utils/pluginRuntime";
 import { GamepadProvider } from "./contexts/GamepadContext";
+import { ConsoleModeRoot } from "./components/console/ConsoleModeRoot";
 import "./App.css";
 
 interface ScanResult {
@@ -151,37 +152,116 @@ export function App() {
     appConfig.modal_backdrop_blur,
   ]);
 
-  // Load and apply installed active theme
+  // Console Mode state & dual-mode theme switching
+  const [isConsoleMode, setIsConsoleMode] = useState(false);
+  const isConsoleModeRef = useRef(false);
+  const wasFullscreenBeforeConsoleRef = useRef(false);
+  const [activeConsoleTheme, setActiveConsoleTheme] = useState<ThemeInfo | null>(null);
+  const [themesInitialMode, setThemesInitialMode] = useState<ThemeMode>("desktop");
+
   useEffect(() => {
-    invoke<ThemeInfo[]>("get_installed_themes")
-      .then((themes) => {
-        const active =
-          themes.find((t) => t.is_active) ||
-          themes.find((t) => t.manifest.id === "default") ||
-          themes[0];
-        if (active) {
-          applyTheme(active);
-        }
-      })
-      .catch((err) => console.warn("Failed to apply initial active theme:", err));
+    isConsoleModeRef.current = isConsoleMode;
+  }, [isConsoleMode]);
+
+  const applyActiveThemeForMode = useCallback(async (mode: ThemeMode) => {
+    try {
+      const themes = await invoke<ThemeInfo[]>("get_installed_themes");
+      const modeThemes = themes.filter(
+        (t) => (t.manifest.mode || "desktop") === mode
+      );
+      const fallbackId = mode === "console" ? "console-default" : "default";
+      const active =
+        modeThemes.find((t) => t.is_active) ||
+        modeThemes.find((t) => t.manifest.id === fallbackId) ||
+        modeThemes[0];
+      if (mode === "console") {
+        setActiveConsoleTheme(active || null);
+      }
+      if (active) {
+        applyTheme(active, mode);
+      }
+    } catch (err) {
+      console.warn(`Failed to apply active ${mode} theme:`, err);
+    }
   }, []);
+
+  const appConfigRef = useRef<AppConfig>(appConfig);
+  useEffect(() => {
+    appConfigRef.current = appConfig;
+  }, [appConfig]);
+
+  const enterConsoleMode = useCallback(async (displayIdOverride?: string | null) => {
+    if (isConsoleModeRef.current) return;
+    setIsDrawerOpen(false);
+    setContextMenu(null);
+    try {
+      const win = getCurrentWindow();
+      const currentlyFs = await win.isFullscreen().catch(() => false);
+      wasFullscreenBeforeConsoleRef.current = currentlyFs;
+      const targetDisplayId =
+        displayIdOverride ?? appConfigRef.current.console_display_id ?? "auto";
+      if (!currentlyFs || (targetDisplayId && targetDisplayId !== "auto")) {
+        await win.setFullscreen(true, targetDisplayId || undefined);
+      }
+    } catch (err) {
+      console.warn("Could not toggle native fullscreen for Console Mode:", err);
+    }
+    setIsConsoleMode(true);
+    await applyActiveThemeForMode("console");
+  }, [applyActiveThemeForMode]);
+
+  const exitConsoleMode = useCallback(async () => {
+    if (!isConsoleModeRef.current) return;
+    setIsConsoleMode(false);
+    setIsHunterHubOpen(false);
+    try {
+      const win = getCurrentWindow();
+      await win.setFullscreen(wasFullscreenBeforeConsoleRef.current);
+    } catch (err) {
+      console.warn("Could not restore window fullscreen state:", err);
+    }
+    await applyActiveThemeForMode("desktop");
+  }, [applyActiveThemeForMode]);
+
+  // Global F12 Hotkey to toggle Console Mode
+  useEffect(() => {
+    const handleConsoleHotkey = (e: KeyboardEvent) => {
+      if (e.key === "F12") {
+        e.preventDefault();
+        if (isConsoleModeRef.current) {
+          exitConsoleMode();
+        } else {
+          enterConsoleMode();
+        }
+      }
+    };
+    window.addEventListener("keydown", handleConsoleHotkey);
+    return () => window.removeEventListener("keydown", handleConsoleHotkey);
+  }, [enterConsoleMode, exitConsoleMode]);
+
+  // Load and apply installed active desktop theme on startup
+  useEffect(() => {
+    applyActiveThemeForMode("desktop");
+  }, [applyActiveThemeForMode]);
 
   const [showEmergencyResetToast, setShowEmergencyResetToast] = useState(false);
 
-  // Global Anti-Softlock Hotkey (Ctrl+Shift+F8) to force-revert to immutable default theme
+  // Global Anti-Softlock Hotkey (Ctrl+Shift+F8) to force-revert active mode to immutable built-in default theme
   useEffect(() => {
     const handleEmergencyReset = async (e: KeyboardEvent) => {
       if (e.ctrlKey && e.shiftKey && e.key === "F8") {
         e.preventDefault();
-        console.warn("[Anti-Softlock] Emergency theme reset triggered (Ctrl+Shift+F8)");
+        const mode: ThemeMode = isConsoleModeRef.current ? "console" : "desktop";
+        const defaultId = mode === "console" ? "console-default" : "default";
+        console.warn(`[Anti-Softlock] Emergency ${mode} theme reset triggered (Ctrl+Shift+F8)`);
         try {
-          await invoke("set_active_theme", { themeId: "default" });
-          removeCustomTheme();
-          const themes = await invoke<ThemeInfo[]>("get_installed_themes");
-          const defaultTheme = themes.find((t) => t.manifest.id === "default");
-          if (defaultTheme) {
-            applyTheme(defaultTheme);
+          if (mode === "console") {
+            await invoke("set_active_console_theme", { themeId: defaultId });
+          } else {
+            await invoke("set_active_theme", { themeId: defaultId });
           }
+          removeCustomTheme();
+          await applyActiveThemeForMode(mode);
           setShowEmergencyResetToast(true);
           setTimeout(() => setShowEmergencyResetToast(false), 5000);
         } catch (err) {
@@ -192,7 +272,7 @@ export function App() {
 
     window.addEventListener("keydown", handleEmergencyReset);
     return () => window.removeEventListener("keydown", handleEmergencyReset);
-  }, []);
+  }, [applyActiveThemeForMode]);
 
   // Default cardWidth to 108 for 7 columns, persist in localStorage
   const [cardWidth, setCardWidth] = useState(() => {
@@ -217,6 +297,10 @@ export function App() {
   const [refreshingGameIds, setRefreshingGameIds] = useState<string[]>([]);
   const lastLiveSyncRef = useRef<number>(0);
   const revalidatedGamesRef = useRef<Map<string, number>>(new Map());
+  const minimizeOnLaunchRef = useRef<boolean>(false);
+  useEffect(() => {
+    minimizeOnLaunchRef.current = Boolean(appConfig.minimize_on_game_launch);
+  }, [appConfig.minimize_on_game_launch]);
 
   // Modals & Drawers
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
@@ -322,6 +406,40 @@ export function App() {
     localStorage.setItem("openplay_card_width", String(val));
   };
 
+  // Stream games from SQLite in lean pages (omitting heavy detail-only columns like
+  // HTML descriptions, screenshots, and trailers) so neither Rust nor Electron IPC
+  // allocates a single multi-megabyte payload for 600+ games.
+  const fetchGamesPaginated = useCallback(async (): Promise<Game[]> => {
+    const pageSize = 200;
+    let offset = 0;
+    const collected: Game[] = [];
+    try {
+      while (true) {
+        const page = await invoke<{
+          games: Game[];
+          total: number;
+          has_more: boolean;
+          next_offset: number;
+        }>("get_games_page", {
+          limit: pageSize,
+          offset,
+          includeHeavyFields: false,
+        });
+        if (!page || !Array.isArray(page.games)) break;
+        collected.push(...page.games);
+        if (!page.has_more || page.games.length === 0) break;
+        offset = page.next_offset;
+      }
+      return collected;
+    } catch {
+      return invoke<Game[]>("get_games");
+    }
+  }, []);
+
+  // Bounded 8-entry LRU cache of full game records (description, screenshots, trailers, links, notes, play_actions)
+  // hydrated on-demand when a game is selected.
+  const [hydratedGames, setHydratedGames] = useState<Record<string, Game>>({});
+
   // Load games, application config and integration state on mount
   const loadInitialData = async () => {
     try {
@@ -361,6 +479,9 @@ export function App() {
           if (cfg.selected_genres) setSelectedGenres(cfg.selected_genres);
           if (cfg.selected_developers) setSelectedDevelopers(cfg.selected_developers);
           if (cfg.selected_sources) setSelectedSources(cfg.selected_sources);
+          if (cfg.start_in_console_mode) {
+            enterConsoleMode(cfg.console_display_id);
+          }
         }
       } catch (err) {
         console.warn("Could not load app config:", err);
@@ -381,7 +502,7 @@ export function App() {
         console.warn("Could not load Epic integration:", e);
       }
 
-      const list = await invoke<Game[]>("get_games");
+      const list = await fetchGamesPaginated();
       setGames(list);
 
       // Re-select last selected game from config / localStorage if valid, or default to RetroArch / first
@@ -499,9 +620,8 @@ export function App() {
             )
           );
         }
-        invoke<Game[]>("get_all_games")
-          .then((all) => {
-            const launched = all.find((g) => g.id === id);
+        invoke<Game | null>("get_game_by_id", { gameId: id })
+          .then((launched) => {
             if (launched) pluginRuntime.emit("game:launch", launched);
           })
           .catch(() => {});
@@ -523,6 +643,10 @@ export function App() {
       const { id, elapsed_seconds, last_played } = event.payload;
       setRunningGameIds((prev) => prev.filter((gid) => gid !== id));
       setIsLaunchingId((curr) => (curr === id ? null : curr));
+
+      if (minimizeOnLaunchRef.current || isConsoleModeRef.current) {
+        getCurrentWindow().restore().catch(() => {});
+      }
       setGames((prev) =>
         prev.map((g) => {
           if (g.id === id) {
@@ -537,9 +661,8 @@ export function App() {
         })
       );
 
-      invoke<Game[]>("get_all_games")
-        .then((all) => {
-          const stopped = all.find((g) => g.id === id);
+      invoke<Game | null>("get_game_by_id", { gameId: id })
+        .then((stopped) => {
           if (stopped) pluginRuntime.emit("game:exit", { game: stopped, durationSeconds: elapsed_seconds });
         })
         .catch(() => {});
@@ -572,11 +695,14 @@ export function App() {
         }
         return [...prev, updated];
       });
+      setHydratedGames((prev) =>
+        prev[updated.id] ? { ...prev, [updated.id]: { ...prev[updated.id], ...updated } } : prev
+      );
     });
 
     const unlistenSyncComplete = listen("library-sync-complete", async () => {
       try {
-        const list = await invoke<Game[]>("get_games");
+        const list = await fetchGamesPaginated();
         setGames(list);
       } catch (err) {
         console.error("Error refreshing library on sync complete:", err);
@@ -585,7 +711,7 @@ export function App() {
 
     const unlistenLibraryUpdated = listen("library-updated", async () => {
       try {
-        const list = await invoke<Game[]>("get_games");
+        const list = await fetchGamesPaginated();
         setGames(list);
       } catch (err) {
         console.error("Error refreshing library on library-updated:", err);
@@ -632,17 +758,10 @@ export function App() {
           if (cfg.selected_sources) setSelectedSources(cfg.selected_sources);
         }
 
-        const list = await invoke<Game[]>("get_games");
+        const list = await fetchGamesPaginated();
         setGames(list);
 
-        const themes = await invoke<ThemeInfo[]>("get_installed_themes");
-        const active =
-          themes.find((t) => t.is_active) ||
-          themes.find((t) => t.manifest.id === "default") ||
-          themes[0];
-        if (active) {
-          applyTheme(active);
-        }
+        await applyActiveThemeForMode(isConsoleModeRef.current ? "console" : "desktop");
 
         pluginRuntime.syncWithBackend();
       } catch (err) {
@@ -698,6 +817,30 @@ export function App() {
     };
   }, []);
 
+  // Zero-GPU In-Game Hibernate: pause all background videos and CSS/blur shaders while a game is running
+  useEffect(() => {
+    const isGameActive = runningGameIds.length > 0;
+    if (isGameActive) {
+      document.documentElement.dataset.gameRunning = "true";
+      document.querySelectorAll<HTMLVideoElement>("video").forEach((v) => {
+        if (!v.paused) {
+          v.dataset.pausedForGame = "true";
+          v.pause();
+        }
+      });
+    } else {
+      delete document.documentElement.dataset.gameRunning;
+      document
+        .querySelectorAll<HTMLVideoElement>('video[data-paused-for-game="true"]')
+        .forEach((v) => {
+          delete v.dataset.pausedForGame;
+          if (v.dataset.inView !== "false") {
+            v.play().catch(() => {});
+          }
+        });
+    }
+  }, [runningGameIds.length]);
+
   // Periodic sync of running games to guarantee immediate state reconciliation
   useEffect(() => {
     if (runningGameIds.length === 0) return;
@@ -708,6 +851,12 @@ export function App() {
         setRunningGameIds((prev) => {
           const filtered = prev.filter((id) => activeIds.includes(id));
           if (filtered.length !== prev.length) {
+            if (
+              filtered.length === 0 &&
+              (minimizeOnLaunchRef.current || isConsoleModeRef.current)
+            ) {
+              getCurrentWindow().restore().catch(() => {});
+            }
             return filtered;
           }
           return prev;
@@ -807,7 +956,7 @@ export function App() {
     try {
       setIsScanning(true);
       const res = await invoke<ScanResult>("scan_steam_library");
-      const list = await invoke<Game[]>("get_games");
+      const list = await fetchGamesPaginated();
       setGames(list);
       const integration = await invoke<LibraryIntegration>("get_steam_integration");
       if (integration) setSteamIntegration(integration);
@@ -892,7 +1041,7 @@ export function App() {
     try {
       setIsScanningEpic(true);
       const res = await invoke<ScanResult>("scan_epic_library");
-      const list = await invoke<Game[]>("get_games");
+      const list = await fetchGamesPaginated();
       setGames(list);
       const integration = await invoke<LibraryIntegration>("get_epic_integration");
       if (integration) setEpicIntegration(integration);
@@ -1031,7 +1180,7 @@ export function App() {
         );
       }
 
-      if (appConfig.minimize_on_game_launch) {
+      if (appConfig.minimize_on_game_launch || isConsoleModeRef.current) {
         try {
           await getCurrentWindow().minimize();
         } catch (e) {}
@@ -1110,7 +1259,7 @@ export function App() {
       setIsFullRefreshing(true);
       await Promise.allSettled([handleScanLibrary(), handleScanEpicLibrary()]);
       await invoke<number>("sync_all_metadata", { installedOnly: false });
-      const list = await invoke<Game[]>("get_games");
+      const list = await fetchGamesPaginated();
       setGames(list);
     } catch (err) {
       console.error("Failed Refresh All:", err);
@@ -1124,7 +1273,7 @@ export function App() {
     setIsSyncingRa(true);
     try {
       await invoke("sync_retroachievements");
-      const list = await invoke<Game[]>("get_games");
+      const list = await fetchGamesPaginated();
       setGames(list);
     } catch (err: any) {
       console.error("Failed to sync RetroAchievements:", err);
@@ -1139,7 +1288,7 @@ export function App() {
     try {
       setIsScanning(true);
       await invoke("sync_all_libraries", { playtimeOnly: false });
-      const list = await invoke<Game[]>("get_games");
+      const list = await fetchGamesPaginated();
       setGames(list);
     } catch (err) {
       console.error("Failed to refresh all libraries:", err);
@@ -1158,7 +1307,7 @@ export function App() {
     try {
       setIsSyncingMetadata(true);
       await invoke<number>("sync_all_metadata", { installedOnly: false });
-      const list = await invoke<Game[]>("get_games");
+      const list = await fetchGamesPaginated();
       setGames(list);
     } catch (err) {
       console.error("Failed to refresh all metadata:", err);
@@ -1172,7 +1321,7 @@ export function App() {
     try {
       setIsSyncingMetadata(true);
       await invoke<number>("sync_all_metadata", { installedOnly: true });
-      const list = await invoke<Game[]>("get_games");
+      const list = await fetchGamesPaginated();
       setGames(list);
     } catch (err) {
       console.error("Failed to refresh installed metadata:", err);
@@ -1195,7 +1344,7 @@ export function App() {
       try {
         setIsScanning(true);
         await invoke<number>("scan_and_import_console_roms", { consoleId });
-        const list = await invoke<Game[]>("get_games");
+        const list = await fetchGamesPaginated();
         setGames(list);
       } catch (err) {
         console.error("Failed to rescan console ROMs:", err);
@@ -1206,7 +1355,7 @@ export function App() {
       try {
         setIsScanning(true);
         await invoke("scan_provider_library", { provider: p });
-        const list = await invoke<Game[]>("get_games");
+        const list = await fetchGamesPaginated();
         setGames(list);
       } catch (err) {
         console.error(`Failed to scan provider '${provider}':`, err);
@@ -1491,7 +1640,7 @@ export function App() {
         ...partialGame,
       };
       const saved = await invoke<Game>("save_game", { game: newGame });
-      const list = await invoke<Game[]>("get_games");
+      const list = await fetchGamesPaginated();
       setGames(list);
       const targetId =
         saved?.id ||
@@ -1504,7 +1653,7 @@ export function App() {
 
   const handleReloadGames = async () => {
     try {
-      const list = await invoke<Game[]>("get_games");
+      const list = await fetchGamesPaginated();
       setGames(list);
       await loadHunterStats();
     } catch (err) {
@@ -1600,6 +1749,17 @@ export function App() {
       selectedSources.length
     );
   }, [showFavoritesOnly, showHiddenOnly, selectedGenres, selectedDevelopers, selectedSources]);
+
+  // Merged list for Console Mode (preserves multi-platform siblings cleanly)
+  const consoleMergedGames = useMemo(
+    () =>
+      mergeDuplicateGames(
+        games,
+        appConfig.merge_duplicates ?? true,
+        appConfig.unmerged_game_ids ?? []
+      ),
+    [games, appConfig.merge_duplicates, appConfig.unmerged_game_ids]
+  );
 
   // Filter and sort games
   const filteredGames = useMemo(() => {
@@ -1741,13 +1901,58 @@ export function App() {
     }
   }, [filteredGames, selectedGameId, isLoading]);
 
-  const selectedGame = useMemo(() => {
+  const selectedGameBase = useMemo(() => {
     const merged = filteredGames.find(
       (g) => g.id === selectedGameId || g.sibling_games?.some((s) => s.id === selectedGameId)
     );
     if (merged) return merged;
     return games.find((g) => g.id === selectedGameId) || null;
   }, [filteredGames, games, selectedGameId]);
+
+  // Hydrate full detail columns (description, screenshots, trailers, links, notes, play_actions)
+  // on-demand for the selected game only, keeping a bounded 8-entry cache in RAM.
+  useEffect(() => {
+    const targetId = selectedGameBase?.id;
+    if (!targetId) return;
+    if (hydratedGames[targetId]) return;
+
+    let cancelled = false;
+    invoke<Game | null>("get_game_by_id", { gameId: targetId })
+      .then((full) => {
+        if (cancelled || !full) return;
+        setHydratedGames((prev) => {
+          const keys = Object.keys(prev);
+          const next: Record<string, Game> = {};
+          // Keep at most 7 previous entries + the new entry = 8 max
+          const startIdx = Math.max(0, keys.length - 7);
+          for (let i = startIdx; i < keys.length; i++) {
+            next[keys[i]] = prev[keys[i]];
+          }
+          next[full.id] = full;
+          return next;
+        });
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedGameBase?.id, hydratedGames]);
+
+  const selectedGame = useMemo(() => {
+    if (!selectedGameBase) return null;
+    const full = hydratedGames[selectedGameBase.id];
+    if (!full) return selectedGameBase;
+    return {
+      ...selectedGameBase,
+      description: selectedGameBase.description ?? full.description,
+      notes: selectedGameBase.notes ?? full.notes,
+      links: selectedGameBase.links?.length ? selectedGameBase.links : full.links,
+      screenshots: selectedGameBase.screenshots?.length ? selectedGameBase.screenshots : full.screenshots,
+      trailers: selectedGameBase.trailers?.length ? selectedGameBase.trailers : full.trailers,
+      play_actions: selectedGameBase.play_actions?.length ? selectedGameBase.play_actions : full.play_actions,
+    };
+  }, [selectedGameBase, hydratedGames]);
 
   const selectedHeroUrl = resolveImageSrc(selectedGame?.background_image);
 
@@ -1864,14 +2069,86 @@ export function App() {
       }`}
     >
       {/* Global Dynamic Blurred Game Background with Seamless Morphing Crossfade */}
-      <DynamicBackground
-        src={isHunterHubOpen ? hunterHeroUrl || selectedHeroUrl : selectedHeroUrl}
-        blur={appConfig.background_blur}
-        opacity={appConfig.background_opacity}
-      />
+      {!isConsoleMode && (
+        <DynamicBackground
+          src={isHunterHubOpen ? hunterHeroUrl || selectedHeroUrl : selectedHeroUrl}
+          blur={appConfig.background_blur}
+          opacity={appConfig.background_opacity}
+        />
+      )}
 
       {/* Foreground UI */}
       <div className="relative z-10 flex flex-col h-full w-full">
+        {isConsoleMode ? (
+          <>
+            <ConsoleModeRoot
+              games={consoleMergedGames}
+              appConfig={appConfig}
+              activeConsoleTheme={activeConsoleTheme}
+              achievementSummaryMap={achievementSummaryMap}
+              runningGameId={runningGameIds[0] || null}
+              launchingGameId={isLaunchingId}
+              isRefreshing={isScanning || isFullRefreshing || isSyncingMetadata}
+              isExternalModalOpen={
+                isSettingsOpen ||
+                isThemesOpen ||
+                isPluginsOpen ||
+                isLibraryManagerOpen ||
+                isAddModalOpen ||
+                isHunterHubOpen ||
+                !!editingGame ||
+                !!contextMenu ||
+                !!steamGridDBGame ||
+                !!trailerGame ||
+                !!saveManagerGame ||
+                !!newerSavePrompt
+              }
+              onUpdateAppConfig={async (partial) => {
+                const updated = { ...appConfig, ...partial };
+                setAppConfig(updated);
+                try {
+                  await invoke("save_app_config", { config: updated });
+                } catch (e) {
+                  console.warn("Failed to persist console config:", e);
+                }
+              }}
+              onLaunchGame={handleLaunchGame}
+              onInstallGame={handleInstallGame}
+              onToggleFavorite={(game) => handleToggleFavorite(game.id)}
+              onUpdateGame={handleSaveGame}
+              onOpenGameOptions={(game) =>
+                setContextMenu({
+                  game,
+                  x: Math.round(window.innerWidth * 0.5),
+                  y: Math.round(window.innerHeight * 0.45),
+                })
+              }
+              onOpenSaveManager={(game) => setSaveManagerGame(game)}
+              onOpenAchievementHub={() => setIsHunterHubOpen(true)}
+              onRefreshLibraries={handleRefreshAll}
+              onOpenConsoleThemes={() => {
+                setThemesInitialMode("console");
+                setIsThemesOpen(true);
+              }}
+              onOpenSettings={() => handleOpenSettings("console")}
+              onExitConsoleMode={exitConsoleMode}
+            />
+
+            {isHunterHubOpen && (
+              <div className="fixed inset-0 z-50 bg-[#06080f]/95 backdrop-blur-xl flex flex-col">
+                <AchievementHunterHub
+                  onBackToLibrary={() => {
+                    setIsHunterHubOpen(false);
+                    loadHunterStats();
+                  }}
+                  games={games}
+                  onCycleBackground={cycleHunterHero}
+                />
+              </div>
+            )}
+          </>
+        ) : (
+        <>
         {/* Top Navigation Bar */}
         <TopNav
           onToggleDrawer={() => setIsDrawerOpen(true)}
@@ -2145,16 +2422,22 @@ export function App() {
         )}
           </main>
         )}
+        </>
+        )}
 
       {/* Left Sliding Drawer */}
       <LeftDrawer
         isOpen={isDrawerOpen}
         onClose={() => setIsDrawerOpen(false)}
+        onEnterConsoleMode={enterConsoleMode}
         onOpenLibraryManager={() => {
           setLibraryManagerTab("steam");
           setIsLibraryManagerOpen(true);
         }}
-        onOpenThemes={() => setIsThemesOpen(true)}
+        onOpenThemes={() => {
+          setThemesInitialMode("desktop");
+          setIsThemesOpen(true);
+        }}
         onOpenPlugins={() => setIsPluginsOpen(true)}
         onOpenSettings={handleOpenSettings}
         gameCount={filteredGames.length}
@@ -2236,6 +2519,7 @@ export function App() {
         onClose={() => setIsSettingsOpen(false)}
         onOpenThemes={() => {
           setIsSettingsOpen(false);
+          setThemesInitialMode("desktop");
           setIsThemesOpen(true);
         }}
         initialTab={settingsInitialTab}
@@ -2258,8 +2542,21 @@ export function App() {
       <ThemesManagerModal
         isOpen={isThemesOpen}
         onClose={() => setIsThemesOpen(false)}
-        onThemeChanged={(theme) => {
-          setAppConfig((prev) => ({ ...prev, active_theme_id: theme.manifest.id }));
+        initialMode={themesInitialMode}
+        activeAppMode={isConsoleMode ? "console" : "desktop"}
+        onThemeChanged={(theme, mode) => {
+          if (mode === "console") {
+            setActiveConsoleTheme(theme);
+            setAppConfig((prev) => ({
+              ...prev,
+              active_console_theme_id: theme.manifest.id,
+            }));
+          } else {
+            setAppConfig((prev) => ({
+              ...prev,
+              active_theme_id: theme.manifest.id,
+            }));
+          }
         }}
       />
 

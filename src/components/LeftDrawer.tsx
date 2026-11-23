@@ -13,6 +13,7 @@ import {
   HardDrive,
   Palette,
   Blocks,
+  Tv,
 } from "lucide-react";
 import { ConnectedLibraryItem } from "../types/backup";
 import { PlatformIcon } from "./icons/PlatformIcons";
@@ -20,6 +21,7 @@ import { PlatformIcon } from "./icons/PlatformIcons";
 interface LeftDrawerProps {
   isOpen: boolean;
   onClose: () => void;
+  onEnterConsoleMode?: () => void;
   onOpenLibraryManager: () => void;
   onOpenThemes?: () => void;
   onOpenPlugins?: () => void;
@@ -38,6 +40,7 @@ interface LeftDrawerProps {
 export const LeftDrawer: React.FC<LeftDrawerProps> = ({
   isOpen,
   onClose,
+  onEnterConsoleMode,
   onOpenLibraryManager,
   onOpenThemes,
   onOpenPlugins,
@@ -205,6 +208,28 @@ export const LeftDrawer: React.FC<LeftDrawerProps> = ({
               </div>
             </div>
           </button>
+
+          {/* Console Mode Button */}
+          {onEnterConsoleMode && (
+            <button
+              onClick={() => {
+                onClose();
+                onEnterConsoleMode();
+              }}
+              className="w-full flex items-center space-x-3 px-3 py-2.5 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-zinc-200 hover:text-white border border-white/10 font-semibold transition-all shadow-sm cursor-pointer group"
+            >
+              <Tv className="w-4 h-4 text-zinc-400 group-hover:text-white shrink-0 transition-colors" />
+              <div className="text-left flex-1 min-w-0">
+                <div className="text-zinc-100">Console Mode</div>
+                <div className="text-[10px] text-zinc-500 font-normal truncate">
+                  Fullscreen TV & Controller UI
+                </div>
+              </div>
+              <kbd className="text-[10px] px-1.5 py-0.5 rounded bg-black/40 border border-white/10 text-zinc-400 font-mono">
+                F12
+              </kbd>
+            </button>
+          )}
 
           {/* Refresh Menu Item with Hover Flyout */}
           <div

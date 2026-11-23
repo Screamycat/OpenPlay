@@ -2,7 +2,6 @@ use crate::db::Database;
 use crate::models::{Game, SaveLocationCacheEntry, SaveLocationRule, SavePathKind, SaveRuleOs};
 use regex::Regex;
 use serde_json::Value;
-use std::time::Duration;
 
 const CACHE_TTL_DAYS: i64 = 30;
 const EMPTY_CACHE_TTL_DAYS: i64 = 3;
@@ -188,11 +187,7 @@ async fn fetch_from_pcgamingwiki(
     steam_appid: Option<&str>,
     preferred_page: Option<&str>,
 ) -> Result<(Option<String>, Vec<SaveLocationRule>), String> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(8))
-        .user_agent("OpenPlay/0.1.4 (https://github.com/Screamycat/OpenPlay)")
-        .build()
-        .map_err(|e| e.to_string())?;
+    let client = crate::http::client();
 
     let mut candidates: Vec<String> = Vec::new();
     if let Some(pref) = preferred_page {
@@ -293,12 +288,7 @@ async fn fetch_and_parse_page(
 /// (since PCGamingWiki disabled public `action=cargoquery`).
 async fn query_page_by_steam_appid(client: &reqwest::Client, appid: &str) -> Option<String> {
     let url = format!("https://www.pcgamingwiki.com/api/appid.php?appid={}", appid);
-    let no_redirect_client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(7))
-        .redirect(reqwest::redirect::Policy::none())
-        .user_agent("OpenPlay/0.1.4 (https://github.com/Screamycat/OpenPlay)")
-        .build()
-        .ok()?;
+    let no_redirect_client = crate::http::no_redirect_client();
 
     if let Ok(resp) = no_redirect_client.get(&url).send().await {
         if let Some(loc) = resp.headers().get(reqwest::header::LOCATION).and_then(|v| v.to_str().ok()) {

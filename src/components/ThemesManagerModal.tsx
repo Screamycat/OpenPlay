@@ -17,24 +17,32 @@ import {
   AlertCircle,
   Loader2,
   RefreshCw,
+  Monitor,
+  Tv,
 } from "lucide-react";
-import { ThemeInfo } from "../types/themes";
+import { ThemeInfo, ThemeMode } from "../types/themes";
 import { resolveImageSrc } from "../utils/image";
 import { applyTheme } from "../utils/themeEngine";
 
 interface ThemesManagerModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onThemeChanged?: (theme: ThemeInfo) => void;
+  onThemeChanged?: (theme: ThemeInfo, mode: ThemeMode) => void;
+  initialMode?: ThemeMode;
+  activeAppMode?: ThemeMode;
 }
 
 export const ThemesManagerModal: React.FC<ThemesManagerModalProps> = ({
   isOpen,
   onClose,
   onThemeChanged,
+  initialMode = "desktop",
+  activeAppMode = "desktop",
 }) => {
   const [themes, setThemes] = useState<ThemeInfo[]>([]);
+  const [themeModeTab, setThemeModeTab] = useState<ThemeMode>(initialMode);
   const [activeThemeId, setActiveThemeId] = useState<string>("default");
+  const [activeConsoleThemeId, setActiveConsoleThemeId] = useState<string>("console-default");
   const [selectedTheme, setSelectedTheme] = useState<ThemeInfo | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -52,9 +60,13 @@ export const ThemesManagerModal: React.FC<ThemesManagerModalProps> = ({
   const [selectedSettingCategory, setSelectedSettingCategory] = useState<string>("All");
   const [isSavingConfig, setIsSavingConfig] = useState(false);
 
+  const getThemeMode = (t: ThemeInfo): ThemeMode =>
+    t.manifest.mode === "console" ? "console" : "desktop";
+
   useEffect(() => {
     if (!isOpen) return;
-    loadThemes();
+    setThemeModeTab(initialMode);
+    loadThemes(initialMode);
     setErrorMessage(null);
     setSuccessMessage(null);
     const unlisten = listen("cloud-sync-completed", () => {
@@ -63,17 +75,25 @@ export const ThemesManagerModal: React.FC<ThemesManagerModalProps> = ({
     return () => {
       unlisten.then((fn) => fn());
     };
-  }, [isOpen]);
+  }, [isOpen, initialMode]);
 
-  const loadThemes = async () => {
+  const loadThemes = async (modeOverride?: ThemeMode) => {
     setIsLoading(true);
     try {
-      const list = await invoke<ThemeInfo[]>("get_installed_themes");
-      const currentActiveId = await invoke<string>("get_active_theme_id");
+      const [list, currentActiveId, currentConsoleActiveId] = await Promise.all([
+        invoke<ThemeInfo[]>("get_installed_themes"),
+        invoke<string>("get_active_theme_id"),
+        invoke<string>("get_active_console_theme_id").catch(() => "console-default"),
+      ]);
       setThemes(list);
       setActiveThemeId(currentActiveId);
+      setActiveConsoleThemeId(currentConsoleActiveId || "console-default");
 
-      const current = list.find((t) => t.manifest.id === currentActiveId) || list[0] || null;
+      const targetMode = modeOverride || themeModeTab;
+      const modeThemes = list.filter((t) => getThemeMode(t) === targetMode);
+      const targetActiveId = targetMode === "console" ? currentConsoleActiveId : currentActiveId;
+      const current =
+        modeThemes.find((t) => t.manifest.id === targetActiveId) || modeThemes[0] || list[0] || null;
       setSelectedTheme(current);
       setActiveSlideIndex(0);
     } catch (err: any) {
@@ -84,6 +104,16 @@ export const ThemesManagerModal: React.FC<ThemesManagerModalProps> = ({
     }
   };
 
+  const handleSwitchModeTab = (mode: ThemeMode) => {
+    setThemeModeTab(mode);
+    setSearchQuery("");
+    const modeThemes = themes.filter((t) => getThemeMode(t) === mode);
+    const activeId = mode === "console" ? activeConsoleThemeId : activeThemeId;
+    const next = modeThemes.find((t) => t.manifest.id === activeId) || modeThemes[0] || null;
+    setSelectedTheme(next);
+    setActiveSlideIndex(0);
+  };
+
   const handleSelectThemeForPreview = (theme: ThemeInfo) => {
     setSelectedTheme(theme);
     setActiveSlideIndex(0);
@@ -91,13 +121,23 @@ export const ThemesManagerModal: React.FC<ThemesManagerModalProps> = ({
 
   const handleApplyTheme = async (theme: ThemeInfo) => {
     try {
-      await invoke("set_active_theme", { themeId: theme.manifest.id });
-      setActiveThemeId(theme.manifest.id);
-      applyTheme(theme);
-      if (onThemeChanged) onThemeChanged(theme);
-      setSuccessMessage(`Applied theme: "${theme.manifest.name}"`);
+      const mode = getThemeMode(theme);
+      if (mode === "console") {
+        await invoke("set_active_console_theme", { themeId: theme.manifest.id });
+        setActiveConsoleThemeId(theme.manifest.id);
+      } else {
+        await invoke("set_active_theme", { themeId: theme.manifest.id });
+        setActiveThemeId(theme.manifest.id);
+      }
+      if (mode === activeAppMode) {
+        applyTheme(theme, mode);
+      }
+      if (onThemeChanged) onThemeChanged(theme, mode);
+      setSuccessMessage(
+        `Applied ${mode === "console" ? "Console" : "Desktop"} theme: "${theme.manifest.name}"`
+      );
       setTimeout(() => setSuccessMessage(null), 3000);
-      await loadThemes();
+      await loadThemes(mode);
     } catch (err: any) {
       setErrorMessage(typeof err === "string" ? err : "Failed to apply theme.");
     }
@@ -112,8 +152,12 @@ export const ThemesManagerModal: React.FC<ThemesManagerModalProps> = ({
 
       setIsImporting(true);
       const imported = await invoke<ThemeInfo>("import_theme_zip", { zipPath: filePath });
-      setSuccessMessage(`Successfully imported "${imported.manifest.name}" (v${imported.manifest.version})!`);
-      await loadThemes();
+      const importedMode = getThemeMode(imported);
+      setThemeModeTab(importedMode);
+      setSuccessMessage(
+        `Successfully imported ${importedMode === "console" ? "Console" : "Desktop"} theme "${imported.manifest.name}" (v${imported.manifest.version})!`
+      );
+      await loadThemes(importedMode);
       setSelectedTheme(imported);
       setActiveSlideIndex(0);
     } catch (err: any) {
@@ -130,20 +174,31 @@ export const ThemesManagerModal: React.FC<ThemesManagerModalProps> = ({
     if (!confirm) return;
 
     try {
-      const wasActive = theme.manifest.id === activeThemeId;
+      const mode = getThemeMode(theme);
+      const wasActive =
+        mode === "console"
+          ? theme.manifest.id === activeConsoleThemeId
+          : theme.manifest.id === activeThemeId;
       await invoke("delete_theme", { themeId: theme.manifest.id });
       setSuccessMessage(`Theme "${theme.manifest.name}" deleted.`);
-      const updatedList = await invoke<ThemeInfo[]>("get_installed_themes");
-      const currentActiveId = await invoke<string>("get_active_theme_id");
+      const [updatedList, currentActiveId, currentConsoleActiveId] = await Promise.all([
+        invoke<ThemeInfo[]>("get_installed_themes"),
+        invoke<string>("get_active_theme_id"),
+        invoke<string>("get_active_console_theme_id").catch(() => "console-default"),
+      ]);
       setThemes(updatedList);
       setActiveThemeId(currentActiveId);
-      const fallback =
-        updatedList.find((t) => t.manifest.id === currentActiveId) || updatedList[0] || null;
+      setActiveConsoleThemeId(currentConsoleActiveId || "console-default");
+      const modeThemes = updatedList.filter((t) => getThemeMode(t) === mode);
+      const targetId = mode === "console" ? currentConsoleActiveId : currentActiveId;
+      const fallback = modeThemes.find((t) => t.manifest.id === targetId) || modeThemes[0] || null;
       setSelectedTheme(fallback);
       setActiveSlideIndex(0);
       if (wasActive && fallback) {
-        applyTheme(fallback);
-        if (onThemeChanged) onThemeChanged(fallback);
+        if (mode === activeAppMode) {
+          applyTheme(fallback, mode);
+        }
+        if (onThemeChanged) onThemeChanged(fallback, mode);
       }
     } catch (err: any) {
       setErrorMessage(typeof err === "string" ? err : "Failed to delete theme.");
@@ -182,21 +237,29 @@ export const ThemesManagerModal: React.FC<ThemesManagerModalProps> = ({
         configJson: json,
       });
 
+      const mode = getThemeMode(editingTheme);
       // Update in local state
       const updatedTheme: ThemeInfo = {
         ...editingTheme,
         config_values: configForm,
       };
 
-      if (editingTheme.manifest.id === activeThemeId) {
-        applyTheme(updatedTheme);
-        if (onThemeChanged) onThemeChanged(updatedTheme);
+      const isCurrentlyActiveForMode =
+        mode === "console"
+          ? editingTheme.manifest.id === activeConsoleThemeId
+          : editingTheme.manifest.id === activeThemeId;
+
+      if (isCurrentlyActiveForMode) {
+        if (mode === activeAppMode) {
+          applyTheme(updatedTheme, mode);
+        }
+        if (onThemeChanged) onThemeChanged(updatedTheme, mode);
       }
 
       setEditingTheme(null);
       setSuccessMessage(`Saved settings for "${editingTheme.manifest.name}"!`);
       setTimeout(() => setSuccessMessage(null), 3000);
-      await loadThemes();
+      await loadThemes(mode);
     } catch (err: any) {
       setErrorMessage(typeof err === "string" ? err : "Failed to save theme settings.");
     } finally {
@@ -206,7 +269,12 @@ export const ThemesManagerModal: React.FC<ThemesManagerModalProps> = ({
 
   if (!isOpen) return null;
 
+  const desktopCount = themes.filter((t) => getThemeMode(t) === "desktop").length;
+  const consoleCount = themes.filter((t) => getThemeMode(t) === "console").length;
+  const currentModeActiveId = themeModeTab === "console" ? activeConsoleThemeId : activeThemeId;
+
   const filteredThemes = themes.filter((t) => {
+    if (getThemeMode(t) !== themeModeTab) return false;
     const q = searchQuery.toLowerCase();
     return (
       t.manifest.name.toLowerCase().includes(q) ||
@@ -279,7 +347,7 @@ export const ThemesManagerModal: React.FC<ThemesManagerModalProps> = ({
 
             {/* Refresh */}
             <button
-              onClick={loadThemes}
+              onClick={() => loadThemes()}
               disabled={isLoading}
               className="w-8 h-8 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-zinc-400 hover:text-white flex items-center justify-center transition-all cursor-pointer"
               title="Reload themes"
@@ -331,15 +399,44 @@ export const ThemesManagerModal: React.FC<ThemesManagerModalProps> = ({
 
         {/* Content Body: Left Gallery + Right Showcase */}
         <div className="flex-1 min-h-0 flex flex-col md:flex-row overflow-hidden">
-          {/* Left Side: Installed Themes List & Search */}
+          {/* Left Side: Mode Switcher, Installed Themes List & Search */}
           <div className="w-full md:w-80 border-r border-white/10 flex flex-col bg-black/20 shrink-0">
-            {/* Search Filter */}
-            <div className="p-3 border-b border-white/10">
+            {/* Desktop / Console Mode Switcher */}
+            <div className="p-3 pb-2 border-b border-white/10 space-y-2.5">
+              <div className="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-white/[0.04] border border-white/10">
+                <button
+                  type="button"
+                  onClick={() => handleSwitchModeTab("desktop")}
+                  className={`flex items-center justify-center space-x-1.5 py-1.5 px-2.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                    themeModeTab === "desktop"
+                      ? "bg-white/15 text-white shadow-sm"
+                      : "text-zinc-400 hover:text-zinc-200 hover:bg-white/5"
+                  }`}
+                >
+                  <Monitor className="w-3.5 h-3.5" />
+                  <span>Desktop</span>
+                  <span className="text-[10px] font-mono opacity-70">{desktopCount}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSwitchModeTab("console")}
+                  className={`flex items-center justify-center space-x-1.5 py-1.5 px-2.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                    themeModeTab === "console"
+                      ? "bg-white/15 text-white shadow-sm"
+                      : "text-zinc-400 hover:text-zinc-200 hover:bg-white/5"
+                  }`}
+                >
+                  <Tv className="w-3.5 h-3.5" />
+                  <span>Console</span>
+                  <span className="text-[10px] font-mono opacity-70">{consoleCount}</span>
+                </button>
+              </div>
+
               <div className="relative">
                 <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
-                  placeholder="Search installed themes..."
+                  placeholder={`Search ${themeModeTab} themes...`}
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="w-full pl-8 pr-3 py-1.5 bg-white/5 border border-white/10 rounded-xl text-xs text-white placeholder-zinc-500 focus:outline-none theme-accent-focus"
@@ -351,7 +448,7 @@ export const ThemesManagerModal: React.FC<ThemesManagerModalProps> = ({
             <div className="flex-1 overflow-y-auto p-3 space-y-2">
               {filteredThemes.map((theme) => {
                 const isSelected = selectedTheme?.manifest.id === theme.manifest.id;
-                const isActive = theme.manifest.id === activeThemeId;
+                const isActive = theme.manifest.id === currentModeActiveId;
                 const iconSrc = resolveImageSrc(theme.resolved_icon);
 
                 return (
@@ -442,9 +539,15 @@ export const ThemesManagerModal: React.FC<ThemesManagerModalProps> = ({
                       <span className="text-xs px-2 py-0.5 rounded-full bg-white/10 font-mono text-zinc-300">
                         v{selectedTheme.manifest.version}
                       </span>
-                      {selectedTheme.manifest.id === activeThemeId && (
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/10 text-zinc-300 font-mono uppercase">
+                        {getThemeMode(selectedTheme)}
+                      </span>
+                      {selectedTheme.manifest.id ===
+                        (getThemeMode(selectedTheme) === "console"
+                          ? activeConsoleThemeId
+                          : activeThemeId) && (
                         <span className="text-[10px] px-2 py-0.5 rounded-full theme-accent-pill font-mono font-bold tracking-wider">
-                          ACTIVE THEME
+                          ACTIVE {getThemeMode(selectedTheme).toUpperCase()} THEME
                         </span>
                       )}
                     </div>
@@ -469,13 +572,18 @@ export const ThemesManagerModal: React.FC<ThemesManagerModalProps> = ({
                     </button>
                   )}
 
-                  {selectedTheme.manifest.id !== activeThemeId ? (
+                  {selectedTheme.manifest.id !==
+                  (getThemeMode(selectedTheme) === "console"
+                    ? activeConsoleThemeId
+                    : activeThemeId) ? (
                     <button
                       onClick={() => handleApplyTheme(selectedTheme)}
                       className="px-4 py-2 rounded-xl theme-accent-btn text-white text-xs font-bold flex items-center space-x-1.5 transition-all cursor-pointer shadow-md"
                     >
                       <Sparkles className="w-3.5 h-3.5" />
-                      <span>Apply Theme</span>
+                      <span>
+                        Apply {getThemeMode(selectedTheme) === "console" ? "Console " : ""}Theme
+                      </span>
                     </button>
                   ) : (
                     <div className="px-3.5 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs font-semibold flex items-center space-x-1.5">

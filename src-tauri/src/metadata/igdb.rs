@@ -1,7 +1,6 @@
 use crate::models::GameLink;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::time::Duration;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MetadataComparison {
@@ -61,10 +60,7 @@ impl IgdbFetcher {
         title: &str,
         platform_hint: Option<&[String]>,
     ) -> Result<MetadataComparison, String> {
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(12))
-            .build()
-            .map_err(|e| e.to_string())?;
+        let client = crate::http::client();
 
         let token = Self::get_access_token(&client, client_id, client_secret).await?;
 

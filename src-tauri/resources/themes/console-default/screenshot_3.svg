@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 540" fill="none">
+  <rect width="960" height="540" fill="#06070c"/>
+  <!-- Expanded Console Grid View Preview -->
+  <rect x="48" y="28" width="160" height="22" rx="11" fill="#ffffff" fill-opacity="0.14"/>
+  <rect x="224" y="28" width="90" height="22" rx="11" fill="#783efe" fill-opacity="0.45"/>
+  <rect x="326" y="28" width="90" height="22" rx="11" fill="#ffffff" fill-opacity="0.08"/>
+  <rect x="820" y="28" width="92" height="22" rx="11" fill="#ffffff" fill-opacity="0.1"/>
+  <!-- 2 Rows of 2:3 Posters -->
+  <g fill="#16192a" stroke="#ffffff" stroke-opacity="0.1">
+    <rect x="48" y="84" width="128" height="192" rx="12" stroke="#783efe" stroke-width="3" stroke-opacity="1"/>
+    <rect x="196" y="84" width="128" height="192" rx="12"/>
+    <rect x="344" y="84" width="128" height="192" rx="12"/>
+    <rect x="492" y="84" width="128" height="192" rx="12"/>
+    <rect x="640" y="84" width="128" height="192" rx="12"/>
+    <rect x="788" y="84" width="128" height="192" rx="12"/>
+    <rect x="48" y="298" width="128" height="192" rx="12"/>
+    <rect x="196" y="298" width="128" height="192" rx="12"/>
+    <rect x="344" y="298" width="128" height="192" rx="12"/>
+    <rect x="492" y="298" width="128" height="192" rx="12"/>
+    <rect x="640" y="298" width="128" height="192" rx="12"/>
+    <rect x="788" y="298" width="128" height="192" rx="12"/>
+  </g>
+</svg>

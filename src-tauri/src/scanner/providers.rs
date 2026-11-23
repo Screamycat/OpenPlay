@@ -91,7 +91,7 @@ impl GogScanner {
     const REDIRECT_URI: &'static str = "https://embed.gog.com/on_login_success?origin=client";
 
     pub async fn exchange_code_for_token(code: &str) -> Result<ProviderAuthResult, String> {
-        let client = reqwest::Client::new();
+        let client = crate::http::client();
         let token_url = format!(
             "https://auth.gog.com/token?client_id={}&client_secret={}&grant_type=authorization_code&code={}&redirect_uri={}",
             Self::CLIENT_ID,
@@ -181,7 +181,7 @@ impl GogScanner {
     }
 
     pub async fn refresh_access_token(refresh_token: &str) -> Result<ProviderAuthResult, String> {
-        let client = reqwest::Client::new();
+        let client = crate::http::client();
         let token_url = format!(
             "https://auth.gog.com/token?client_id={}&client_secret={}&grant_type=refresh_token&refresh_token={}",
             Self::CLIENT_ID,
@@ -336,7 +336,7 @@ impl GogScanner {
     ) -> (HashMap<String, u64>, HashMap<String, String>) {
         let mut playtimes = HashMap::new();
         let mut last_played = HashMap::new();
-        let client = reqwest::Client::new();
+        let client = crate::http::client();
 
         let mut resolved_username = username.trim().to_string();
         if (resolved_username.is_empty() || resolved_username.starts_with("GOG User"))
@@ -439,7 +439,7 @@ impl GogScanner {
                     pid,
                     uid.trim()
                 );
-                let client = reqwest::Client::new();
+                let client = crate::http::client();
                 if let Ok(resp) = client
                     .get(&url)
                     .bearer_auth(tok.trim())
@@ -942,7 +942,7 @@ $results | ConvertTo-Json -Compress
         username: Option<&str>,
         user_id: Option<&str>,
     ) -> Result<Vec<Game>, String> {
-        let client = reqwest::Client::new();
+        let client = crate::http::client();
         let mut owned_games = Vec::new();
         let now_str = chrono::Local::now().format("%Y-%m-%d").to_string();
         let mut playtimes = Self::get_local_playtimes();
@@ -1000,13 +1000,9 @@ $results | ConvertTo-Json -Compress
                         continue;
                     }
 
-                    let cover_image = prod["image"].as_str().map(|img| {
-                        if img.starts_with("http") {
-                            format!("{}_glx_logo.jpg", img)
-                        } else {
-                            format!("https:{}_glx_logo.jpg", img)
-                        }
-                    });
+                    // Leave cover_image as None here so IGDB / metadata enrichment fetches proper vertical
+                    // box art instead of GOG's wide `_glx_logo.jpg` banner.
+                    let cover_image: Option<String> = None;
 
                     let category = prod["category"]
                         .as_str()
@@ -1052,7 +1048,7 @@ impl XboxScanner {
 
     /// Exchanges a Microsoft OAuth2 authorization `code` OR `access_token` for Xbox Live XBL + XSTS token and profile info
     pub async fn authenticate_with_ms_token(code_or_token: &str) -> Result<ProviderAuthResult, String> {
-        let client = reqwest::Client::new();
+        let client = crate::http::client();
         let trimmed = code_or_token.trim();
 
         // If this is an authorization code (typically ~36-60 chars starting with M. or similar, not an Ew... / t=... access token),
@@ -1190,7 +1186,7 @@ impl XboxScanner {
     }
 
     pub async fn refresh_xbox_auth(refresh_token: &str) -> Result<ProviderAuthResult, String> {
-        let client = reqwest::Client::new();
+        let client = crate::http::client();
         let form_body = format!(
             "grant_type=refresh_token&client_id={}&scope=Xboxlive.signin%20Xboxlive.offline_access&refresh_token={}&redirect_uri={}",
             Self::CLIENT_ID,
@@ -1232,7 +1228,7 @@ impl XboxScanner {
             return map;
         }
 
-        let client = reqwest::Client::new();
+        let client = crate::http::client();
         for chunk in title_ids.chunks(60) {
             let stats_arr: Vec<Value> = chunk
                 .iter()
@@ -1502,7 +1498,7 @@ $results | ConvertTo-Json -Compress
 
     /// Fetches Xbox TitleHistory + MinutesPlayed from Xbox Live TitleHub & UserStats APIs
     pub async fn fetch_cloud_library(xuid: &str, auth_header: &str) -> Result<Vec<Game>, String> {
-        let client = reqwest::Client::new();
+        let client = crate::http::client();
         let url = format!(
             "https://titlehub.xboxlive.com/users/xuid({})/titles/titlehistory/decoration/detail,image,scid",
             xuid
@@ -1597,7 +1593,7 @@ $results | ConvertTo-Json -Compress
         xuid: &str,
         auth_header: &str,
     ) -> Result<Vec<crate::models::Achievement>, String> {
-        let client = reqwest::Client::new();
+        let client = crate::http::client();
         let mut title_id = source_id.trim().to_string();
 
         // If source_id is a Package Family Name (PFN) rather than numeric titleId, resolve numeric titleId via TitleHub
@@ -1953,7 +1949,7 @@ impl EaScanner {
 
     /// Authenticates an EA OAuth2 Bearer access_token and resolves the user's PID & Persona via Juno GraphQL + Identity proxy
     pub async fn authenticate_with_token(access_token: &str) -> Result<ProviderAuthResult, String> {
-        let client = reqwest::Client::new();
+        let client = crate::http::client();
         let clean_token = access_token.trim();
 
         // First query Juno GraphQL `me { player { pd psd displayName uniqueName nickname avatar { medium { path } } } }`
@@ -2052,7 +2048,7 @@ impl EaScanner {
     /// Fetches owned games, playtimes (`totalPlayTimeSeconds`), last played dates (`lastSessionEndDate`),
     /// and local install states (`installCheckOverride`) from EA's Juno GraphQL API (matching Playnite's EaLibrary).
     pub async fn fetch_cloud_library(pid_id: &str, access_token: &str) -> Result<Vec<Game>, String> {
-        let client = reqwest::Client::new();
+        let client = crate::http::client();
         let clean_token = access_token.trim();
         let now_str = chrono::Local::now().format("%Y-%m-%d").to_string();
 
@@ -2587,7 +2583,7 @@ $results | ConvertTo-Json -Compress
         }
 
         if let Some(tok) = access_token.filter(|t| !t.trim().is_empty()) {
-            let client = reqwest::Client::new();
+            let client = crate::http::client();
             let clean_token = tok.trim();
 
             // Resolve `playerPsd` if needed
@@ -2870,7 +2866,7 @@ $results | ConvertTo-Json -Compress
 
     /// Queries Ubisoft Connect Cloud GraphQL API for owned games, playtimes (`playtime`), and `lastPlayedDate`
     pub async fn fetch_cloud_library(ticket: &str) -> Result<Vec<Game>, String> {
-        let client = reqwest::Client::new();
+        let client = crate::http::client();
         let gql_body = serde_json::json!({
             "operationName": "AllGames",
             "variables": {},
@@ -3188,7 +3184,7 @@ impl AmazonScanner {
 
     pub async fn exchange_code_for_token(code: &str) -> Result<ProviderAuthResult, String> {
         let (_, device_serial, client_id_hex, code_verifier) = Self::build_login_params();
-        let client = reqwest::Client::new();
+        let client = crate::http::client();
 
         let body = serde_json::json!({
             "auth_data": {
@@ -3252,7 +3248,7 @@ impl AmazonScanner {
     }
 
     pub async fn fetch_cloud_library(access_token: &str) -> Result<Vec<Game>, String> {
-        let client = reqwest::Client::new();
+        let client = crate::http::client();
         let mut owned_games = Vec::new();
         let mut seen_ids = HashSet::new();
         let now_str = chrono::Local::now().format("%Y-%m-%d").to_string();

@@ -26,6 +26,10 @@ pub struct ThemeSetting {
     pub step: Option<f64>,
 }
 
+fn default_theme_mode() -> String {
+    "desktop".to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ThemeManifest {
     pub id: String,
@@ -33,6 +37,8 @@ pub struct ThemeManifest {
     pub version: String,
     pub author: String,
     pub description: String,
+    #[serde(default = "default_theme_mode")]
+    pub mode: String, // "desktop" | "console"
     pub icon: String, // MANDATORY
     pub screenshots: Vec<String>, // MANDATORY: >= 3
     #[serde(default)]
@@ -61,36 +67,44 @@ pub fn get_themes_dir() -> PathBuf {
         .join("themes")
 }
 
-pub fn resolve_bundled_default_theme_dir(resource_dir: Option<&Path>) -> Option<PathBuf> {
+pub fn resolve_bundled_theme_dir(resource_dir: Option<&Path>, folder_name: &str) -> Option<PathBuf> {
     let mut candidates = Vec::new();
     if let Some(res) = resource_dir {
-        candidates.push(res.join("resources").join("themes").join("default"));
-        candidates.push(res.join("themes").join("default"));
+        candidates.push(res.join("resources").join("themes").join(folder_name));
+        candidates.push(res.join("themes").join(folder_name));
     }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(parent) = exe.parent() {
-            candidates.push(parent.join("resources").join("themes").join("default"));
-            candidates.push(parent.join("themes").join("default"));
+            candidates.push(parent.join("resources").join("themes").join(folder_name));
+            candidates.push(parent.join("themes").join(folder_name));
             if let Some(grandparent) = parent.parent() {
-                candidates.push(grandparent.join("resources").join("themes").join("default"));
+                candidates.push(grandparent.join("resources").join("themes").join(folder_name));
             }
         }
     }
     // App root resources directory (in dev or when run from project root)
     if let Some(parent) = Path::new(env!("CARGO_MANIFEST_DIR")).parent() {
-        candidates.push(parent.join("resources").join("themes").join("default"));
+        candidates.push(parent.join("resources").join("themes").join(folder_name));
     }
     candidates.push(
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("resources")
             .join("themes")
-            .join("default"),
+            .join(folder_name),
     );
-    candidates.push(PathBuf::from("resources/themes/default"));
+    candidates.push(PathBuf::from("resources").join("themes").join(folder_name));
 
     candidates
         .into_iter()
         .find(|dir| dir.is_dir() && dir.join("theme.json").is_file())
+}
+
+pub fn resolve_bundled_default_theme_dir(resource_dir: Option<&Path>) -> Option<PathBuf> {
+    resolve_bundled_theme_dir(resource_dir, "default")
+}
+
+pub fn resolve_bundled_console_default_theme_dir(resource_dir: Option<&Path>) -> Option<PathBuf> {
+    resolve_bundled_theme_dir(resource_dir, "console-default")
 }
 
 pub fn get_default_theme_dir(resource_dir: Option<&Path>) -> PathBuf {
@@ -109,10 +123,27 @@ pub fn get_default_theme_dir(resource_dir: Option<&Path>) -> PathBuf {
         .join("default")
 }
 
+pub fn get_console_default_theme_dir(resource_dir: Option<&Path>) -> PathBuf {
+    if let Some(bundled) = resolve_bundled_console_default_theme_dir(resource_dir) {
+        return bundled;
+    }
+    if let Some(parent) = Path::new(env!("CARGO_MANIFEST_DIR")).parent() {
+        let cand = parent.join("resources").join("themes").join("console-default");
+        if cand.is_dir() {
+            return cand;
+        }
+    }
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("resources")
+        .join("themes")
+        .join("console-default")
+}
+
 pub fn seed_default_theme(resource_dir: Option<&Path>) -> Result<(), String> {
-    // With decoupled app-root theming, the built-in default theme lives permanently in the application root.
+    // With decoupled app-root theming, the built-in default themes live permanently in the application root.
     // We only verify that bundled default theme files exist and avoid writing to user data folder.
     let _ = get_default_theme_dir(resource_dir);
+    let _ = get_console_default_theme_dir(resource_dir);
     Ok(())
 }
 
@@ -194,7 +225,8 @@ pub fn seed_default_theme_to(themes_dir: &Path, resource_dir: Option<&Path>) -> 
 fn parse_theme_at_path(
     path: &Path,
     is_builtin: bool,
-    active_theme_id: &str,
+    active_desktop_id: &str,
+    active_console_id: &str,
     db: &Database,
 ) -> Option<ThemeInfo> {
     let manifest_path = path.join("theme.json");
@@ -202,8 +234,18 @@ fn parse_theme_at_path(
         return None;
     }
     let manifest_content = fs::read_to_string(&manifest_path).ok()?;
-    let manifest = serde_json::from_str::<ThemeManifest>(&manifest_content).ok()?;
-    let is_active = manifest.id == active_theme_id;
+    let mut manifest = serde_json::from_str::<ThemeManifest>(&manifest_content).ok()?;
+    let normalized_mode = manifest.mode.trim().to_lowercase();
+    manifest.mode = if normalized_mode == "console" {
+        "console".to_string()
+    } else {
+        "desktop".to_string()
+    };
+    let is_active = if manifest.mode == "console" {
+        manifest.id == active_console_id
+    } else {
+        manifest.id == active_desktop_id
+    };
 
     // Resolve path for icon (supporting .svg, .png, .jpg, .jpeg, .webp, .gif)
     let resolved_icon = if path.join(&manifest.icon).exists() {
@@ -291,31 +333,64 @@ pub fn list_themes(db: &Database) -> Result<Vec<ThemeInfo>, String> {
     let themes_dir = get_themes_dir();
     let _ = fs::create_dir_all(&themes_dir);
 
-    let active_theme_id = get_active_theme_id(db);
+    let active_desktop_id = get_active_theme_id(db);
+    let active_console_id = get_active_console_theme_id(db);
     let mut results = Vec::new();
-    let mut has_active = false;
+    let mut has_active_desktop = false;
+    let mut has_active_console = false;
 
-    // 1. Built-in default theme from immutable app root
+    // 1. Built-in default Desktop theme from immutable app root
     let default_theme_dir = get_default_theme_dir(None);
-    if let Some(def_info) = parse_theme_at_path(&default_theme_dir, true, &active_theme_id, db) {
+    if let Some(def_info) = parse_theme_at_path(
+        &default_theme_dir,
+        true,
+        &active_desktop_id,
+        &active_console_id,
+        db,
+    ) {
         if def_info.is_active {
-            has_active = true;
+            has_active_desktop = true;
         }
         results.push(def_info);
     }
 
-    // 2. Custom/imported themes from user data folder
+    // 2. Built-in default Console theme from immutable app root
+    let console_default_dir = get_console_default_theme_dir(None);
+    if let Some(console_info) = parse_theme_at_path(
+        &console_default_dir,
+        true,
+        &active_desktop_id,
+        &active_console_id,
+        db,
+    ) {
+        if console_info.is_active {
+            has_active_console = true;
+        }
+        results.push(console_info);
+    }
+
+    // 3. Custom/imported themes from user data folder
     if let Ok(entries) = fs::read_dir(&themes_dir) {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
                 let folder_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                if folder_name == "default" {
-                    continue; // Skip any shadowing default in user data
+                if folder_name == "default" || folder_name == "console-default" {
+                    continue; // Skip any shadowing built-in themes in user data
                 }
-                if let Some(custom_info) = parse_theme_at_path(&path, false, &active_theme_id, db) {
+                if let Some(custom_info) = parse_theme_at_path(
+                    &path,
+                    false,
+                    &active_desktop_id,
+                    &active_console_id,
+                    db,
+                ) {
                     if custom_info.is_active {
-                        has_active = true;
+                        if custom_info.manifest.mode == "console" {
+                            has_active_console = true;
+                        } else {
+                            has_active_desktop = true;
+                        }
                     }
                     results.push(custom_info);
                 }
@@ -323,20 +398,28 @@ pub fn list_themes(db: &Database) -> Result<Vec<ThemeInfo>, String> {
         }
     }
 
-    // Fallback: If selected custom theme was deleted or corrupted, mark default as active
-    if !has_active && !results.is_empty() {
-        results[0].is_active = true;
+    // Fallback: If selected custom theme was deleted or corrupted, mark built-in default active per mode
+    if !has_active_desktop {
+        if let Some(first_desktop) = results.iter_mut().find(|t| t.manifest.mode != "console") {
+            first_desktop.is_active = true;
+        }
+    }
+    if !has_active_console {
+        if let Some(first_console) = results.iter_mut().find(|t| t.manifest.mode == "console") {
+            first_console.is_active = true;
+        }
     }
 
-    // Sort: default first, then alphabetically by name
+    // Sort: built-in defaults first, then alphabetically by name
     results.sort_by(|a, b| {
-        if a.manifest.id == "default" {
-            std::cmp::Ordering::Less
-        } else if b.manifest.id == "default" {
-            std::cmp::Ordering::Greater
-        } else {
-            a.manifest.name.cmp(&b.manifest.name)
-        }
+        let rank = |id: &str| match id {
+            "default" => 0,
+            "console-default" => 1,
+            _ => 2,
+        };
+        rank(&a.manifest.id)
+            .cmp(&rank(&b.manifest.id))
+            .then_with(|| a.manifest.name.cmp(&b.manifest.name))
     });
 
     Ok(results)
@@ -387,6 +470,14 @@ pub fn get_active_theme_id(db: &Database) -> String {
         .unwrap_or_else(|| "default".to_string())
 }
 
+pub fn get_active_console_theme_id(db: &Database) -> String {
+    db.get_setting("active_console_theme_id")
+        .ok()
+        .flatten()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "console-default".to_string())
+}
+
 pub fn set_active_theme_from_sync(db: &Database, theme_id: &str) -> Result<(), String> {
     db.set_setting("active_theme_id", theme_id)?;
     if let Ok(mut cfg) = db.get_app_config() {
@@ -401,6 +492,28 @@ pub fn set_active_theme(db: &Database, theme_id: &str) -> Result<(), String> {
     db.set_setting("active_theme_id", theme_id)?;
     if let Ok(mut cfg) = db.get_app_config() {
         cfg.active_theme_id = Some(theme_id.to_string());
+        let _ = db.save_app_config_from_sync(&cfg, &now_utc);
+    } else {
+        let _ = db.set_setting("ui_updated_at", &now_utc);
+    }
+    let _ = db.set_setting("extensions_updated_at", &now_utc);
+    Ok(())
+}
+
+pub fn set_active_console_theme_from_sync(db: &Database, theme_id: &str) -> Result<(), String> {
+    db.set_setting("active_console_theme_id", theme_id)?;
+    if let Ok(mut cfg) = db.get_app_config() {
+        cfg.active_console_theme_id = Some(theme_id.to_string());
+        let _ = db.save_app_config_from_sync(&cfg, "");
+    }
+    Ok(())
+}
+
+pub fn set_active_console_theme(db: &Database, theme_id: &str) -> Result<(), String> {
+    let now_utc = chrono::Utc::now().to_rfc3339();
+    db.set_setting("active_console_theme_id", theme_id)?;
+    if let Ok(mut cfg) = db.get_app_config() {
+        cfg.active_console_theme_id = Some(theme_id.to_string());
         let _ = db.save_app_config_from_sync(&cfg, &now_utc);
     } else {
         let _ = db.set_setting("ui_updated_at", &now_utc);
@@ -441,7 +554,7 @@ pub fn delete_theme_from_sync(
     deleted_at: &str,
     themes_dir_override: Option<&Path>,
 ) -> Result<(), String> {
-    if theme_id == "default" {
+    if theme_id == "default" || theme_id == "console-default" {
         return Ok(());
     }
 
@@ -460,13 +573,16 @@ pub fn delete_theme_from_sync(
     if get_active_theme_id(db) == theme_id {
         set_active_theme_from_sync(db, "default")?;
     }
+    if get_active_console_theme_id(db) == theme_id {
+        set_active_console_theme_from_sync(db, "console-default")?;
+    }
 
     Ok(())
 }
 
 pub fn delete_theme(db: &Database, theme_id: &str) -> Result<(), String> {
-    if theme_id == "default" {
-        return Err("Cannot delete the official OpenPlay default theme.".to_string());
+    if theme_id == "default" || theme_id == "console-default" {
+        return Err("Cannot delete an official built-in OpenPlay theme.".to_string());
     }
 
     let now_utc = chrono::Utc::now().to_rfc3339();
@@ -483,9 +599,12 @@ pub fn delete_theme(db: &Database, theme_id: &str) -> Result<(), String> {
     record_theme_tombstone(db, theme_id, &now_utc);
     let _ = db.set_setting("extensions_updated_at", &now_utc);
 
-    // If active theme was deleted, fallback to default
+    // If active theme was deleted, fallback to built-in default
     if get_active_theme_id(db) == theme_id {
         set_active_theme(db, "default")?;
+    }
+    if get_active_console_theme_id(db) == theme_id {
+        set_active_console_theme(db, "console-default")?;
     }
 
     Ok(())
@@ -494,6 +613,8 @@ pub fn delete_theme(db: &Database, theme_id: &str) -> Result<(), String> {
 pub fn get_theme_css(theme_id: &str) -> Result<String, String> {
     let theme_dir = if theme_id == "default" {
         get_default_theme_dir(None)
+    } else if theme_id == "console-default" {
+        get_console_default_theme_dir(None)
     } else {
         let custom = get_themes_dir().join(theme_id);
         if custom.exists() {
@@ -610,9 +731,9 @@ pub fn extract_and_install_theme_zip_to(
 
     // Validate ID
     let theme_id = manifest.id.trim().to_lowercase();
-    if theme_id.is_empty() || theme_id == "default" {
+    if theme_id.is_empty() || theme_id == "default" || theme_id == "console-default" {
         let _ = fs::remove_dir_all(&temp_dir);
-        return Err("Invalid theme ID: ID cannot be empty or 'default'.".to_string());
+        return Err("Invalid theme ID: ID cannot be empty, 'default', or 'console-default'.".to_string());
     }
     if !theme_id.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
         let _ = fs::remove_dir_all(&temp_dir);
@@ -712,7 +833,11 @@ pub fn import_theme_zip(db: &Database, zip_path_str: &str) -> Result<ThemeInfo, 
     let _ = db.set_setting("extensions_updated_at", &now_utc);
 
     // Return ThemeInfo
-    let is_active = get_active_theme_id(db) == theme_id;
+    let is_active = if manifest.mode.trim().eq_ignore_ascii_case("console") {
+        get_active_console_theme_id(db) == theme_id
+    } else {
+        get_active_theme_id(db) == theme_id
+    };
     let resolved_icon = if final_dest.join(&manifest.icon).exists() {
         Some(final_dest.join(&manifest.icon).to_string_lossy().to_string())
     } else {
@@ -824,6 +949,54 @@ mod tests {
                 legacy
             );
         }
+
+        let _ = fs::remove_dir_all(&temp_root);
+    }
+
+    #[test]
+    fn test_dual_mode_console_theme_bundled_and_protected() {
+        let console_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("resources")
+            .join("themes")
+            .join("console-default");
+        for expected in [
+            "theme.json",
+            "theme.css",
+            "icon.svg",
+            "screenshot_1.svg",
+            "screenshot_2.svg",
+            "screenshot_3.svg",
+        ] {
+            let p = console_dir.join(expected);
+            assert!(p.is_file(), "Missing bundled console-default theme file: {:?}", p);
+        }
+
+        let temp_root = std::env::temp_dir().join(format!(
+            "openplay_console_theme_test_{}",
+            uuid::Uuid::new_v4()
+        ));
+        let db = Database::new_at_path(&temp_root.join("test.db")).unwrap();
+
+        assert_eq!(get_active_theme_id(&db), "default");
+        assert_eq!(get_active_console_theme_id(&db), "console-default");
+
+        let themes = list_themes(&db).unwrap();
+        let desktop_def = themes.iter().find(|t| t.manifest.id == "default");
+        let console_def = themes.iter().find(|t| t.manifest.id == "console-default");
+        assert!(desktop_def.is_some(), "Expected built-in default desktop theme");
+        assert!(console_def.is_some(), "Expected built-in console-default theme");
+        assert_eq!(desktop_def.unwrap().manifest.mode, "desktop");
+        assert!(desktop_def.unwrap().is_active);
+        assert_eq!(console_def.unwrap().manifest.mode, "console");
+        assert!(console_def.unwrap().is_active);
+
+        // Independent switching
+        set_active_console_theme(&db, "custom-console-theme").unwrap();
+        assert_eq!(get_active_console_theme_id(&db), "custom-console-theme");
+        assert_eq!(get_active_theme_id(&db), "default");
+
+        // Built-in protection
+        assert!(delete_theme(&db, "console-default").is_err());
 
         let _ = fs::remove_dir_all(&temp_root);
     }

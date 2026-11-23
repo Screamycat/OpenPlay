@@ -265,10 +265,7 @@ impl SteamScanner {
             format!("https://steamcommunity.com/id/{}/?xml=1", id_or_vanity)
         };
 
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(10))
-            .build()
-            .map_err(|e| e.to_string())?;
+        let client = crate::http::client();
 
         let text = client
             .get(&url)
@@ -312,10 +309,7 @@ impl SteamScanner {
             steamid64
         );
 
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(15))
-            .build()
-            .map_err(|e| e.to_string())?;
+        let client = crate::http::client();
 
         let text = client
             .get(&url)
@@ -502,10 +496,7 @@ impl SteamScanner {
             .collect();
         candidates.sort_by(|a, b| b.1.cmp(&a.1));
 
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(4))
-            .build()
-            .unwrap_or_default();
+        let client = crate::http::client();
 
         // Process top 60 candidates in parallel chunks of 8
         for chunk in candidates.into_iter().take(60).collect::<Vec<_>>().chunks(8) {

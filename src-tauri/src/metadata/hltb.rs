@@ -14,10 +14,7 @@ pub struct HltbFetcher;
 impl HltbFetcher {
     pub async fn fetch_hltb(game_title: &str) -> Option<HltbData> {
         let ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36";
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(8))
-            .build()
-            .ok()?;
+        let client = crate::http::client();
 
         let now_millis = chrono::Utc::now().timestamp_millis();
         let init_url = format!("https://howlongtobeat.com/api/search/site/init?t={}", now_millis);

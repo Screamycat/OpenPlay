@@ -68,6 +68,15 @@ export function resolveImageSrc(pathOrUrl?: string): string | undefined {
   ) {
     return pathOrUrl;
   }
+  // Built-in public/videos assets served by Vite dev server or packaged dist/
+  if (pathOrUrl.startsWith("/videos/") || pathOrUrl.startsWith("./videos/")) {
+    const cleanRel = pathOrUrl.startsWith("./") ? pathOrUrl.slice(1) : pathOrUrl;
+    const prefix =
+      typeof window !== "undefined" && window.location?.protocol === "file:"
+        ? "."
+        : "";
+    return encodeURI(`${prefix}${cleanRel}`);
+  }
   // Ignore unresolvable custom:// or Windows drive paths on Linux/POSIX
   if (pathOrUrl.startsWith("custom://")) {
     return undefined;

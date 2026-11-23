@@ -10,10 +10,7 @@ impl SteamMetadataFetcher {
             appid
         );
 
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(12))
-            .build()
-            .map_err(|e| e.to_string())?;
+        let client = crate::http::client();
 
         let resp = client
             .get(&url)
@@ -238,10 +235,7 @@ impl SteamMetadataFetcher {
             appid
         );
 
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(5))
-            .build()
-            .map_err(|e| e.to_string())?;
+        let client = crate::http::client();
 
         let resp = client
             .get(&url)
@@ -262,10 +256,7 @@ impl SteamMetadataFetcher {
 
     /// Fetches latest news items and changelogs from Steam News API
     pub async fn fetch_game_news(appid: &str) -> Result<Vec<SteamNewsItem>, String> {
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(8))
-            .build()
-            .map_err(|e| e.to_string())?;
+        let client = crate::http::client();
 
         // 1. First priority: fetch official developer announcements & patch notes
         let official_url = format!(
@@ -411,10 +402,7 @@ impl SteamMetadataFetcher {
             return Some(trimmed.to_string());
         }
 
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(6))
-            .build()
-            .ok()?;
+        let client = crate::http::client();
 
         // Clean title of trademark / copyright / curly quotes
         let cleaned = trimmed
@@ -469,10 +457,7 @@ impl SteamMetadataFetcher {
 
     /// Fetches trailers directly from Steam Store using an appid or by searching game title
     pub async fn fetch_store_trailers(title: &str, appid: Option<&str>) -> Result<Vec<GameTrailer>, String> {
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(8))
-            .build()
-            .map_err(|e| e.to_string())?;
+        let client = crate::http::client();
 
         let resolved_appid = match appid {
             Some(id) if !id.trim().is_empty() && id.trim().chars().all(|c| c.is_ascii_digit()) => {
@@ -603,10 +588,7 @@ impl SteamMetadataFetcher {
         appid: &str,
         steamid64: Option<&str>,
     ) -> Result<Vec<Achievement>, String> {
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(12))
-            .build()
-            .map_err(|e| e.to_string())?;
+        let client = crate::http::client();
 
         // 1. Fetch Global Achievement Percentages
         let global_url = format!(

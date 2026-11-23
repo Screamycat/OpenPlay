@@ -209,13 +209,7 @@ impl ScoreEnrichmentEngine {
         source: &str,
         source_id: Option<&str>,
     ) -> EnrichedScores {
-        let client = match reqwest::Client::builder()
-            .timeout(Duration::from_secs(8))
-            .build()
-        {
-            Ok(c) => c,
-            Err(_) => return EnrichedScores::default(),
-        };
+        let client = crate::http::client();
 
         let mut critic_score: Option<u32> = None;
         let mut community_score: Option<u32> = None;

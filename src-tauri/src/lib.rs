@@ -4,6 +4,7 @@ pub mod daemon;
 pub mod db;
 pub mod emulator;
 pub mod gamepad;
+pub mod http;
 pub mod launcher;
 pub mod metadata;
 pub mod models;
@@ -162,8 +163,15 @@ pub fn check_game_installation_status(game: &Game) -> bool {
     game.is_installed
 }
 
-pub fn sync_and_get_all_games_core(db: &Database) -> Result<Vec<Game>, String> {
-    let mut games = db.get_all_games()?;
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GamesPageResponse {
+    pub games: Vec<Game>,
+    pub total: usize,
+    pub has_more: bool,
+    pub next_offset: usize,
+}
+
+fn repair_games_batch(db: &Database, games: &mut [Game]) {
     let mut updates = Vec::new();
     let mut repaired_count = 0;
 
@@ -174,7 +182,7 @@ pub fn sync_and_get_all_games_core(db: &Database) -> Result<Vec<Game>, String> {
         .filter(|s| !s.trim().is_empty())
         .map(std::path::PathBuf::from);
 
-    for game in &mut games {
+    for game in games.iter_mut() {
         let actual_installed = check_game_installation_status(game);
         if actual_installed != game.is_installed {
             updates.push((game.id.clone(), actual_installed));
@@ -311,7 +319,12 @@ pub fn sync_and_get_all_games_core(db: &Database) -> Result<Vec<Game>, String> {
         }
 
         if changed_art {
-            let _ = db.save_game_exact(game);
+            let _ = db.update_game_artwork_paths(
+                &game.id,
+                game.cover_image.as_deref(),
+                game.background_image.as_deref(),
+                game.logo_image.as_deref(),
+            );
             repaired_count += 1;
         }
     }
@@ -321,10 +334,34 @@ pub fn sync_and_get_all_games_core(db: &Database) -> Result<Vec<Game>, String> {
     }
 
     if repaired_count > 0 {
-        println!("[Artwork Engine] Restored and repaired artwork for {} games", repaired_count);
+        eprintln!("[Artwork Engine] Restored and repaired artwork for {} games", repaired_count);
     }
+}
 
+pub fn sync_and_get_all_games_core(db: &Database) -> Result<Vec<Game>, String> {
+    let mut games = db.get_all_games()?;
+    repair_games_batch(db, &mut games);
     Ok(games)
+}
+
+pub fn sync_and_get_games_page_core(
+    db: &Database,
+    limit: usize,
+    offset: usize,
+    include_heavy_fields: bool,
+) -> Result<GamesPageResponse, String> {
+    let clamped_limit = limit.clamp(1, 500);
+    let total = db.get_games_count()?;
+    let mut games = db.get_games_page(clamped_limit, offset, include_heavy_fields)?;
+    repair_games_batch(db, &mut games);
+    let next_offset = offset.saturating_add(games.len());
+    let has_more = next_offset < total;
+    Ok(GamesPageResponse {
+        games,
+        total,
+        has_more,
+        next_offset,
+    })
 }
 
 pub fn normalize_title_for_match(title: &str) -> String {
@@ -601,6 +638,29 @@ async fn get_games(state: State<'_, AppState>) -> Result<Vec<Game>, String> {
 #[tauri::command]
 async fn get_all_games(state: State<'_, AppState>) -> Result<Vec<Game>, String> {
     sync_and_get_all_games_core(&state.db)
+}
+
+#[tauri::command]
+async fn get_games_page(
+    limit: Option<usize>,
+    offset: Option<usize>,
+    include_heavy_fields: Option<bool>,
+    state: State<'_, AppState>,
+) -> Result<GamesPageResponse, String> {
+    sync_and_get_games_page_core(
+        &state.db,
+        limit.unwrap_or(200),
+        offset.unwrap_or(0),
+        include_heavy_fields.unwrap_or(false),
+    )
+}
+
+#[tauri::command]
+async fn get_game_by_id(
+    game_id: String,
+    state: State<'_, AppState>,
+) -> Result<Option<Game>, String> {
+    state.db.get_game_by_id(&game_id)
 }
 
 #[tauri::command]
@@ -2374,8 +2434,21 @@ pub async fn scan_provider_library_core(
         .collect();
     let current_device_id = db.get_or_create_device_id().unwrap_or_default();
 
+    let needs_enrichment = |existing: Option<&Game>| -> bool {
+        match existing {
+            None => true,
+            Some(eg) => {
+                eg.cover_image.as_deref().map(|s| s.trim().is_empty()).unwrap_or(true)
+                    || eg.description.as_deref().map(|s| s.trim().is_empty()).unwrap_or(true)
+                    || eg.background_image.as_deref().map(|s| s.trim().is_empty()).unwrap_or(true)
+            }
+        }
+    };
+
     for mut game in installed_games {
-        enrich_scanned_provider_game(&mut game, &igdb_creds).await;
+        if needs_enrichment(existing_map.get(&game.id)) {
+            enrich_scanned_provider_game(&mut game, &igdb_creds).await;
+        }
         preserve_and_detect_scanned_provenance(
             &mut game,
             &existing_map,
@@ -2383,12 +2456,15 @@ pub async fn scan_provider_library_core(
         );
         let _ = db.upsert_game(&game);
         if let Some(app) = app_handle {
-            let _ = app.emit("game-updated", &game);
+            let emitted = db.get_game_by_id(&game.id).ok().flatten().unwrap_or(game);
+            let _ = app.emit("game-updated", &emitted);
         }
     }
 
     for mut game in uninstalled_games {
-        enrich_scanned_provider_game(&mut game, &igdb_creds).await;
+        if needs_enrichment(existing_map.get(&game.id)) {
+            enrich_scanned_provider_game(&mut game, &igdb_creds).await;
+        }
         preserve_and_detect_scanned_provenance(
             &mut game,
             &existing_map,
@@ -2396,7 +2472,8 @@ pub async fn scan_provider_library_core(
         );
         let _ = db.upsert_game(&game);
         if let Some(app) = app_handle {
-            let _ = app.emit("game-updated", &game);
+            let emitted = db.get_game_by_id(&game.id).ok().flatten().unwrap_or(game);
+            let _ = app.emit("game-updated", &emitted);
         }
     }
 
@@ -2631,10 +2708,9 @@ fn clear_all_games(state: State<'_, AppState>) -> Result<(), String> {
 
 #[tauri::command]
 async fn fetch_game_metadata(game_id: String, state: State<'_, AppState>) -> Result<Game, String> {
-    let all = state.db.get_all_games()?;
-    let mut game = all
-        .into_iter()
-        .find(|g| g.id == game_id)
+    let mut game = state
+        .db
+        .get_game_by_id(&game_id)?
         .ok_or_else(|| "Game not found".to_string())?;
 
     if game.source.to_lowercase() == "steam" {
@@ -3075,10 +3151,9 @@ fn apply_custom_artwork(
     app_handle: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Game, String> {
-    let all = state.db.get_all_games()?;
-    let mut game = all
-        .into_iter()
-        .find(|g| g.id == game_id)
+    let mut game = state
+        .db
+        .get_game_by_id(&game_id)?
         .ok_or_else(|| "Game not found".to_string())?;
 
     if let Some(c) = cover_image {
@@ -3807,13 +3882,11 @@ fn is_version_newer(latest: &str, current: &str) -> bool {
 pub async fn check_for_app_updates_core() -> Result<UpdateCheckResult, String> {
     let current_version = env!("CARGO_PKG_VERSION").to_string();
     let url = "https://api.github.com/repos/Screamycat/OpenPlay/releases/latest";
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .build()
-        .map_err(|e| e.to_string())?;
+    let client = crate::http::client();
 
     let resp = client
         .get(url)
+        .timeout(std::time::Duration::from_secs(10))
         .header("User-Agent", format!("OpenPlay/{}", current_version))
         .header("Accept", "application/vnd.github.v3+json")
         .send()
@@ -3850,6 +3923,7 @@ pub async fn check_for_app_updates_core() -> Result<UpdateCheckResult, String> {
 
             let mut assets = Vec::new();
             let mut download_url = None;
+            let mut best_priority: u8 = 0;
 
             if let Some(arr) = json.get("assets").and_then(|a| a.as_array()) {
                 for a in arr {
@@ -3858,10 +3932,49 @@ pub async fn check_for_app_updates_core() -> Result<UpdateCheckResult, String> {
                     let size = a.get("size").and_then(|v| v.as_u64()).unwrap_or(0);
                     if !name.is_empty() && !url.is_empty() {
                         let lower_name = name.to_lowercase();
-                        // Always prefer NSIS .exe setup over .msi or .zip
-                        if lower_name.ends_with(".exe") {
-                            download_url = Some(url.clone());
-                        } else if (lower_name.ends_with(".msi") || lower_name.ends_with(".zip")) && download_url.is_none() {
+                        let priority: u8 = {
+                            #[cfg(target_os = "windows")]
+                            {
+                                // Prefer direct update zip for silent in-app update, then Windows setup .exe, then .msi
+                                if lower_name.contains("update") && lower_name.contains("win") && lower_name.ends_with(".zip") {
+                                    100
+                                } else if lower_name.contains("win") && lower_name.ends_with(".zip") {
+                                    90
+                                } else if lower_name.ends_with(".exe") {
+                                    80
+                                } else if lower_name.ends_with(".msi") {
+                                    60
+                                } else {
+                                    0
+                                }
+                            }
+                            #[cfg(target_os = "linux")]
+                            {
+                                let is_appimage = std::env::var("APPIMAGE").is_ok();
+                                if is_appimage && lower_name.ends_with(".appimage") {
+                                    100
+                                } else if lower_name.contains("update") && lower_name.contains("linux") && lower_name.ends_with(".zip") {
+                                    95
+                                } else if lower_name.contains("linux") && lower_name.ends_with(".zip") {
+                                    85
+                                } else if lower_name.ends_with(".appimage") {
+                                    75
+                                } else if lower_name.contains("setup") && lower_name.contains("linux") {
+                                    65
+                                } else if lower_name.ends_with(".deb") {
+                                    40
+                                } else {
+                                    0
+                                }
+                            }
+                            #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+                            {
+                                if lower_name.ends_with(".zip") { 50 } else { 0 }
+                            }
+                        };
+
+                        if priority > best_priority {
+                            best_priority = priority;
                             download_url = Some(url.clone());
                         }
                         assets.push(ReleaseAssetInfo {
@@ -3896,6 +4009,11 @@ pub async fn check_for_app_updates_core() -> Result<UpdateCheckResult, String> {
 }
 
 #[tauri::command]
+fn get_app_version() -> String {
+    env!("CARGO_PKG_VERSION").to_string()
+}
+
+#[tauri::command]
 async fn check_for_app_updates() -> Result<UpdateCheckResult, String> {
     check_for_app_updates_core().await
 }
@@ -3912,13 +4030,11 @@ pub async fn download_app_update_core(
     target_version: &str,
     on_progress: impl Fn(UpdateProgressPayload),
 ) -> Result<String, String> {
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(300))
-        .build()
-        .map_err(|e| e.to_string())?;
+    let client = crate::http::client();
 
     let mut resp = client
         .get(download_url)
+        .timeout(std::time::Duration::from_secs(300))
         .header("User-Agent", format!("OpenPlay/{}", env!("CARGO_PKG_VERSION")))
         .send()
         .await
@@ -3931,15 +4047,36 @@ pub async fn download_app_update_core(
     let total = resp.content_length().unwrap_or(0);
     let temp_dir = std::env::temp_dir();
     let clean_version = target_version.trim_start_matches(|c| c == 'v' || c == 'V');
-    let ext = if download_url.to_lowercase().ends_with(".msi") {
-        "msi"
-    } else {
-        "exe"
-    };
-    let file_name = format!("OpenPlay-Setup-{}.{}", clean_version, ext);
-    let dest_path = temp_dir.join(file_name);
 
-    let mut file = std::fs::File::create(&dest_path)
+    // Preserve the real asset filename/extension from the download URL
+    let url_filename = download_url
+        .split('?')
+        .next()
+        .unwrap_or(download_url)
+        .rsplit('/')
+        .next()
+        .unwrap_or("");
+    let sanitized_name: String = url_filename
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
+        .collect();
+
+    let file_name = if !sanitized_name.is_empty() && sanitized_name.contains('.') {
+        format!("openplay-update-{}-{}", clean_version, sanitized_name)
+    } else if download_url.to_lowercase().ends_with(".zip") {
+        format!("OpenPlay-Update-{}.zip", clean_version)
+    } else if download_url.to_lowercase().ends_with(".appimage") {
+        format!("OpenPlay-Update-{}.AppImage", clean_version)
+    } else if download_url.to_lowercase().ends_with(".msi") {
+        format!("OpenPlay-Setup-{}.msi", clean_version)
+    } else {
+        format!("OpenPlay-Setup-{}.exe", clean_version)
+    };
+
+    let dest_path = temp_dir.join(&file_name);
+    let part_path = temp_dir.join(format!("{}.part", file_name));
+
+    let mut file = std::fs::File::create(&part_path)
         .map_err(|e| format!("Failed to create destination file: {}", e))?;
 
     use std::io::Write;
@@ -3974,6 +4111,22 @@ pub async fn download_app_update_core(
     }
 
     file.flush().map_err(|e| e.to_string())?;
+    drop(file);
+
+    if downloaded == 0 || (total > 0 && downloaded != total) {
+        let _ = std::fs::remove_file(&part_path);
+        return Err(format!(
+            "Incomplete update download ({} of {} bytes received). Please try again.",
+            downloaded, total
+        ));
+    }
+
+    // Atomically move .part into final destination
+    if dest_path.exists() {
+        let _ = std::fs::remove_file(&dest_path);
+    }
+    std::fs::rename(&part_path, &dest_path)
+        .map_err(|e| format!("Failed to finalize downloaded update: {}", e))?;
 
     on_progress(UpdateProgressPayload {
         downloaded,
@@ -4839,10 +4992,9 @@ async fn get_game_achievement_summary(
     game_id: String,
     state: State<'_, AppState>,
 ) -> Result<GameAchievementSummary, String> {
-    let all = state.db.get_all_games()?;
-    let game = all
-        .into_iter()
-        .find(|g| g.id == game_id)
+    let game = state
+        .db
+        .get_game_by_id(&game_id)?
         .ok_or_else(|| "Game not found".to_string())?;
 
     state.db.get_game_achievement_summary(&game)
@@ -4850,7 +5002,7 @@ async fn get_game_achievement_summary(
 
 #[tauri::command]
 async fn get_hunter_profile(state: State<'_, AppState>) -> Result<HunterProfile, String> {
-    let all = state.db.get_all_games()?;
+    let all = state.db.get_all_games_summary()?;
     state.db.get_hunter_profile(&all)
 }
 
@@ -5044,13 +5196,13 @@ async fn sync_retroachievements_core(
 
     for g in all_games {
         let src_lower = g.source.to_lowercase();
-        if src_lower.contains("retro") {
+        if src_lower.contains("retro") || g.id.starts_with("ra_") {
             if let Some(ref sid) = g.source_id {
                 game_map_by_source_id.insert(sid.clone(), g.clone());
             }
+            game_map_by_title.insert(g.title.to_lowercase().trim().to_string(), g.clone());
+            game_map_by_norm.insert(ScoreEnrichmentEngine::normalize_title(&g.title), g);
         }
-        game_map_by_title.insert(g.title.to_lowercase().trim().to_string(), g.clone());
-        game_map_by_norm.insert(ScoreEnrichmentEngine::normalize_title(&g.title), g);
     }
 
     for prog in progress_list {
@@ -6193,9 +6345,9 @@ pub async fn export_portable_backup_core(
                 if path.is_file() && count < 250 {
                     if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
                         let zip_path = format!("artwork/{}", name);
-                        if let Ok(bytes) = std::fs::read(&path) {
+                        if let Ok(mut art_file) = std::fs::File::open(&path) {
                             if zip.start_file(&zip_path, options).is_ok() {
-                                let _ = std::io::Write::write_all(&mut zip, &bytes);
+                                let _ = std::io::copy(&mut art_file, &mut zip);
                                 count += 1;
                             }
                         }
@@ -6609,6 +6761,108 @@ fn set_active_theme(theme_id: String, state: State<'_, AppState>) -> Result<(), 
 }
 
 #[tauri::command]
+fn get_active_console_theme_id(state: State<'_, AppState>) -> Result<String, String> {
+    Ok(themes::get_active_console_theme_id(&state.db))
+}
+
+#[tauri::command]
+fn set_active_console_theme(theme_id: String, state: State<'_, AppState>) -> Result<(), String> {
+    themes::set_active_console_theme(&state.db, &theme_id)?;
+    cloud_sync::spawn_background_export(state.db.clone());
+    Ok(())
+}
+
+pub fn execute_system_power_action(action: &str) -> Result<(), String> {
+    let normalized = action.trim().to_lowercase();
+    match normalized.as_str() {
+        "sleep" | "suspend" => {
+            #[cfg(target_os = "windows")]
+            {
+                std::process::Command::new("rundll32.exe")
+                    .args(["powrprof.dll,SetSuspendState", "0,1,0"])
+                    .spawn()
+                    .map_err(|e| format!("Failed to put system to sleep: {}", e))?;
+                return Ok(());
+            }
+            #[cfg(target_os = "macos")]
+            {
+                std::process::Command::new("pmset")
+                    .arg("sleepnow")
+                    .spawn()
+                    .map_err(|e| format!("Failed to put system to sleep: {}", e))?;
+                return Ok(());
+            }
+            #[cfg(all(unix, not(target_os = "macos")))]
+            {
+                std::process::Command::new("systemctl")
+                    .arg("suspend")
+                    .spawn()
+                    .map_err(|e| format!("Failed to suspend system via systemctl: {}", e))?;
+                return Ok(());
+            }
+        }
+        "restart" | "reboot" => {
+            #[cfg(target_os = "windows")]
+            {
+                std::process::Command::new("shutdown")
+                    .args(["/r", "/t", "0"])
+                    .spawn()
+                    .map_err(|e| format!("Failed to restart system: {}", e))?;
+                return Ok(());
+            }
+            #[cfg(target_os = "macos")]
+            {
+                std::process::Command::new("osascript")
+                    .args(["-e", "tell app \"System Events\" to restart"])
+                    .spawn()
+                    .map_err(|e| format!("Failed to restart system: {}", e))?;
+                return Ok(());
+            }
+            #[cfg(all(unix, not(target_os = "macos")))]
+            {
+                std::process::Command::new("systemctl")
+                    .arg("reboot")
+                    .spawn()
+                    .map_err(|e| format!("Failed to reboot system via systemctl: {}", e))?;
+                return Ok(());
+            }
+        }
+        "shutdown" | "poweroff" => {
+            #[cfg(target_os = "windows")]
+            {
+                std::process::Command::new("shutdown")
+                    .args(["/s", "/t", "0"])
+                    .spawn()
+                    .map_err(|e| format!("Failed to shut down system: {}", e))?;
+                return Ok(());
+            }
+            #[cfg(target_os = "macos")]
+            {
+                std::process::Command::new("osascript")
+                    .args(["-e", "tell app \"System Events\" to shut down"])
+                    .spawn()
+                    .map_err(|e| format!("Failed to shut down system: {}", e))?;
+                return Ok(());
+            }
+            #[cfg(all(unix, not(target_os = "macos")))]
+            {
+                std::process::Command::new("systemctl")
+                    .arg("poweroff")
+                    .spawn()
+                    .map_err(|e| format!("Failed to power off system via systemctl: {}", e))?;
+                return Ok(());
+            }
+        }
+        _ => Err(format!("Unsupported system power action: {}", action)),
+    }
+}
+
+#[tauri::command]
+fn system_power_action(action: String) -> Result<(), String> {
+    execute_system_power_action(&action)
+}
+
+#[tauri::command]
 fn get_theme_config(theme_id: String, state: State<'_, AppState>) -> Result<std::collections::HashMap<String, serde_json::Value>, String> {
     themes::get_theme_config(&state.db, &theme_id)
 }
@@ -6935,6 +7189,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_games,
             get_all_games,
+            get_games_page,
+            get_game_by_id,
             scan_steam_library,
             fetch_game_metadata,
             get_steam_current_players,
@@ -6996,6 +7252,7 @@ pub fn run() {
             open_in_explorer,
             get_game_news,
             set_game_hidden,
+            get_app_version,
             check_for_app_updates,
             download_app_update,
             apply_update_and_restart,
@@ -7059,6 +7316,9 @@ pub fn run() {
             delete_theme,
             get_active_theme_id,
             set_active_theme,
+            get_active_console_theme_id,
+            set_active_console_theme,
+            system_power_action,
             get_theme_config,
             save_theme_config,
             get_theme_css,
@@ -7412,6 +7672,53 @@ mod tests {
         let after_local = db.get_game_by_id("steam_620").unwrap().unwrap();
         assert!(!after_local.played_on_other_device);
         assert_eq!(after_local.last_played_device_id.as_deref(), Some(current_device_id.as_str()));
+
+        let _ = std::fs::remove_file(&temp_db_path);
+    }
+
+    #[test]
+    fn test_paginated_lean_games_and_detail_preservation() {
+        let temp_db_path = std::env::temp_dir().join(format!("openplay_test_page_{}.db", uuid::Uuid::new_v4()));
+        let db = Database::new_at_path(&temp_db_path).expect("init temp db");
+
+        for i in 0..5 {
+            let game = Game {
+                id: format!("steam_{}", 1000 + i),
+                title: format!("Game {:02}", i),
+                source: "Steam".to_string(),
+                source_id: Some(format!("{}", 1000 + i)),
+                is_installed: false,
+                cover_image: Some("custom://missing_cover.png".to_string()),
+                description: Some(format!("<p>Long HTML description for Game {}</p>", i)),
+                screenshots: vec![format!("https://example.com/shot_{}.jpg", i)],
+                notes: Some("Private note".to_string()),
+                ..Default::default()
+            };
+            db.save_game_exact(&game).expect("seed game");
+        }
+
+        // Page 1 (lean): limit 2, offset 0
+        let page1 = sync_and_get_games_page_core(&db, 2, 0, false).expect("page1");
+        assert_eq!(page1.total, 5);
+        assert_eq!(page1.games.len(), 2);
+        assert!(page1.has_more);
+        assert_eq!(page1.next_offset, 2);
+        // Heavy fields omitted in lean projection
+        assert!(page1.games[0].description.is_none());
+        assert!(page1.games[0].screenshots.is_empty());
+        assert!(page1.games[0].notes.is_none());
+
+        // Hydrating via get_game_by_id must still have intact heavy fields even after artwork repair ran on page1
+        let full = db.get_game_by_id("steam_1000").expect("get_game_by_id").expect("exists");
+        assert_eq!(full.description.as_deref(), Some("<p>Long HTML description for Game 0</p>"));
+        assert_eq!(full.screenshots.len(), 1);
+        assert_eq!(full.notes.as_deref(), Some("Private note"));
+
+        // Page 3 (final partial page)
+        let page3 = sync_and_get_games_page_core(&db, 2, 4, false).expect("page3");
+        assert_eq!(page3.games.len(), 1);
+        assert!(!page3.has_more);
+        assert_eq!(page3.next_offset, 5);
 
         let _ = std::fs::remove_file(&temp_db_path);
     }

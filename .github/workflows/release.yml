@@ -1,0 +1,223 @@
+name: Release OpenPlay (Windows & Linux)
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v1.0.0)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    name: Build Windows x64
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo dependencies
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src-tauri
+            installer/src-tauri
+
+      - name: Resolve release version
+        id: ver
+        shell: pwsh
+        run: |
+          $pkg = Get-Content package.json -Raw | ConvertFrom-Json
+          echo "version=$($pkg.version)" >> $env:GITHUB_OUTPUT
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Build openplay-core (Release)
+        run: cargo build --release --manifest-path src-tauri/Cargo.toml --bin openplay-core
+
+      - name: Stage openplay-core binary
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path staging-bin | Out-Null
+          Copy-Item "src-tauri\target\release\openplay-core.exe" "staging-bin\openplay-core.exe"
+
+      - name: Build frontend & Electron app
+        run: npm run build
+
+      - name: Package Windows app directory with electron-builder
+        run: npx electron-builder --win dir --config electron-builder.yml
+
+      - name: Create Windows Update ZIP payload
+        shell: pwsh
+        run: |
+          $v = "${{ steps.ver.outputs.version }}"
+          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          $zipPath = "artifacts\OpenPlay-Update-$v-win-x64.zip"
+          Compress-Archive -Path "release-dist\win-unpacked\*" -DestinationPath $zipPath -CompressionLevel Optimal
+
+      - name: Build Custom OpenPlay Installer (Windows)
+        run: cargo build --release --manifest-path installer/src-tauri/Cargo.toml
+
+      - name: Assemble Self-Extracting Windows Installer (.exe)
+        shell: pwsh
+        run: |
+          $v = "${{ steps.ver.outputs.version }}"
+          $stub = "installer\src-tauri\target\release\openplay-installer.exe"
+          $zip = "artifacts\OpenPlay-Update-$v-win-x64.zip"
+          $out = "artifacts\OpenPlay-Setup-$v-win-x64.exe"
+          $stubSize = (Get-Item $stub).Length
+          $magic = [System.Text.Encoding]::ASCII.GetBytes("OPSFX001")
+          $offsetBytes = [System.BitConverter]::GetBytes([UInt64]$stubSize)
+          $outStream = [System.IO.File]::Create($out)
+          try {
+            $s1 = [System.IO.File]::OpenRead($stub)
+            try { $s1.CopyTo($outStream) } finally { $s1.Dispose() }
+            $s2 = [System.IO.File]::OpenRead($zip)
+            try { $s2.CopyTo($outStream) } finally { $s2.Dispose() }
+            $outStream.Write($magic, 0, $magic.Length)
+            $outStream.Write($offsetBytes, 0, $offsetBytes.Length)
+          } finally {
+            $outStream.Dispose()
+          }
+          Get-Item $out | Format-List Name, Length
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-artifacts
+          path: artifacts/*
+
+  build-linux:
+    name: Build Linux x64
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Linux WebKitGTK & packaging dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libgtk-3-dev \
+            libssl-dev \
+            zip
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo dependencies
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src-tauri
+            installer/src-tauri
+
+      - name: Resolve release version
+        id: ver
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Build openplay-core (Release)
+        run: cargo build --release --manifest-path src-tauri/Cargo.toml --bin openplay-core
+
+      - name: Stage openplay-core binary
+        run: |
+          mkdir -p staging-bin
+          cp src-tauri/target/release/openplay-core staging-bin/openplay-core
+          chmod +x staging-bin/openplay-core
+
+      - name: Build frontend & Electron app
+        run: npm run build
+
+      - name: Package Linux packages with electron-builder
+        run: npx electron-builder --linux dir AppImage deb --config electron-builder.yml
+
+      - name: Create Linux Update ZIP & collect native packages
+        run: |
+          V="${{ steps.ver.outputs.version }}"
+          mkdir -p artifacts
+          (cd release-dist/linux-unpacked && zip -ry "../../artifacts/OpenPlay-Update-${V}-linux-x64.zip" .)
+          cp release-dist/*.AppImage "artifacts/OpenPlay-${V}-linux-x64.AppImage"
+          cp release-dist/*.deb "artifacts/OpenPlay-${V}-linux-x64.deb"
+
+      - name: Build Custom OpenPlay Installer (Linux)
+        run: cargo build --release --manifest-path installer/src-tauri/Cargo.toml
+
+      - name: Assemble Self-Extracting Linux Installer
+        run: |
+          V="${{ steps.ver.outputs.version }}"
+          python3 -c '
+          import os, shutil, struct, sys
+          stub, zpath, out = sys.argv[1], sys.argv[2], sys.argv[3]
+          stub_size = os.path.getsize(stub)
+          with open(out, "wb") as f:
+              with open(stub, "rb") as s: shutil.copyfileobj(s, f)
+              with open(zpath, "rb") as z: shutil.copyfileobj(z, f)
+              f.write(b"OPSFX001" + struct.pack("<Q", stub_size))
+          os.chmod(out, 0o755)
+          ' "installer/src-tauri/target/release/openplay-installer" "artifacts/OpenPlay-Update-${V}-linux-x64.zip" "artifacts/OpenPlay-Setup-${V}-linux-x64.bin"
+          ls -lh artifacts/
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-artifacts
+          path: artifacts/*
+
+  publish-release:
+    name: Publish GitHub Release
+    needs: [build-windows, build-linux]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.tag != ''
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: List release assets
+        run: ls -lh release-assets/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
+          name: OpenPlay ${{ inputs.tag || github.ref_name }}
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+          files: release-assets/*

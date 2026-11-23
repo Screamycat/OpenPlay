@@ -11,6 +11,11 @@ node_modules
 dist
 dist-electron
 dist-ssr
+release-dist
+staging-bin
+artifacts
+installer/src-tauri/target
+.cargo/
 *.local
 
 # Editor directories and files

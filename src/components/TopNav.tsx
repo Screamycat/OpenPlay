@@ -1,5 +1,4 @@
 import React, { useState, useRef } from "react";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { WindowControls } from "./WindowControls";
 import { FilterPopover, FilterItem } from "./FilterPopover";
 import { SortDropdown } from "./SortDropdown";
@@ -118,25 +117,17 @@ export const TopNav: React.FC<TopNavProps> = ({
 }) => {
   const [isFilterPopoverOpen, setIsFilterPopoverOpen] = useState(false);
   const filterContainerRef = useRef<HTMLDivElement>(null);
-  const handleHeaderDoubleClick = async (e: React.MouseEvent) => {
-    if (e.button === 0) {
-      try {
-        await getCurrentWindow().toggleMaximize();
-      } catch (err) {}
-    }
-  };
 
   return (
     <header
       data-theme-part="top-nav"
       data-gamepad-zone="top-nav"
       data-tauri-drag-region
-      onDoubleClick={handleHeaderDoubleClick}
       className="titlebar-drag-region h-14 bg-black/25 backdrop-blur-xl border-b border-white/10 px-4 flex items-center justify-between select-none z-30 gap-3 shadow-lg"
     >
       {/* Top Left: OpenPlay Menu, Filters, Sort, Search */}
       <div
-        className="flex items-center space-x-3 shrink-0"
+        className="titlebar-no-drag flex items-center space-x-3 shrink-0"
         onMouseDown={(e) => e.stopPropagation()}
       >
         <button
@@ -339,7 +330,7 @@ export const TopNav: React.FC<TopNavProps> = ({
       {/* Right: View Mode Toggle, Settings & Windows Controls */}
       <div
         data-theme-part="nav-controls"
-        className="flex items-center space-x-2 shrink-0"
+        className="titlebar-no-drag flex items-center space-x-2 shrink-0"
         onMouseDown={(e) => e.stopPropagation()}
       >
         {/* Subtle Update Available Pill */}

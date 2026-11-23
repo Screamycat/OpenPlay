@@ -7,6 +7,14 @@ export interface RunnerInfo {
   is_default: boolean;
 }
 
+export interface ConsoleProfile {
+  id: string;
+  name: string;
+  avatar_url?: string | null;
+  avatar_game_id?: string | null;
+  accent_color?: string | null;
+}
+
 export interface AppConfig {
   // Layout & Session State (Reopen right where you left off)
   view_mode?: "split" | "grid" | "list";
@@ -35,6 +43,7 @@ export interface AppConfig {
 
   // Appearance
   active_theme_id?: string;
+  active_console_theme_id?: string;
   theme?: "dark" | "oled" | "midnight";
   background_blur?: number; // 0 to 64
   background_opacity?: number; // 0 to 1
@@ -89,6 +98,21 @@ export interface AppConfig {
   controller_deadzone?: number;
   controller_suspend_in_game?: boolean;
   controller_bindings?: Record<string, string>;
+
+  // Console Mode (Fullscreen Couch Experience)
+  start_in_console_mode?: boolean;
+  console_boot_splash_enabled?: boolean;
+  console_boot_video_path?: string | null;
+  console_auto_sign_in?: boolean;
+  console_login_bg_video_path?: string | null;
+  console_ui_sounds?: boolean;
+  console_ui_volume?: number;
+  console_bg_music_enabled?: boolean;
+  console_bg_music_volume?: number;
+  console_bg_music_path?: string | null;
+  console_display_id?: string | null;
+  console_profiles?: ConsoleProfile[];
+  console_active_profile_id?: string | null;
 }
 
 export const DEFAULT_APP_CONFIG: AppConfig = {
@@ -121,12 +145,26 @@ export const DEFAULT_APP_CONFIG: AppConfig = {
   controller_deadzone: 0.18,
   controller_suspend_in_game: true,
   controller_bindings: {},
+  start_in_console_mode: false,
+  console_boot_splash_enabled: true,
+  console_boot_video_path: "/videos/splash boot/OpenPlay_Console_2K.mp4",
+  console_auto_sign_in: false,
+  console_login_bg_video_path: "/videos/login loop/50632-464085910_medium.mp4",
+  console_ui_sounds: true,
+  console_ui_volume: 0.45,
+  console_bg_music_enabled: true,
+  console_bg_music_volume: 0.25,
+  console_bg_music_path: null,
+  console_display_id: "auto",
+  console_profiles: [],
+  console_active_profile_id: null,
   launch_on_startup: false,
   minimize_on_game_launch: false,
   close_to_tray: false,
   merge_duplicates: true,
   unmerged_game_ids: [],
   active_theme_id: "default",
+  active_console_theme_id: "console-default",
   theme: "dark",
   background_blur: 32,
   background_opacity: 0.75,

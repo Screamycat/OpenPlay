@@ -11,12 +11,15 @@ export interface ThemeSetting {
   step?: number;
 }
 
+export type ThemeMode = "desktop" | "console";
+
 export interface ThemeManifest {
   id: string;
   name: string;
   version: string;
   author: string;
   description: string;
+  mode?: ThemeMode;
   icon: string; // MANDATORY
   screenshots: string[]; // MANDATORY: >= 3
   css?: string;

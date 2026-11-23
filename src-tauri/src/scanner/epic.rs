@@ -473,10 +473,7 @@ impl EpicScanner {
 
     /// 3. Exchange an authorization code or exchange code for OAuth2 tokens
     pub async fn exchange_code_for_token(code: &str) -> Result<EpicAuthResponse, String> {
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(15))
-            .build()
-            .map_err(|e| e.to_string())?;
+        let client = crate::http::client();
 
         let url = "https://account-public-service-prod03.ol.epicgames.com/account/api/oauth/token";
 
@@ -522,10 +519,7 @@ impl EpicScanner {
 
     /// 4. Refresh token
     pub async fn refresh_access_token(refresh_token: &str) -> Result<EpicAuthResponse, String> {
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(15))
-            .build()
-            .map_err(|e| e.to_string())?;
+        let client = crate::http::client();
 
         let url = "https://account-public-service-prod03.ol.epicgames.com/account/api/oauth/token";
 
@@ -552,10 +546,7 @@ impl EpicScanner {
 
     /// 5. Fetch user's owned games list from Epic's live cloud library service with cursor pagination
     pub async fn fetch_owned_library(access_token: &str) -> Result<Vec<EpicOwnedGame>, String> {
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(25))
-            .build()
-            .map_err(|e| e.to_string())?;
+        let client = crate::http::client();
 
         let mut raw_records = Vec::new();
         let mut cursor: Option<String> = None;
@@ -790,10 +781,7 @@ impl EpicScanner {
 
     /// 6. Fetch user's recorded playtime across all Epic titles from Epic's live library service
     pub async fn fetch_playtime(account_id: &str, access_token: &str) -> Result<HashMap<String, u64>, String> {
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(15))
-            .build()
-            .map_err(|e| e.to_string())?;
+        let client = crate::http::client();
 
         let url = format!(
             "https://library-service.live.use1a.on.epicgames.com/library/api/public/playtime/account/{}/all",

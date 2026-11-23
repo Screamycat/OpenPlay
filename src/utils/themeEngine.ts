@@ -1,4 +1,4 @@
-import { ThemeInfo } from "../types/themes";
+import { ThemeInfo, ThemeMode } from "../types/themes";
 
 const STYLE_TAG_ID = "openplay-active-theme";
 const CONFIG_STYLE_TAG_ID = "openplay-theme-config-vars";
@@ -6,12 +6,15 @@ const CONFIG_STYLE_TAG_ID = "openplay-theme-config-vars";
 /**
  * Injects custom CSS rules and CSS variables for the active theme
  */
-export function applyTheme(theme: ThemeInfo): void {
+export function applyTheme(theme: ThemeInfo, forcedMode?: ThemeMode): void {
   try {
     const root = document.documentElement;
+    const mode: ThemeMode =
+      forcedMode || (theme.manifest.mode === "console" ? "console" : "desktop");
 
-    // Set theme identity attribute on <html>
+    // Set theme identity attributes on <html>
     root.setAttribute("data-theme-id", theme.manifest.id);
+    root.setAttribute("data-theme-mode", mode);
 
     // 1. Injected custom theme CSS stylesheet
     let styleTag = document.getElementById(STYLE_TAG_ID) as HTMLStyleElement | null;
@@ -52,6 +55,7 @@ export function applyTheme(theme: ThemeInfo): void {
         if (setting.id === "accent_color" && typeof val === "string") {
           cssVars.push(`  --app-accent-color: ${val};`);
           cssVars.push(`  --accent: ${val};`);
+          cssVars.push(`  --console-accent: ${val};`);
         } else if (setting.id === "panel_tint" && typeof val === "string") {
           cssVars.push(`  --app-panel-tint: ${val};`);
         } else if (setting.id === "modal_backdrop_opacity" && typeof val === "number") {
@@ -60,16 +64,42 @@ export function applyTheme(theme: ThemeInfo): void {
           cssVars.push(`  --modal-backdrop-blur: ${val}px;`);
         } else if (setting.id === "background_blur" && typeof val === "number") {
           cssVars.push(`  --background-blur: ${val}px;`);
+          cssVars.push(`  --console-bg-blur: ${val}px;`);
         } else if (setting.id === "background_opacity" && typeof val === "number") {
           cssVars.push(`  --background-opacity: ${val};`);
+        } else if (setting.id === "background_dim" && typeof val === "number") {
+          cssVars.push(`  --console-bg-dim: ${val};`);
+        } else if (setting.id === "safe_max_width") {
+          const str = String(val).toLowerCase();
+          if (str.includes("1920")) {
+            cssVars.push(`  --console-safe-width: 1920px;`);
+          } else if (str.includes("100%") || str.includes("full")) {
+            cssVars.push(`  --console-safe-width: 100%;`);
+          } else {
+            cssVars.push(`  --console-safe-width: 2200px;`);
+          }
+        } else if (setting.id === "card_scale") {
+          const str = String(val).toLowerCase();
+          if (str.includes("compact")) {
+            cssVars.push(`  --console-card-width: 164px;`);
+          } else if (str.includes("large")) {
+            cssVars.push(`  --console-card-width: 224px;`);
+          } else {
+            cssVars.push(`  --console-card-width: 192px;`);
+          }
+        } else if (setting.id === "selection_glow") {
+          cssVars.push(`  --console-selection-glow: ${val ? "1" : "0"};`);
         } else if (setting.id === "card_border_radius") {
           const str = String(val);
-          if (str.includes("8px")) {
+          if (str.includes("8px") || str.includes("10px")) {
             cssVars.push(`  --theme-card-radius: 8px;`);
-          } else if (str.includes("24px")) {
+            cssVars.push(`  --console-card-radius: 10px;`);
+          } else if (str.includes("24px") || str.includes("20px")) {
             cssVars.push(`  --theme-card-radius: 24px;`);
+            cssVars.push(`  --console-card-radius: 20px;`);
           } else {
             cssVars.push(`  --theme-card-radius: 16px;`);
+            cssVars.push(`  --console-card-radius: 14px;`);
           }
         } else if (setting.id === "card_aspect_ratio") {
           const str = String(val).toLowerCase();
@@ -120,7 +150,9 @@ export function applyTheme(theme: ThemeInfo): void {
     configStyleTag.textContent = `:root {\n${cssVars.join("\n")}\n}`;
 
     window.dispatchEvent(
-      new CustomEvent("openplay-theme-changed", { detail: { themeId: theme.manifest.id } })
+      new CustomEvent("openplay-theme-changed", {
+        detail: { themeId: theme.manifest.id, mode, theme },
+      })
     );
   } catch (err) {
     console.error("Failed to apply theme:", theme.manifest.id, err);
@@ -133,6 +165,7 @@ export function applyTheme(theme: ThemeInfo): void {
 export function removeCustomTheme(): void {
   const root = document.documentElement;
   root.removeAttribute("data-theme-id");
+  root.removeAttribute("data-theme-mode");
 
   const styleTag = document.getElementById(STYLE_TAG_ID);
   if (styleTag) styleTag.remove();

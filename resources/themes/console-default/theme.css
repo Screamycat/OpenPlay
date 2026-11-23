@@ -1,0 +1,59 @@
+/* ==========================================================================
+   OpenPlay Console — Built-In Console Mode Theme (console-default)
+   Community Console Themes can target any [data-console-part="..."] selector
+   and override --console-* CSS custom properties.
+   ========================================================================== */
+
+:root[data-theme-mode="console"] {
+  --console-accent: var(--app-accent-color, #783efe);
+  --console-bg: #05060a;
+  --console-panel: rgba(11, 13, 20, 0.82);
+  --console-card-radius: var(--theme-card-radius, 16px);
+  --console-card-aspect: 2 / 3;
+  --console-hero-dim: var(--theme-opt-background_dim, 0.45);
+  --console-hero-blur: var(--theme-opt-background_blur, 0px);
+  --console-safe-width: 2200px;
+}
+
+[data-console-part="console-root"] {
+  background-color: var(--console-bg);
+  color: #f8fafc;
+}
+
+[data-console-part="console-top-bar"] {
+  background: linear-gradient(
+    to bottom,
+    rgba(5, 6, 10, 0.88) 0%,
+    rgba(5, 6, 10, 0.45) 65%,
+    transparent 100%
+  );
+}
+
+[data-console-part="console-card"] {
+  border-radius: var(--console-card-radius);
+  aspect-ratio: var(--console-card-aspect);
+  transition: transform 240ms cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 240ms cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 200ms ease;
+}
+
+[data-console-part="console-card"][data-console-selected="true"] {
+  transform: translateY(-6px) scale(1.06);
+  box-shadow:
+    0 0 0 2.5px #ffffff,
+    0 0 0 5px var(--console-accent),
+    0 22px 45px -8px rgba(0, 0, 0, 0.9),
+    0 0 36px color-mix(in srgb, var(--console-accent) 65%, transparent);
+  z-index: 20;
+}
+
+[data-console-part="console-play-btn"] {
+  background: #ffffff;
+  color: #07080c;
+  box-shadow: 0 10px 30px rgba(255, 255, 255, 0.2);
+}
+
+[data-console-part="console-play-btn"]:hover,
+[data-console-part="console-play-btn"][data-gamepad-focused="true"] {
+  box-shadow: 0 0 0 2px #ffffff, 0 0 28px color-mix(in srgb, var(--console-accent) 75%, transparent);
+}

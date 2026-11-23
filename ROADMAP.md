@@ -29,16 +29,15 @@ Welcome to the central tracking document for **OpenPlay**. Use this document to 
 - [x] **Custom Theme Tinting**: Option in Settings to choose primary accent color
 - [x] **Trailer Autoplay Controls in Settings**: Option to toggle video trailer autoplay on/off or mute by default.
 - [x] **Hide**: Be able to hide and unhide a game.
-- [ ] **Console Mode**: Much like fullscreen mode, only that its main focus is making your pc into a console (big picture mode if you will).
+- [x] **Console Mode**: Much like fullscreen mode, only that its main focus is making your pc into a console (big picture mode if you will).
 
 ### 🟢 Backlog & Wishlist
 - [ ] **Custom installer**: Replace the native wizard with a sleek and modern installer. A chance to prepare settings and so on.
 - [ ] **Feedback button**: A button that lets users send feedback.
 - [ ] **Android Support**: An android apk, to view all data on mobile.
-- [ ] **Stats & Analytics Dashboard**: Charts showing playtime trends, most played genres, and monthly play history.
 
 ### ⚙️ Implemented but Non-Tested Features
-- [ ] **Cloud save**: Optionally store game saves on your own cloud.
+- [x] **Cloud save**: Optionally store game saves on your own cloud.
 - [ ] **Dual launch**: Make it possible to choose on play what exe to launch. (for mod managers or something other) Much Like playnite actions.
 - [ ] **Update in app**: Updating should not open a installer, it should update within the app.
 - [ ] **Launch option on start up (Settings)**: An option in settings to enable start OpenPLay on device boot.
@@ -47,6 +46,7 @@ Welcome to the central tracking document for **OpenPlay**. Use this document to 
 - [ ] **Extention / Theme support**: Open up the application for custom plugins (extention) and themes.
 
 ### ❓ Ignored Features at This Time
+- [ ] **Stats & Analytics Dashboard**: Charts showing playtime trends, most played genres, and monthly play history.
 - [ ] **Emulation backup support (Advanced)**: Roms imported from playnite backup appears as local games, once emulators is implemented, roms should be supported through backups as well.
 - [ ] **Achievement system**: Optional native OpenPlay extention that makes it possible to track achivements for local games.
 
@@ -74,9 +74,9 @@ Welcome to the central tracking document for **OpenPlay**. Use this document to 
 - [x] **Title image percentage**: Instead of the title image being confined  to pixels, it should be confiend to a max of 50% of the heros width and 65% of the heros height.
 - [x] **Ontouched games in hub**: Untouched games in the achivement hub should not be in calcualtion for things like avarege completion and unlocked count etc.
 - [x] **Sidebar version number**: The version number in the bottom sidebar is not automatically synced.
-- [ ] **Double clicking to maximize**: Double clicking various UI element ssuch as the dropdown menu panel for filters, dropdown menu panel for sorting maximizes the same way it would do when double clicking the window bar. THis is not a feature and should be removed. Double clicking anywhere should never have this behaviour. This goes for all the othe possible places this would also occur.
-- [ ] **Missing refresh button**: Retroachivements are missing in the refresh menu when logged in.
-- [ ] **Missing icon on linux**: Running OpenPlay on linux is displaying the wayland icon isntead of the OpenPlay icon.
+- [x] **Double clicking to maximize**: Double clicking various UI element ssuch as the dropdown menu panel for filters, dropdown menu panel for sorting maximizes the same way it would do when double clicking the window bar. THis is not a feature and should be removed. Double clicking anywhere should never have this behaviour. This goes for all the othe possible places this would also occur.
+- [x] **Missing refresh button**: Retroachivements are missing in the refresh menu when logged in.
+- [x] **Missing icon on linux**: Running OpenPlay on linux is displaying the wayland icon isntead of the OpenPlay icon.
 ---
 
 ## 🐛 Bug Tracker
@@ -84,11 +84,11 @@ Welcome to the central tracking document for **OpenPlay**. Use this document to 
 |:---|:------------------|:--------:|:-------------------|:------:|
 | 001 | *Window completely disappears sometimes after restarting the application and imeaditly try to move it.* | Medium | *This can be becasue of VITE or something with the window management?* | Resolved |
 | 002 | *Incomming artwork from steam is null in the metadata window* | Small | *Fetching manual steam emtadata* | Resolved
-| 003 | *Random selected artwork covers can appear empty* | Small | *This issue  occurance is uknown but is easliy fixed buy restarting, or via VITE update.* | Testing fix
+| 003 | *Random selected artwork covers can appear empty* | Small | *This issue  occurance is uknown but is easliy fixed buy restarting, or via VITE update.* | Resolved
 | 004 | *Animated artwork covers are null (with the iamge icon) in places like game settings and achivement hub* | Medium | *This happens only with animated covers, which should be animated in these instances* | Resolved
 | 005 | *Animated covers in the grid view that is not installed is not grey like static covers are* | Medium | *Animated covers should match the grayscale affect of the static covers when not installed* | Resolved
-| 006 | *More often than usual the window refuses top open. Its icon is visible in the task bar, only a click apon it does nothing.* | High | *When this happens OpenPlay is still running in the background, and a restart is required to open the window again.* | Testing fix
+| 006 | *More often than usual the window refuses top open. Its icon is visible in the task bar, only a click apon it does nothing.* | High | *When this happens OpenPlay is still running in the background, and a restart is required to open the window again.* | Resolved
 | 007 | *When importing a playnite backup, if chosen not to import example, artwork. All artwork for the already existing games gets removed and set to empty* | High | *When importing playnite backups it should never be destructive, it should on replace the data that was selected to be imported. Unless the existing data has already been modified by the user. User modification always goes first.* | Testing fix
 | 008 | *When importing a playnite backup, if that game already exists, instad of merging or replacing data. It makes a new platform cell of the same platform.* | High | *When importing playnite backups, it should check the existing unique id from the import file and match it to the exists. This fix also need to fix the already broken library entries that now conissts of multiple libraries of the same platform.* | Testing fix
-| 009 | *When having "minimize openplay" active it dose not appear again when game is closed* | Medium | *If this option is active it should also open openplay backup when the game is no longer running.* | Needs attention
-| 010 | *GOG is not saving metadata or artwork, or is simply overwriting metadata with its own useless metadata* | Medium | *It should not do this.* | Needs attention
+| 009 | *When having "minimize openplay" active it dose not appear again when game is closed* | Medium | *If this option is active it should also open openplay backup when the game is no longer running.* | Resolved
+| 010 | *GOG is not saving metadata or artwork, or is simply overwriting metadata with its own useless metadata* | Medium | *It should not do this.* | Testing fix

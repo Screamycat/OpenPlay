@@ -1,5 +1,15 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ConsoleProfile {
+    pub id: String,
+    pub name: String,
+    pub avatar_url: Option<String>,
+    pub avatar_game_id: Option<String>,
+    #[serde(default)]
+    pub accent_color: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     // Layout & Session State (Reopen right where you left off)
@@ -26,6 +36,7 @@ pub struct AppConfig {
 
     // Appearance
     pub active_theme_id: Option<String>,
+    pub active_console_theme_id: Option<String>,
     pub theme: Option<String>,
     pub background_blur: Option<i32>,
     pub background_opacity: Option<f64>,
@@ -84,6 +95,21 @@ pub struct AppConfig {
     pub controller_deadzone: Option<f64>,
     pub controller_suspend_in_game: Option<bool>,
     pub controller_bindings: Option<std::collections::HashMap<String, String>>,
+
+    // Console Mode (Fullscreen Couch Experience)
+    pub start_in_console_mode: Option<bool>,
+    pub console_boot_splash_enabled: Option<bool>,
+    pub console_boot_video_path: Option<String>,
+    pub console_auto_sign_in: Option<bool>,
+    pub console_login_bg_video_path: Option<String>,
+    pub console_ui_sounds: Option<bool>,
+    pub console_ui_volume: Option<f64>,
+    pub console_bg_music_enabled: Option<bool>,
+    pub console_bg_music_volume: Option<f64>,
+    pub console_bg_music_path: Option<String>,
+    pub console_display_id: Option<String>,
+    pub console_profiles: Option<Vec<ConsoleProfile>>,
+    pub console_active_profile_id: Option<String>,
 }
 
 impl Default for AppConfig {
@@ -106,6 +132,7 @@ impl Default for AppConfig {
             close_to_tray: Some(false),
             last_played_date_format: Some("date_and_time".to_string()),
             active_theme_id: Some("default".to_string()),
+            active_console_theme_id: Some("console-default".to_string()),
             theme: Some("dark".to_string()),
             background_blur: Some(32),
             background_opacity: Some(0.75),
@@ -148,6 +175,19 @@ impl Default for AppConfig {
             controller_deadzone: Some(0.18),
             controller_suspend_in_game: Some(true),
             controller_bindings: None,
+            start_in_console_mode: Some(false),
+            console_boot_splash_enabled: Some(true),
+            console_boot_video_path: Some("/videos/splash boot/OpenPlay_Console_2K.mp4".to_string()),
+            console_auto_sign_in: Some(false),
+            console_login_bg_video_path: Some("/videos/login loop/50632-464085910_medium.mp4".to_string()),
+            console_ui_sounds: Some(true),
+            console_ui_volume: Some(0.45),
+            console_bg_music_enabled: Some(true),
+            console_bg_music_volume: Some(0.25),
+            console_bg_music_path: None,
+            console_display_id: Some("auto".to_string()),
+            console_profiles: None,
+            console_active_profile_id: None,
         }
     }
 }

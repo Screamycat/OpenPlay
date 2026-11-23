@@ -422,4 +422,128 @@ html[data-controller-mode="true"] [data-gamepad-card-focused="true"] .card-shine
   transition: transform 1.4s cubic-bezier(0.35, 0, 0.15, 1), opacity 0.4s ease;
 }
 
+/* Zero-GPU In-Game Hibernate: pause all animations and heavy blur passes while a game is running */
+html[data-game-running="true"],
+html[data-game-running="true"] *,
+html[data-game-running="true"] *::before,
+html[data-game-running="true"] *::after {
+  animation-play-state: paused !important;
+  transition: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+@keyframes consoleMeshDrift {
+  0% {
+    transform: translate3d(-4%, -3%, 0) scale(1.06) rotate(0deg);
+  }
+  50% {
+    transform: translate3d(4%, 3%, 0) scale(1.12) rotate(1.5deg);
+  }
+  100% {
+    transform: translate3d(-4%, -3%, 0) scale(1.06) rotate(0deg);
+  }
+}
+
+.console-ambient-mesh {
+  background:
+    radial-gradient(circle at 22% 28%, color-mix(in srgb, var(--console-accent, #38bdf8) 26%, transparent) 0%, transparent 48%),
+    radial-gradient(circle at 78% 70%, rgba(129, 140, 248, 0.22) 0%, transparent 52%),
+    radial-gradient(circle at 52% 15%, rgba(56, 189, 248, 0.14) 0%, transparent 45%),
+    linear-gradient(135deg, #05070e 0%, #090e1c 50%, #060812 100%);
+  animation: consoleMeshDrift 22s ease-in-out infinite;
+  will-change: transform;
+}
+
+[data-console-part="card"][data-selected="true"] {
+  box-shadow:
+    0 0 0 2px #ffffff,
+    0 18px 40px -10px rgba(0, 0, 0, 0.85),
+    0 0 calc(28px * var(--console-selection-glow, 1))
+      color-mix(in srgb, var(--console-accent, #38bdf8) 60%, transparent);
+}
+
+/* Subtle, faded architectural diagonal lines for Console Mode backgrounds & UI panels */
+.console-diagonal-backdrop::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: repeating-linear-gradient(
+    -45deg,
+    rgba(255, 255, 255, 0.028) 0px,
+    rgba(255, 255, 255, 0.028) 1px,
+    transparent 1px,
+    transparent 14px
+  );
+  -webkit-mask-image: radial-gradient(
+    ellipse 85% 80% at 50% 45%,
+    rgba(0, 0, 0, 0.85) 0%,
+    rgba(0, 0, 0, 0.35) 55%,
+    transparent 100%
+  );
+  mask-image: radial-gradient(
+    ellipse 85% 80% at 50% 45%,
+    rgba(0, 0, 0, 0.85) 0%,
+    rgba(0, 0, 0, 0.35) 55%,
+    transparent 100%
+  );
+  opacity: var(--console-pattern-opacity, 1);
+}
+
+.console-diagonal-surface,
+html[data-theme-mode="console"] .isolated-widget {
+  background-image: linear-gradient(
+      145deg,
+      rgba(255, 255, 255, 0.03) 0%,
+      transparent 48%,
+      rgba(0, 0, 0, 0.14) 100%
+    ),
+    repeating-linear-gradient(
+      -45deg,
+      rgba(255, 255, 255, 0.022) 0px,
+      rgba(255, 255, 255, 0.022) 1px,
+      transparent 1px,
+      transparent 11px
+    );
+}
+
+/* On ultrawide monitors (21:9 & 32:9), feather the native-height center video/image edges
+   into the content-aware ambient wing layer behind it for a completely seamless transition. */
+@media (min-aspect-ratio: 19/10) {
+  .console-ultrawide-center-feather {
+    -webkit-mask-image: linear-gradient(
+      to right,
+      transparent 0%,
+      rgba(0, 0, 0, 0.25) 4%,
+      rgba(0, 0, 0, 0.72) 10%,
+      #000000 17%,
+      #000000 83%,
+      rgba(0, 0, 0, 0.72) 90%,
+      rgba(0, 0, 0, 0.25) 96%,
+      transparent 100%
+    );
+    mask-image: linear-gradient(
+      to right,
+      transparent 0%,
+      rgba(0, 0, 0, 0.25) 4%,
+      rgba(0, 0, 0, 0.72) 10%,
+      #000000 17%,
+      #000000 83%,
+      rgba(0, 0, 0, 0.72) 90%,
+      rgba(0, 0, 0, 0.25) 96%,
+      transparent 100%
+    );
+  }
+}
+
+
+
 

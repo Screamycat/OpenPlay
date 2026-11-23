@@ -53,10 +53,7 @@ impl SteamGridDBClient {
     /// Resolves Steam App ID to SteamGridDB game ID
     pub async fn get_game_id(api_key: &str, steam_appid: &str) -> Result<u64, String> {
         let url = format!("https://www.steamgriddb.com/api/v2/games/steam/{}", steam_appid);
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(8))
-            .build()
-            .map_err(|e| e.to_string())?;
+        let client = crate::http::client();
 
         let resp = client
             .get(&url)
@@ -87,10 +84,7 @@ impl SteamGridDBClient {
             return Err("Game title is empty; cannot search SteamGridDB".to_string());
         }
 
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(8))
-            .build()
-            .map_err(|e| e.to_string())?;
+        let client = crate::http::client();
 
         // Build candidate search queries: full clean title first, then base title before ':' if edition suffix exists
         let mut candidates = vec![clean.clone()];
@@ -238,10 +232,7 @@ impl SteamGridDBClient {
             )
         };
 
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(10))
-            .build()
-            .map_err(|e| e.to_string())?;
+        let client = crate::http::client();
 
         let resp = client
             .get(&url)

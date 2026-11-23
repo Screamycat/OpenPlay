@@ -224,11 +224,8 @@ export const OpenPlayBackupTab: React.FC<OpenPlayBackupTabProps> = ({
   return (
     <div className="space-y-5">
       <div>
-        <h3 className="text-xs font-bold text-white uppercase tracking-wider mb-1 flex items-center space-x-2">
-          <span>OpenPlay Database Backups & Snapshots</span>
-          <span className="text-[10px] px-2 py-0.5 rounded-full font-mono font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30">
-            OFFLINE-FIRST
-          </span>
+        <h3 className="text-xs font-bold text-white uppercase tracking-wider mb-1">
+          OpenPlay Database Backups & Snapshots
         </h3>
         <p className="text-[11px] text-zinc-400">
           Create point-in-time database snapshots or export portable <code className="text-zinc-200">.openplaybackup</code> bundles for other devices.

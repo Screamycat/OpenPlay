@@ -20,9 +20,20 @@ import {
   FolderOpen,
   Gamepad2,
   RotateCcw,
+  Tv,
+  Volume2,
+  Film,
+  Trash2,
+  Monitor,
+  Music,
+  Bug,
+  Lightbulb,
+  Copy,
+  Send,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow, DisplayInfo, getVersion } from "../utils/ipc";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { AppConfig, DEFAULT_APP_CONFIG, RunnerInfo } from "../types/config";
 import {
@@ -42,11 +53,18 @@ import { UpdateCheckResult, UpdateProgressPayload } from "../types/update";
 import { ThemeInfo } from "../types/themes";
 import { resolveImageSrc } from "../utils/image";
 import { applyTheme } from "../utils/themeEngine";
+import {
+  BUILTIN_CONSOLE_LOGIN_VIDEOS,
+  DEFAULT_CONSOLE_BOOT_VIDEO,
+  DEFAULT_CONSOLE_LOGIN_VIDEO,
+} from "../constants/consoleVideos";
 
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
   onOpenThemes?: () => void;
+  onOpenConsoleThemes?: () => void;
+  onEnterConsoleMode?: () => void;
   onScanLibrary?: () => void;
   onReloadGames?: () => Promise<void>;
   isScanning?: boolean;
@@ -62,6 +80,7 @@ type SettingsTab =
   | "appearance"
   | "playback"
   | "controller"
+  | "console"
   | "linux"
   | "apis"
   | "backup"
@@ -88,10 +107,28 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   });
   const [showSgdbKey, setShowSgdbKey] = useState(false);
   const [showIgdbSecret, setShowIgdbSecret] = useState(false);
+  const [displays, setDisplays] = useState<DisplayInfo[]>([]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    getCurrentWindow()
+      .getDisplays()
+      .then((list) => setDisplays(list || []))
+      .catch(() => setDisplays([]));
+  }, [isOpen]);
   const [isSavedNotice, setIsSavedNotice] = useState(false);
+  const [appVersion, setAppVersion] = useState<string>("");
   const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(
     initialUpdateResult || null
   );
+
+  useEffect(() => {
+    getVersion()
+      .then((ver) => {
+        if (ver) setAppVersion(ver);
+      })
+      .catch(() => {});
+  }, []);
   const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
   const [updateError, setUpdateError] = useState<string | null>(null);
 
@@ -106,6 +143,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   });
   const [installerPath, setInstallerPath] = useState<string | null>(null);
   const [backupSubTab, setBackupSubTab] = useState<"cloud" | "openplay" | "playnite">("cloud");
+
+  // Feedback section state
+  const [feedbackType, setFeedbackType] = useState<"bug" | "feature">("bug");
+  const [feedbackTitle, setFeedbackTitle] = useState("");
+  const [feedbackBody, setFeedbackBody] = useState("");
+  const [includeSystemInfo, setIncludeSystemInfo] = useState(true);
+  const [systemInfo, setSystemInfo] = useState<{
+    version: string;
+    os: string;
+    arch: string;
+    is_appimage?: boolean;
+  } | null>(null);
+  const [copiedDiagnostics, setCopiedDiagnostics] = useState(false);
   const [availableRunners, setAvailableRunners] = useState<RunnerInfo[]>([]);
   const {
     isControllerConnected,
@@ -158,15 +208,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   }, [initialUpdateResult]);
 
   useEffect(() => {
+    if (isOpen && activeTab === "about" && !systemInfo) {
+      invoke<{ version: string; os: string; arch: string; is_appimage?: boolean }>(
+        "get_system_info"
+      )
+        .then((info) => setSystemInfo(info))
+        .catch(() => {});
+    }
+  }, [isOpen, activeTab, systemInfo]);
+
+  useEffect(() => {
     let isMounted = true;
     const unlistenPromise = listen<UpdateProgressPayload>(
       "app-update-progress",
       (event) => {
         if (!isMounted) return;
         setDownloadProgress(event.payload);
-        if (event.payload.percentage >= 100) {
-          setUpdateStatus("ready");
-        }
       }
     );
 
@@ -217,6 +274,55 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     } catch (err: any) {
       setUpdateError(String(err));
       setUpdateStatus("ready");
+    }
+  };
+
+  const buildSystemInfoMarkdown = () => {
+    const version = systemInfo?.version || updateResult?.current_version || appVersion || "unknown";
+    const os = systemInfo?.os || (navigator.userAgent.includes("Windows") ? "windows" : "linux");
+    const arch = systemInfo?.arch || "x86_64";
+    const pkg = systemInfo?.is_appimage ? " (AppImage)" : "";
+    return [
+      "### Environment",
+      `- **OpenPlay Version:** v${version}`,
+      `- **OS / Arch:** ${os} (${arch})${pkg}`,
+    ].join("\n");
+  };
+
+  const handleOpenFeedbackOnGitHub = () => {
+    const isBug = feedbackType === "bug";
+    const label = isBug ? "bug" : "enhancement";
+    const prefix = isBug ? "[Bug]: " : "[Feature]: ";
+    const title = feedbackTitle.trim() ? `${prefix}${feedbackTitle.trim()}` : prefix;
+
+    const sections: string[] = [];
+    if (isBug) {
+      sections.push("### Description");
+      sections.push(feedbackBody.trim() || "_Describe what went wrong and how to reproduce it._");
+    } else {
+      sections.push("### Feature Summary");
+      sections.push(feedbackBody.trim() || "_Describe the feature or improvement you'd like to see._");
+    }
+    if (includeSystemInfo) {
+      sections.push("");
+      sections.push(buildSystemInfoMarkdown());
+    }
+
+    const params = new URLSearchParams({
+      labels: label,
+      title,
+      body: sections.join("\n"),
+    });
+    openUrl(`https://github.com/Screamycat/OpenPlay/issues/new?${params.toString()}`);
+  };
+
+  const handleCopyDiagnostics = async () => {
+    try {
+      await navigator.clipboard.writeText(buildSystemInfoMarkdown());
+      setCopiedDiagnostics(true);
+      setTimeout(() => setCopiedDiagnostics(false), 2000);
+    } catch {
+      // ignore clipboard error
     }
   };
 
@@ -291,6 +397,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     { id: "appearance", label: "Appearance", icon: Palette },
     { id: "playback", label: "Playback & Media", icon: PlaySquare },
     { id: "controller", label: "Controller", icon: Gamepad2 },
+    { id: "console", label: "Console Mode", icon: Tv },
     { id: "linux", label: "Linux", icon: Terminal },
     { id: "apis", label: "APIs & Services", icon: KeyRound },
     { id: "backup", label: "Backups & Data", icon: Archive },
@@ -1498,6 +1605,371 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               );
             })()}
 
+            {/* Console Mode Tab */}
+            {activeTab === "console" && (
+              <div className="space-y-5">
+                <div>
+                  <h3 className="text-xs font-bold text-white uppercase tracking-wider mb-1">
+                    Console Mode Experience
+                  </h3>
+                  <p className="text-[11px] text-zinc-400">
+                    Configure OpenPlay&apos;s fullscreen TV &amp; ultrawide console experience, display target, boot video, profile backdrop, and ambient audio.
+                  </p>
+                </div>
+
+                {/* Startup & Display Target */}
+                <div className="space-y-3 bg-white/[0.02] border border-white/5 rounded-xl p-4">
+                  <label className="flex items-center justify-between cursor-pointer group">
+                    <div className="space-y-0.5 pr-4">
+                      <div className="font-semibold text-zinc-200 group-hover:text-white transition-colors">
+                        Start Directly in Console Mode
+                      </div>
+                      <div className="text-[11px] text-zinc-500">
+                        Automatically enter fullscreen Console Mode whenever OpenPlay launches.
+                      </div>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={formConfig.start_in_console_mode ?? false}
+                      onChange={(e) =>
+                        updateField("start_in_console_mode", e.target.checked)
+                      }
+                      className="w-4 h-4 rounded bg-zinc-800 border-zinc-700 text-white accent-white cursor-pointer"
+                    />
+                  </label>
+
+                  <div className="border-t border-white/5" />
+
+                  {/* Target Display Selector */}
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="space-y-0.5">
+                      <div className="font-semibold text-zinc-200 flex items-center gap-1.5">
+                        <Monitor className="w-3.5 h-3.5 text-zinc-400" />
+                        <span>Target Display</span>
+                      </div>
+                      <div className="text-[11px] text-zinc-500">
+                        Force Console Mode to open fullscreen on a specific monitor or living-room TV.
+                      </div>
+                    </div>
+                    <select
+                      value={formConfig.console_display_id || "auto"}
+                      onChange={(e) => updateField("console_display_id", e.target.value)}
+                      className="px-3 py-1.5 rounded-xl bg-black/40 border border-white/15 text-xs text-white focus:outline-none cursor-pointer max-w-[240px]"
+                    >
+                      <option value="auto">Current Display (Auto)</option>
+                      {displays.map((d, idx) => (
+                        <option key={d.id} value={d.id}>
+                          {d.label || `Display ${idx + 1}`} — {d.width}×{d.height}
+                          {d.isPrimary ? " (Primary)" : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="border-t border-white/5" />
+
+                  <label className="flex items-center justify-between cursor-pointer group">
+                    <div className="space-y-0.5 pr-4">
+                      <div className="font-semibold text-zinc-200 group-hover:text-white transition-colors">
+                        Show Boot Splash Screen
+                      </div>
+                      <div className="text-[11px] text-zinc-500">
+                        Play the OpenPlay startup animation or your custom boot video when entering Console Mode.
+                      </div>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={formConfig.console_boot_splash_enabled ?? true}
+                      onChange={(e) =>
+                        updateField("console_boot_splash_enabled", e.target.checked)
+                      }
+                      className="w-4 h-4 rounded bg-zinc-800 border-zinc-700 text-white accent-white cursor-pointer"
+                    />
+                  </label>
+
+                  <div className="border-t border-white/5" />
+
+                  <label className="flex items-center justify-between cursor-pointer group">
+                    <div className="space-y-0.5 pr-4">
+                      <div className="font-semibold text-zinc-200 group-hover:text-white transition-colors">
+                        Auto-Sign In (Skip Profile Selection)
+                      </div>
+                      <div className="text-[11px] text-zinc-500">
+                        Jump straight to your library using the last active local profile.
+                      </div>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={formConfig.console_auto_sign_in ?? false}
+                      onChange={(e) =>
+                        updateField("console_auto_sign_in", e.target.checked)
+                      }
+                      className="w-4 h-4 rounded bg-zinc-800 border-zinc-700 text-white accent-white cursor-pointer"
+                    />
+                  </label>
+                </div>
+
+                {/* Custom Boot & Login Videos */}
+                <div className="space-y-4 bg-white/[0.02] border border-white/5 rounded-xl p-4">
+                  <div className="flex items-center space-x-2">
+                    <Film className="w-4 h-4 text-zinc-400" />
+                    <span className="font-bold text-zinc-100">Custom Motion &amp; Boot Videos</span>
+                  </div>
+
+                  {/* Custom Boot Video */}
+                  <div className="space-y-1.5">
+                    <div className="text-xs font-semibold text-zinc-200">
+                      Boot Splash Video (.mp4 / .webm)
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        readOnly
+                        value={
+                          formConfig.console_boot_video_path ||
+                          DEFAULT_CONSOLE_BOOT_VIDEO
+                        }
+                        placeholder="Using preinstalled OpenPlay_Console_2K.mp4"
+                        className="flex-1 px-3 py-2 rounded-xl bg-black/30 border border-white/10 text-xs text-zinc-300 placeholder-zinc-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const picked = await invoke<string | null>("select_file", {
+                            filter: ".mp4,.webm,.mkv,.mov",
+                          });
+                          if (picked) updateField("console_boot_video_path", picked);
+                        }}
+                        className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 text-xs font-semibold text-white flex items-center space-x-1.5 cursor-pointer"
+                      >
+                        <FolderOpen className="w-3.5 h-3.5" />
+                        <span>Browse</span>
+                      </button>
+                      {formConfig.console_boot_video_path &&
+                        formConfig.console_boot_video_path !== DEFAULT_CONSOLE_BOOT_VIDEO && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              updateField(
+                                "console_boot_video_path",
+                                DEFAULT_CONSOLE_BOOT_VIDEO
+                              )
+                            }
+                            className="p-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 text-zinc-300 cursor-pointer"
+                            title="Restore preinstalled OpenPlay_Console_2K.mp4"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                    </div>
+                  </div>
+
+                  {/* Preinstalled & Custom Login Screen Moving Backgrounds */}
+                  <div className="space-y-2.5 pt-2 border-t border-white/5">
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <div className="text-xs font-semibold text-zinc-200">
+                          Profile Screen Moving Background
+                        </div>
+                        <div className="text-[11px] text-zinc-500">
+                          Pick one of OpenPlay&apos;s 9 preinstalled login loop videos or browse for your own
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const picked = await invoke<string | null>("select_file", {
+                            filter: ".mp4,.webm,.mkv,.mov",
+                          });
+                          if (picked) updateField("console_login_bg_video_path", picked);
+                        }}
+                        className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 text-xs font-semibold text-white flex items-center space-x-1.5 cursor-pointer shrink-0"
+                      >
+                        <FolderOpen className="w-3.5 h-3.5" />
+                        <span>Browse Custom...</span>
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-2.5">
+                      {BUILTIN_CONSOLE_LOGIN_VIDEOS.map((preset) => {
+                        const currentPath =
+                          formConfig.console_login_bg_video_path ||
+                          DEFAULT_CONSOLE_LOGIN_VIDEO;
+                        const isSelected = currentPath === preset.path;
+                        const previewSrc = resolveImageSrc(preset.path);
+                        return (
+                          <button
+                            key={preset.id}
+                            type="button"
+                            onClick={() =>
+                              updateField("console_login_bg_video_path", preset.path)
+                            }
+                            className={`group relative rounded-xl overflow-hidden border text-left transition-all cursor-pointer bg-black/40 ${
+                              isSelected
+                                ? "border-white ring-1 ring-white shadow-lg"
+                                : "border-white/10 hover:border-white/35"
+                            }`}
+                          >
+                            <div className="aspect-video w-full bg-black overflow-hidden relative">
+                              {previewSrc && (
+                                <video
+                                  src={previewSrc}
+                                  autoPlay
+                                  loop
+                                  muted
+                                  playsInline
+                                  preload="metadata"
+                                  className="w-full h-full object-cover"
+                                />
+                              )}
+                              {isSelected && (
+                                <div className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-white text-slate-950 flex items-center justify-center shadow">
+                                  <Check className="w-3 h-3 stroke-[3]" />
+                                </div>
+                              )}
+                            </div>
+                            <div className="px-2.5 py-1.5 text-[11px] font-semibold text-zinc-200 truncate bg-black/60">
+                              {preset.label}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Audio Cues & Ambient Background Music */}
+                <div className="space-y-3 bg-white/[0.02] border border-white/5 rounded-xl p-4">
+                  <label className="flex items-center justify-between cursor-pointer group">
+                    <div className="space-y-0.5 pr-4">
+                      <div className="font-semibold text-zinc-200 group-hover:text-white transition-colors flex items-center gap-2">
+                        <Volume2 className="w-4 h-4 text-zinc-400" />
+                        <span>Subtle Console UI Sounds</span>
+                      </div>
+                      <div className="text-[11px] text-zinc-500">
+                        Play gentle synthesized sound cues for navigation, tabs, and launching games (auto-muted while in-game).
+                      </div>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={formConfig.console_ui_sounds ?? true}
+                      onChange={(e) =>
+                        updateField("console_ui_sounds", e.target.checked)
+                      }
+                      className="w-4 h-4 rounded bg-zinc-800 border-zinc-700 text-white accent-white cursor-pointer"
+                    />
+                  </label>
+
+                  {formConfig.console_ui_sounds !== false && (
+                    <div className="pt-2 border-t border-white/5 space-y-1.5">
+                      <div className="flex items-center justify-between text-[11px]">
+                        <span className="text-zinc-400 font-medium">UI Sound Volume</span>
+                        <span className="font-mono text-zinc-200">
+                          {Math.round((formConfig.console_ui_volume ?? 0.45) * 100)}%
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min={0}
+                        max={1}
+                        step={0.05}
+                        value={formConfig.console_ui_volume ?? 0.45}
+                        onChange={(e) =>
+                          updateField("console_ui_volume", parseFloat(e.target.value))
+                        }
+                        className="w-full accent-white cursor-pointer"
+                      />
+                    </div>
+                  )}
+
+                  <div className="border-t border-white/5" />
+
+                  {/* Background Music */}
+                  <label className="flex items-center justify-between cursor-pointer group">
+                    <div className="space-y-0.5 pr-4">
+                      <div className="font-semibold text-zinc-200 group-hover:text-white transition-colors flex items-center gap-2">
+                        <Music className="w-4 h-4 text-zinc-400" />
+                        <span>Subtle Background Music</span>
+                      </div>
+                      <div className="text-[11px] text-zinc-500">
+                        Plays calm ambient console music in the background (auto-pauses when a game launches or a trailer plays).
+                      </div>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={formConfig.console_bg_music_enabled ?? true}
+                      onChange={(e) =>
+                        updateField("console_bg_music_enabled", e.target.checked)
+                      }
+                      className="w-4 h-4 rounded bg-zinc-800 border-zinc-700 text-white accent-white cursor-pointer"
+                    />
+                  </label>
+
+                  {formConfig.console_bg_music_enabled !== false && (
+                    <div className="pt-2 border-t border-white/5 space-y-3">
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between text-[11px]">
+                          <span className="text-zinc-400 font-medium">Music Volume</span>
+                          <span className="font-mono text-zinc-200">
+                            {Math.round((formConfig.console_bg_music_volume ?? 0.25) * 100)}%
+                          </span>
+                        </div>
+                        <input
+                          type="range"
+                          min={0}
+                          max={1}
+                          step={0.05}
+                          value={formConfig.console_bg_music_volume ?? 0.25}
+                          onChange={(e) =>
+                            updateField("console_bg_music_volume", parseFloat(e.target.value))
+                          }
+                          className="w-full accent-white cursor-pointer"
+                        />
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <div className="text-[11px] font-semibold text-zinc-300">
+                          Custom Background Music Track (Optional: .mp3 / .ogg / .wav / .flac)
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            readOnly
+                            value={formConfig.console_bg_music_path || ""}
+                            placeholder="Using built-in calm ambient console synth"
+                            className="flex-1 px-3 py-2 rounded-xl bg-black/30 border border-white/10 text-xs text-zinc-300 placeholder-zinc-500"
+                          />
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const picked = await invoke<string | null>("select_file", {
+                                filter: ".mp3,.ogg,.wav,.flac,.m4a,.opus",
+                              });
+                              if (picked) updateField("console_bg_music_path", picked);
+                            }}
+                            className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 text-xs font-semibold text-white flex items-center space-x-1.5 cursor-pointer"
+                          >
+                            <FolderOpen className="w-3.5 h-3.5" />
+                            <span>Browse</span>
+                          </button>
+                          {formConfig.console_bg_music_path && (
+                            <button
+                              type="button"
+                              onClick={() => updateField("console_bg_music_path", undefined)}
+                              className="p-2 rounded-xl bg-red-500/15 hover:bg-red-500/25 border border-red-500/25 text-red-300 cursor-pointer"
+                              title="Reset to built-in ambient music"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* 5. Backups & Data Tab */}
             {activeTab === "backup" && (
               <div className="space-y-4">
@@ -1586,15 +2058,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       <div>
                         <div className="font-extrabold text-sm text-white flex items-center space-x-2">
                           <span>OpenPlay</span>
-                          <span
-                            className="text-[10px] px-2 py-0.5 rounded-full font-mono font-bold text-white border"
-                            style={{
-                              backgroundColor: "color-mix(in srgb, var(--app-accent-color, #783efe) 25%, transparent)",
-                              borderColor: "color-mix(in srgb, var(--app-accent-color, #783efe) 50%, transparent)",
-                            }}
-                          >
-                            v{updateResult?.current_version || "0.1.1"}
-                          </span>
+                          {(updateResult?.current_version || appVersion) && (
+                            <span
+                              className="text-[10px] px-2 py-0.5 rounded-full font-mono font-bold text-white border"
+                              style={{
+                                backgroundColor: "color-mix(in srgb, var(--app-accent-color, #783efe) 25%, transparent)",
+                                borderColor: "color-mix(in srgb, var(--app-accent-color, #783efe) 50%, transparent)",
+                              }}
+                            >
+                              v{updateResult?.current_version || appVersion}
+                            </span>
+                          )}
                         </div>
                         <div className="text-[11px] text-zinc-400">
                           Cross-platform game library & launcher
@@ -1850,12 +2324,128 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   )}
                 </div>
 
+                {/* Feedback & Bug Reports Section */}
+                <div className="bg-white/[0.02] border border-white/5 rounded-xl p-4 space-y-3.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <h4 className="text-xs font-bold text-white">Feedback & Bug Reports</h4>
+                      <p className="text-[11px] text-zinc-400">
+                        Report an issue or suggest a feature — opens a pre-filled GitHub issue.
+                      </p>
+                    </div>
+                    <div className="flex items-center bg-black/40 border border-white/10 rounded-lg p-0.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setFeedbackType("bug")}
+                        className={`px-2.5 py-1 rounded-md text-[11px] font-semibold flex items-center space-x-1.5 transition-colors cursor-pointer ${
+                          feedbackType === "bug"
+                            ? "text-white shadow-sm"
+                            : "text-zinc-400 hover:text-zinc-200"
+                        }`}
+                        style={
+                          feedbackType === "bug"
+                            ? { backgroundColor: "var(--app-accent-color, #783efe)" }
+                            : undefined
+                        }
+                      >
+                        <Bug className="w-3 h-3" />
+                        <span>Bug</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setFeedbackType("feature")}
+                        className={`px-2.5 py-1 rounded-md text-[11px] font-semibold flex items-center space-x-1.5 transition-colors cursor-pointer ${
+                          feedbackType === "feature"
+                            ? "text-white shadow-sm"
+                            : "text-zinc-400 hover:text-zinc-200"
+                        }`}
+                        style={
+                          feedbackType === "feature"
+                            ? { backgroundColor: "var(--app-accent-color, #783efe)" }
+                            : undefined
+                        }
+                      >
+                        <Lightbulb className="w-3 h-3" />
+                        <span>Feature</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2.5">
+                    <input
+                      type="text"
+                      value={feedbackTitle}
+                      onChange={(e) => setFeedbackTitle(e.target.value)}
+                      placeholder={
+                        feedbackType === "bug"
+                          ? "Short summary of the bug..."
+                          : "Short summary of your feature idea..."
+                      }
+                      className="w-full px-3 py-2 rounded-lg bg-black/40 border border-white/10 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-white/25 transition-colors"
+                    />
+                    <textarea
+                      rows={3}
+                      value={feedbackBody}
+                      onChange={(e) => setFeedbackBody(e.target.value)}
+                      placeholder={
+                        feedbackType === "bug"
+                          ? "What happened, and how can it be reproduced?"
+                          : "Describe what you'd like added and how it would help..."
+                      }
+                      className="w-full px-3 py-2 rounded-lg bg-black/40 border border-white/10 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-white/25 transition-colors resize-none"
+                    />
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
+                    <label className="flex items-center space-x-2 text-[11px] text-zinc-400 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={includeSystemInfo}
+                        onChange={(e) => setIncludeSystemInfo(e.target.checked)}
+                        className="rounded border-white/20 bg-black/40 accent-[var(--app-accent-color,#783efe)]"
+                      />
+                      <span>
+                        Include OS & version (
+                        {systemInfo ? `${systemInfo.os} / v${systemInfo.version}` : `v${appVersion || "1.0.0"}`}
+                        )
+                      </span>
+                    </label>
+
+                    <div className="flex items-center space-x-2">
+                      <button
+                        type="button"
+                        onClick={handleCopyDiagnostics}
+                        className="px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-[11px] font-semibold text-zinc-300 hover:text-white flex items-center space-x-1.5 transition-colors cursor-pointer"
+                      >
+                        {copiedDiagnostics ? (
+                          <Check className="w-3 h-3 text-emerald-400" />
+                        ) : (
+                          <Copy className="w-3 h-3 text-zinc-400" />
+                        )}
+                        <span>{copiedDiagnostics ? "Copied" : "Copy Info"}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleOpenFeedbackOnGitHub}
+                        className="px-3 py-1.5 rounded-lg text-xs font-bold text-white flex items-center space-x-1.5 transition-all cursor-pointer shadow-sm active:scale-95"
+                        style={{
+                          backgroundColor: "var(--app-accent-color, #783efe)",
+                        }}
+                      >
+                        <Send className="w-3 h-3" />
+                        <span>Open on GitHub</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
                 {/* Offline-First Architecture Card */}
                 <div className="bg-white/[0.02] border border-white/5 rounded-xl p-4 space-y-3 text-[11px] text-zinc-400">
                   <div className="flex items-start space-x-2.5">
                     <Terminal className="w-4 h-4 text-zinc-400 shrink-0 mt-0.5" />
                     <div>
-                      <strong className="text-zinc-200">Offline-First Architecture:</strong> Built on Tauri v2 + Rust with local SQLite storage. All metadata, artwork links, and game configurations remain exclusively on your device.
+                      <strong className="text-zinc-200">Offline-First Architecture:</strong> Built on Electron + Rust with local SQLite storage. All metadata, artwork links, and game configurations remain exclusively on your device.
                     </div>
                   </div>
                 </div>

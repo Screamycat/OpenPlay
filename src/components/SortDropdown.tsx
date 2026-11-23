@@ -115,7 +115,7 @@ export const SortDropdown: React.FC<SortDropdownProps> = ({
       {isOpen && (
         <div
           data-gamepad-zone="popover"
-          className="absolute left-0 top-full mt-2 w-64 theme-panel-surface backdrop-blur-2xl border border-white/10 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.85)] p-2.5 z-50 text-xs text-zinc-200 animate-in fade-in slide-in-from-top-2 duration-150 select-none space-y-3"
+          className="titlebar-no-drag absolute left-0 top-full mt-2 w-64 theme-panel-surface backdrop-blur-2xl border border-white/10 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.85)] p-2.5 z-50 text-xs text-zinc-200 animate-in fade-in slide-in-from-top-2 duration-150 select-none space-y-3"
         >
           {/* Section 1: Sort Criteria */}
           <div>

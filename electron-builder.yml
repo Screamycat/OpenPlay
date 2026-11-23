@@ -1,0 +1,56 @@
+appId: com.openplay.app
+productName: OpenPlay
+copyright: Copyright © 2026 ScreamyCat
+
+directories:
+  output: release-dist
+
+files:
+  - dist/**/*
+  - dist-electron/**/*
+  - package.json
+
+extraResources:
+  - from: staging-bin
+    to: bin
+    filter:
+      - "**/*"
+  - from: resources/themes
+    to: themes
+    filter:
+      - "**/*"
+  - from: src-tauri/icons
+    to: icons
+    filter:
+      - "*.png"
+      - "*.ico"
+
+asar: true
+
+win:
+  icon: src-tauri/icons/icon.ico
+  target:
+    - target: dir
+      arch:
+        - x64
+
+linux:
+  icon: src-tauri/icons/icon.png
+  executableName: openplay
+  category: Game
+  desktop:
+    entry:
+      Name: OpenPlay
+      Comment: Open-source, offline-first cross-platform game launcher
+      StartupWMClass: openplay
+      Categories: Game;
+  target:
+    - target: dir
+      arch:
+        - x64
+    - target: AppImage
+      arch:
+        - x64
+    - target: deb
+      arch:
+        - x64

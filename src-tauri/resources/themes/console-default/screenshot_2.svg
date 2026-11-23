@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 540" fill="none">
+  <rect width="960" height="540" fill="#06070d"/>
+  <rect width="960" height="270" fill="#171333" fill-opacity="0.75"/>
+  <!-- Cinematic Game Details Preview -->
+  <rect x="56" y="88" width="146" height="219" rx="14" fill="#232842" stroke="#ffffff" stroke-opacity="0.25" stroke-width="2"/>
+  <rect x="228" y="102" width="320" height="40" rx="8" fill="#ffffff" fill-opacity="0.92"/>
+  <rect x="228" y="156" width="210" height="12" rx="6" fill="#94a3b8" fill-opacity="0.6"/>
+  <rect x="228" y="190" width="150" height="40" rx="20" fill="#ffffff"/>
+  <rect x="392" y="190" width="40" height="40" rx="20" fill="#ffffff" fill-opacity="0.12"/>
+  <rect x="444" y="190" width="40" height="40" rx="20" fill="#ffffff" fill-opacity="0.12"/>
+  <!-- Tabs & Metadata Panels -->
+  <rect x="56" y="340" width="76" height="8" rx="4" fill="#783efe"/>
+  <rect x="152" y="340" width="88" height="8" rx="4" fill="#ffffff" fill-opacity="0.25"/>
+  <rect x="260" y="340" width="68" height="8" rx="4" fill="#ffffff" fill-opacity="0.25"/>
+  <rect x="56" y="368" width="540" height="130" rx="16" fill="#ffffff" fill-opacity="0.05" stroke="#ffffff" stroke-opacity="0.1"/>
+  <rect x="616" y="368" width="288" height="130" rx="16" fill="#ffffff" fill-opacity="0.05" stroke="#ffffff" stroke-opacity="0.1"/>
+</svg>

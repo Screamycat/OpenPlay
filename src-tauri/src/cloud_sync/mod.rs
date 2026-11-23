@@ -8,7 +8,6 @@ use chrono::{Local, TimeZone};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -256,21 +255,28 @@ fn hash_directory(dir: &Path) -> Result<(String, String), String> {
 
     let mut hasher = Sha256::new();
     let mut latest_mtime: Option<std::time::SystemTime> = None;
+    let mut buf = [0u8; 64 * 1024];
 
     for (rel_path, full_path) in &files {
-        let bytes = fs::read(full_path).map_err(|e| e.to_string())?;
+        let meta = fs::metadata(full_path).map_err(|e| e.to_string())?;
         hasher.update(rel_path.as_bytes());
         hasher.update(b"\0");
-        hasher.update((bytes.len() as u64).to_le_bytes());
-        hasher.update(&bytes);
+        hasher.update(meta.len().to_le_bytes());
 
-        if let Ok(meta) = fs::metadata(full_path) {
-            if let Ok(modified) = meta.modified() {
-                latest_mtime = Some(match latest_mtime {
-                    Some(prev) => std::cmp::max(prev, modified),
-                    None => modified,
-                });
+        let mut file = fs::File::open(full_path).map_err(|e| e.to_string())?;
+        loop {
+            let n = std::io::Read::read(&mut file, &mut buf).map_err(|e| e.to_string())?;
+            if n == 0 {
+                break;
             }
+            hasher.update(&buf[..n]);
+        }
+
+        if let Ok(modified) = meta.modified() {
+            latest_mtime = Some(match latest_mtime {
+                Some(prev) => std::cmp::max(prev, modified),
+                None => modified,
+            });
         }
     }
 
@@ -299,9 +305,9 @@ fn export_directory_to_zip(src_dir: &Path, dest_zip: &Path) -> Result<(), String
             .compression_method(zip::CompressionMethod::Deflated);
 
         for (rel_path, full_path) in &files {
-            let bytes = fs::read(full_path).map_err(|e| e.to_string())?;
             zip.start_file(rel_path, options).map_err(|e| e.to_string())?;
-            zip.write_all(&bytes).map_err(|e| e.to_string())?;
+            let mut src_file = fs::File::open(full_path).map_err(|e| e.to_string())?;
+            std::io::copy(&mut src_file, &mut zip).map_err(|e| e.to_string())?;
         }
 
         zip.finish().map_err(|e| e.to_string())?;
@@ -421,14 +427,21 @@ fn export_artwork_if_local(
 
     let is_already_hex_hash = stem.len() == 64 && stem.chars().all(|c| c.is_ascii_hexdigit());
 
-    let (art_filename, bytes_opt) = if is_already_hex_hash {
-        (format!("{}.{}", stem, ext), None)
+    let art_filename = if is_already_hex_hash {
+        format!("{}.{}", stem, ext)
     } else {
-        let bytes = fs::read(local_file).ok()?;
+        let mut file = fs::File::open(local_file).ok()?;
         let mut hasher = Sha256::new();
-        hasher.update(&bytes);
+        let mut buf = [0u8; 64 * 1024];
+        loop {
+            let n = std::io::Read::read(&mut file, &mut buf).ok()?;
+            if n == 0 {
+                break;
+            }
+            hasher.update(&buf[..n]);
+        }
         let hash_hex = hex::encode(hasher.finalize());
-        (format!("{}.{}", hash_hex, ext), Some(bytes))
+        format!("{}.{}", hash_hex, ext)
     };
 
     let art_dir = sync_dir.join("custom_artwork");
@@ -436,11 +449,7 @@ fn export_artwork_if_local(
 
     if !art_dest.exists() {
         let _ = fs::create_dir_all(&art_dir);
-        let bytes = match bytes_opt {
-            Some(b) => b,
-            None => fs::read(local_file).ok()?,
-        };
-        let _ = fs::write(&art_dest, &bytes);
+        let _ = fs::copy(local_file, &art_dest);
     }
 
     Some(format!("custom://{}", art_filename))

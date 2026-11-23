@@ -30,6 +30,24 @@ function extractYear(releaseDate?: string): number | null {
   return match ? parseInt(match[1], 10) : null;
 }
 
+const KNOWN_BARE_TITLE_REBOOTS = new Set([
+  "prey",
+  "godofwar",
+  "thief",
+  "simcity",
+  "starwarsbattlefront",
+  "callofdutymodernwarfare",
+  "modernwarfare",
+  "shadowwarrior",
+  "killerinstinct",
+  "mortalkombat",
+  "gauntlet",
+  "tombraider",
+  "doom",
+  "saintsrow",
+  "hitman",
+]);
+
 /**
  * Strict safety check: determines if two game instances represent the same title across platforms.
  */
@@ -47,18 +65,17 @@ export function canMergeGames(
   if (!key1 || !key2 || key1 !== key2) return false;
 
   // Franchise reboot guard:
-  // Across multi-store catalogs (Steam, Epic Games Store, GOG), live-service and back-catalog titles
-  // are frequently added years apart (e.g. Warframe 2013 on Steam vs 2020 on Epic, Destiny 2 2019 on Steam vs 2021 on Epic).
-  // Only guard against genuine generational reboots with identical bare titles (e.g. Doom 1993 vs Doom 2016, Prey 2006 vs Prey 2017)
-  // where release dates are 8+ years apart and lack a distinct number or roman numeral identifier.
+  // Digital storefront ports of classic console games (e.g. Banjo-Kazooie 1998 N64 vs 2010 XBLA)
+  // often have ~10-14 year storefront listing gaps. Only block automatic merging for known
+  // bare-title reboots (e.g. Prey 2006 vs 2017, God of War 2005 vs 2018, Doom 1993 vs 2016)
+  // or very large >=15 year gaps without a distinct number / roman numeral.
   const y1 = extractYear(g1.release_date);
   const y2 = extractYear(g2.release_date);
   if (y1 !== null && y2 !== null) {
-    if (Math.abs(y1 - y2) >= 8) {
-      const hasDistinctIdentifier = /\d+|(\b(ii|iii|iv|v|vi|vii|viii|ix|x)\b)/i.test(g1.title);
-      if (!hasDistinctIdentifier) {
-        return false;
-      }
+    const yearDiff = Math.abs(y1 - y2);
+    const hasDistinctIdentifier = /\d+|(\b(ii|iii|iv|v|vi|vii|viii|ix|x)\b)/i.test(g1.title);
+    if (!hasDistinctIdentifier && (yearDiff >= 15 || (yearDiff >= 8 && KNOWN_BARE_TITLE_REBOOTS.has(key1)))) {
+      return false;
     }
   }
 
@@ -256,14 +273,6 @@ export function findMergeCandidate(
 
     const otherKey = normalizeTitleForMerge(other.title);
     if (otherKey !== targetKey) return false;
-
-    // Check year compatibility using reboot guard
-    const y1 = extractYear(game.release_date);
-    const y2 = extractYear(other.release_date);
-    if (y1 !== null && y2 !== null && Math.abs(y1 - y2) >= 8) {
-      const hasDistinctIdentifier = /\d+|(\b(ii|iii|iv|v|vi|vii|viii|ix|x)\b)/i.test(game.title);
-      if (!hasDistinctIdentifier) return false;
-    }
 
     return true;
   });

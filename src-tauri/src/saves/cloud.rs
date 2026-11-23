@@ -198,12 +198,23 @@ pub fn compute_save_paths_digest(paths: &[PathBuf]) -> Result<(Option<String>, u
         return Ok((None, 0, 0));
     }
     let mut hasher = Sha256::new();
+    let mut buf = [0u8; 64 * 1024];
     for item in &files {
-        let bytes = fs::read(&item.disk_path).map_err(|e| e.to_string())?;
+        let file_len = fs::metadata(&item.disk_path)
+            .map_err(|e| e.to_string())?
+            .len();
         hasher.update(item.zip_rel_path.as_bytes());
         hasher.update(b"\0");
-        hasher.update((bytes.len() as u64).to_le_bytes());
-        hasher.update(&bytes);
+        hasher.update(file_len.to_le_bytes());
+
+        let mut f = fs::File::open(&item.disk_path).map_err(|e| e.to_string())?;
+        loop {
+            let n = std::io::Read::read(&mut f, &mut buf).map_err(|e| e.to_string())?;
+            if n == 0 {
+                break;
+            }
+            hasher.update(&buf[..n]);
+        }
     }
     Ok((Some(hex::encode(hasher.finalize())), total_bytes, files.len()))
 }
@@ -234,16 +245,27 @@ fn write_save_zip_atomic(
             zip.write_all(&manifest_bytes).map_err(|e| e.to_string())?;
         }
 
+        let mut buf = [0u8; 64 * 1024];
         for item in files {
-            let bytes = fs::read(&item.disk_path).map_err(|e| e.to_string())?;
+            let file_len = fs::metadata(&item.disk_path)
+                .map_err(|e| e.to_string())?
+                .len();
             hasher.update(item.zip_rel_path.as_bytes());
             hasher.update(b"\0");
-            hasher.update((bytes.len() as u64).to_le_bytes());
-            hasher.update(&bytes);
+            hasher.update(file_len.to_le_bytes());
 
             zip.start_file(&item.zip_rel_path, options)
                 .map_err(|e| e.to_string())?;
-            zip.write_all(&bytes).map_err(|e| e.to_string())?;
+
+            let mut f = fs::File::open(&item.disk_path).map_err(|e| e.to_string())?;
+            loop {
+                let n = std::io::Read::read(&mut f, &mut buf).map_err(|e| e.to_string())?;
+                if n == 0 {
+                    break;
+                }
+                hasher.update(&buf[..n]);
+                zip.write_all(&buf[..n]).map_err(|e| e.to_string())?;
+            }
         }
 
         zip.finish().map_err(|e| e.to_string())?;

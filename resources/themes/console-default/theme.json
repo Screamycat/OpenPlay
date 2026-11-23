@@ -1,0 +1,96 @@
+{
+  "id": "console-default",
+  "mode": "console",
+  "name": "OpenPlay Console",
+  "version": "1.0.0",
+  "author": "OpenPlay Developers",
+  "description": "The official built-in fullscreen console theme for OpenPlay. Engineered for both 16:9 living-room TVs and 32:9 ultrawide displays with dynamic hero backdrops, Steam-ratio vertical box art, and fluid carousel-to-grid transitions.",
+  "icon": "icon.svg",
+  "screenshots": [
+    "screenshot_1.svg",
+    "screenshot_2.svg",
+    "screenshot_3.svg"
+  ],
+  "css": "theme.css",
+  "colors": {
+    "accent": "#783efe",
+    "panel_tint": "#0b0d14",
+    "background": "#05060a"
+  },
+  "settings": [
+    {
+      "id": "accent_color",
+      "label": "Console Accent Color",
+      "type": "color",
+      "default": "#783efe",
+      "category": "Aesthetics & Colors",
+      "description": "Primary highlight color for focused game covers, active filter presets, and play buttons in Console Mode."
+    },
+    {
+      "id": "background_dim",
+      "label": "Hero Backdrop Dimming",
+      "type": "number",
+      "min": 0.15,
+      "max": 0.85,
+      "step": 0.05,
+      "default": 0.45,
+      "category": "Aesthetics & Colors",
+      "description": "Darkness vignette overlaid on full-bleed hero backgrounds for crisp text readability."
+    },
+    {
+      "id": "background_blur",
+      "label": "Hero Backdrop Blur (px)",
+      "type": "number",
+      "min": 0,
+      "max": 32,
+      "step": 2,
+      "default": 0,
+      "category": "Aesthetics & Colors",
+      "description": "Optional blur applied to hero backgrounds on the Console Home screen (0px keeps sharp cinematic art)."
+    },
+    {
+      "id": "default_home_view",
+      "label": "Default Console Home Layout",
+      "type": "select",
+      "options": ["Horizontal Carousel", "Expanded Grid"],
+      "default": "Horizontal Carousel",
+      "category": "Layout & Display",
+      "description": "Choose whether Console Mode opens on the Horizontal Carousel or directly in the Expanded Cover Grid."
+    },
+    {
+      "id": "safe_max_width",
+      "label": "Ultrawide Content Width",
+      "type": "select",
+      "options": ["Balanced (1920px)", "Wide (2200px)", "Full Panorama (100%)"],
+      "default": "Wide (2200px)",
+      "category": "Layout & Display",
+      "description": "Controls foreground UI safe-zone width on 21:9 and 32:9 ultrawide monitors while hero backdrops always fill edge-to-edge."
+    },
+    {
+      "id": "card_scale",
+      "label": "Cover Card Size",
+      "type": "select",
+      "options": ["Compact", "Standard", "Large"],
+      "default": "Standard",
+      "category": "Game Cards & Posters",
+      "description": "Scale of vertical 2:3 Steam-ratio box art cards in the carousel and fullscreen grid."
+    },
+    {
+      "id": "card_border_radius",
+      "label": "Card Corner Radius",
+      "type": "select",
+      "options": ["Sleek (8px)", "Rounded (16px)", "Ultra Rounded (22px)"],
+      "default": "Rounded (16px)",
+      "category": "Game Cards & Posters",
+      "description": "Corner roundness for game cover cards in Console Mode."
+    },
+    {
+      "id": "selection_glow",
+      "label": "Focused Cover Glow & Zoom",
+      "type": "boolean",
+      "default": true,
+      "category": "Game Cards & Posters",
+      "description": "Applies luminous accent glow and smooth elevation zoom to the currently focused game cover."
+    }
+  ]
+}

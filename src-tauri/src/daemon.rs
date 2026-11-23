@@ -20,21 +20,22 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 #[derive(Clone)]
 pub struct DaemonEmitter {
-    sender: tokio::sync::mpsc::UnboundedSender<String>,
+    sender: tokio::sync::mpsc::Sender<String>,
 }
 
 impl DaemonEmitter {
-    pub fn new(sender: tokio::sync::mpsc::UnboundedSender<String>) -> Self {
+    pub fn new(sender: tokio::sync::mpsc::Sender<String>) -> Self {
         Self { sender }
     }
 
     pub fn emit<T: Serialize + ?Sized>(&self, event: &str, payload: &T) {
-        if let Ok(val) = serde_json::to_value(payload) {
-            let msg = serde_json::json!({
-                "event": event,
-                "payload": val,
-            });
-            let _ = self.sender.send(msg.to_string());
+        #[derive(Serialize)]
+        struct EventEnvelope<'a, P: Serialize + ?Sized> {
+            event: &'a str,
+            payload: &'a P,
+        }
+        if let Ok(json_line) = serde_json::to_string(&EventEnvelope { event, payload }) {
+            let _ = self.sender.try_send(json_line);
         }
     }
 }
@@ -66,8 +67,9 @@ pub async fn run_daemon() {
 
     eprintln!("[openplay-core] Initializing SQLite database...");
     let db = Arc::new(Database::new().expect("Failed to initialize OpenPlay SQLite database"));
+    apply_installer_seed_if_present(&db);
 
-    let (stdout_tx, mut stdout_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let (stdout_tx, mut stdout_rx) = tokio::sync::mpsc::channel::<String>(256);
     let emitter = DaemonEmitter::new(stdout_tx.clone());
 
     // 1. Spawn dedicated stdout line-writer task
@@ -123,6 +125,59 @@ pub async fn run_daemon() {
         let gp_clone = native_gamepad.clone();
 
         tokio::spawn(async move {
+            // Fast-path direct JSON serialization for large library responses to avoid
+            // allocating a huge intermediate serde_json::Value DOM tree in RAM.
+            let direct_json: Option<Result<String, String>> = match req.method.as_str() {
+                "get_games" | "get_all_games" => Some(
+                    crate::sync_and_get_all_games_core(&db_clone)
+                        .and_then(|games| serde_json::to_string(&games).map_err(|e| e.to_string())),
+                ),
+                "get_games_page" => {
+                    let limit = req
+                        .params
+                        .get("limit")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(200) as usize;
+                    let offset = req
+                        .params
+                        .get("offset")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0) as usize;
+                    let include_heavy = req
+                        .params
+                        .get("includeHeavyFields")
+                        .or_else(|| req.params.get("include_heavy_fields"))
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    Some(
+                        crate::sync_and_get_games_page_core(&db_clone, limit, offset, include_heavy)
+                            .and_then(|page| serde_json::to_string(&page).map_err(|e| e.to_string())),
+                    )
+                }
+                _ => None,
+            };
+
+            if let Some(raw_res) = direct_json {
+                let json_line = match raw_res {
+                    Ok(raw_result) => match req.id {
+                        Some(id) => format!("{{\"id\":{},\"result\":{}}}", id, raw_result),
+                        None => format!("{{\"id\":null,\"result\":{}}}", raw_result),
+                    },
+                    Err(err) => {
+                        let resp = RpcResponse {
+                            id: req.id,
+                            result: None,
+                            error: Some(err),
+                        };
+                        serde_json::to_string(&resp).unwrap_or_default()
+                    }
+                };
+                if !json_line.is_empty() {
+                    let _ = stdout_tx_clone.send(json_line).await;
+                }
+                return;
+            }
+
             let res = handle_rpc_call(&req.method, req.params, &db_clone, &emitter_clone, &gp_clone).await;
             let resp = match res {
                 Ok(val) => RpcResponse {
@@ -138,12 +193,92 @@ pub async fn run_daemon() {
             };
 
             if let Ok(json_line) = serde_json::to_string(&resp) {
-                let _ = stdout_tx_clone.send(json_line);
+                let _ = stdout_tx_clone.send(json_line).await;
             }
         });
     }
 
     eprintln!("[openplay-core] Stdin closed (EOF). Shutting down daemon gracefully...");
+}
+
+/// Applies optional initial settings written by the OpenPlay custom installer wizard
+/// (`<data_dir>/OpenPlay/installer-seed.json`) non-destructively on first launch.
+fn apply_installer_seed_if_present(db: &Database) {
+    let seed_path = dirs::data_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("OpenPlay")
+        .join("installer-seed.json");
+
+    if !seed_path.exists() {
+        return;
+    }
+
+    let raw = match std::fs::read_to_string(&seed_path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[InstallerSeed] Failed to read seed file: {}", e);
+            return;
+        }
+    };
+
+    let seed: serde_json::Value = match serde_json::from_str(&raw) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("[InstallerSeed] Invalid JSON in seed file: {}", e);
+            let _ = std::fs::remove_file(&seed_path);
+            return;
+        }
+    };
+
+    let mut cfg = db.get_app_config().unwrap_or_default();
+    let mut changed = false;
+
+    let opt_str = |key: &str| -> Option<String> {
+        seed.get(key)
+            .and_then(|v| v.as_str())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+    };
+
+    if let Some(v) = opt_str("steamgriddb_api_key") {
+        cfg.steamgriddb_api_key = Some(v);
+        changed = true;
+    }
+    if let Some(v) = opt_str("retroachievements_username") {
+        cfg.retroachievements_username = Some(v);
+        changed = true;
+    }
+    if let Some(v) = opt_str("retroachievements_api_key") {
+        cfg.retroachievements_api_key = Some(v);
+        changed = true;
+    }
+    if let Some(v) = opt_str("igdb_client_id") {
+        cfg.igdb_client_id = Some(v);
+        changed = true;
+    }
+    if let Some(v) = opt_str("igdb_client_secret") {
+        cfg.igdb_client_secret = Some(v);
+        changed = true;
+    }
+    if let Some(v) = opt_str("cloud_sync_folder") {
+        cfg.cloud_sync_folder = Some(v);
+        cfg.cloud_sync_enabled = Some(true);
+        changed = true;
+    }
+    if let Some(b) = seed.get("start_in_console_mode").and_then(|v| v.as_bool()) {
+        cfg.start_in_console_mode = Some(b);
+        changed = true;
+    }
+
+    if changed {
+        if let Err(e) = db.save_app_config(&cfg) {
+            eprintln!("[InstallerSeed] Failed to save seeded config: {}", e);
+            return;
+        }
+        eprintln!("[InstallerSeed] Applied initial installer configuration successfully.");
+    }
+
+    let _ = std::fs::remove_file(&seed_path);
 }
 
 fn spawn_background_workers(db: Arc<Database>, emitter: DaemonEmitter) {
@@ -281,13 +416,39 @@ pub async fn handle_rpc_call(
 ) -> Result<serde_json::Value, String> {
     match method {
         "get_app_version" => {
-            Ok(serde_json::to_value("0.1.4").map_err(|e| e.to_string())?)
+            Ok(serde_json::to_value(env!("CARGO_PKG_VERSION")).map_err(|e| e.to_string())?)
+        }
+        "get_system_info" => {
+            Ok(serde_json::json!({
+                "version": env!("CARGO_PKG_VERSION"),
+                "os": std::env::consts::OS,
+                "arch": std::env::consts::ARCH,
+                "family": std::env::consts::FAMILY,
+                "is_appimage": std::env::var("APPIMAGE").is_ok(),
+            }))
         }
 
         // --- 1. Games & Library ---
         "get_games" | "get_all_games" => {
             let games = crate::sync_and_get_all_games_core(db)?;
             Ok(serde_json::to_value(games).map_err(|e| e.to_string())?)
+        }
+        "get_games_page" => {
+            let limit = params.get("limit").and_then(|v| v.as_u64()).unwrap_or(200) as usize;
+            let offset = params.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            let include_heavy = params
+                .get("includeHeavyFields")
+                .or_else(|| params.get("include_heavy_fields"))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let page = crate::sync_and_get_games_page_core(db, limit, offset, include_heavy)?;
+            Ok(serde_json::to_value(page).map_err(|e| e.to_string())?)
+        }
+        "get_game_by_id" => {
+            let game_id = get_str_param(&params, &["gameId", "game_id", "id"])
+                .ok_or_else(|| "Missing gameId".to_string())?;
+            let game = db.get_game_by_id(&game_id)?;
+            Ok(serde_json::to_value(game).map_err(|e| e.to_string())?)
         }
         "launch_game" => {
             let game_id = get_str_param(&params, &["gameId", "game_id"])
@@ -347,10 +508,8 @@ pub async fn handle_rpc_call(
             let game_id = get_str_param(&params, &["gameId", "game_id"])
                 .ok_or_else(|| "Missing gameId".to_string())?;
             let next_fav = db.toggle_favorite(&game_id)?;
-            if let Ok(all) = db.get_all_games() {
-                if let Some(updated) = all.into_iter().find(|g| g.id == game_id) {
-                    emitter.emit("game-updated", &updated);
-                }
+            if let Ok(Some(updated)) = db.get_game_by_id(&game_id) {
+                emitter.emit("game-updated", &updated);
             }
             cloud_sync::spawn_background_export(db.clone());
             Ok(serde_json::Value::Bool(next_fav))
@@ -361,10 +520,8 @@ pub async fn handle_rpc_call(
             let is_fav = params.get("isFavorite").or_else(|| params.get("is_favorite"))
                 .and_then(|v| v.as_bool()).unwrap_or(false);
             let _ = db.set_favorite(&game_id, is_fav)?;
-            if let Ok(all) = db.get_all_games() {
-                if let Some(updated) = all.into_iter().find(|g| g.id == game_id) {
-                    emitter.emit("game-updated", &updated);
-                }
+            if let Ok(Some(updated)) = db.get_game_by_id(&game_id) {
+                emitter.emit("game-updated", &updated);
             }
             cloud_sync::spawn_background_export(db.clone());
             Ok(serde_json::Value::Null)
@@ -373,8 +530,7 @@ pub async fn handle_rpc_call(
             let id = get_str_param(&params, &["id", "gameId", "game_id"])
                 .ok_or_else(|| "Missing game id".to_string())?;
             let hidden = params.get("hidden").and_then(|v| v.as_bool()).unwrap_or(false);
-            let all = db.get_all_games()?;
-            if let Some(mut game) = all.into_iter().find(|g| g.id == id) {
+            if let Some(mut game) = db.get_game_by_id(&id)? {
                 game.is_hidden = hidden;
                 game.updated_at = Some(chrono::Utc::now().to_rfc3339());
                 db.save_game_exact(&game)?;
@@ -416,8 +572,7 @@ pub async fn handle_rpc_call(
         "fetch_game_metadata" => {
             let game_id = get_str_param(&params, &["gameId", "game_id"])
                 .ok_or_else(|| "Missing gameId".to_string())?;
-            let all = db.get_all_games()?;
-            let mut game = all.into_iter().find(|g| g.id == game_id).ok_or_else(|| "Game not found".to_string())?;
+            let mut game = db.get_game_by_id(&game_id)?.ok_or_else(|| "Game not found".to_string())?;
             if game.source.eq_ignore_ascii_case("steam") {
                 if let Some(ref appid) = game.source_id {
                     if let Ok(meta) = SteamMetadataFetcher::fetch_metadata_for_appid(appid).await {
@@ -489,8 +644,7 @@ pub async fn handle_rpc_call(
         "apply_custom_artwork" => {
             let game_id = get_str_param(&params, &["gameId", "game_id"])
                 .ok_or_else(|| "Missing gameId".to_string())?;
-            let all = db.get_all_games()?;
-            let mut game = all.into_iter().find(|g| g.id == game_id).ok_or_else(|| "Game not found".to_string())?;
+            let mut game = db.get_game_by_id(&game_id)?.ok_or_else(|| "Game not found".to_string())?;
             if let Some(c) = get_str_param(&params, &["coverImage", "cover_image"]) {
                 if !c.trim().is_empty() { game.cover_image = Some(c); }
             }
@@ -739,8 +893,7 @@ pub async fn handle_rpc_call(
                 ("riot", "Riot Games", "RIOT"),
                 ("amazon", "Amazon Games", "AMZN"),
             ];
-            let all_games = db.get_all_games().unwrap_or_default();
-            let sources_in_db: HashSet<String> = all_games.iter().map(|g| g.source.trim().to_lowercase()).collect();
+            let sources_in_db: HashSet<String> = db.get_distinct_sources().unwrap_or_default().into_iter().collect();
             let mut items = Vec::new();
             for (p_id, p_name, p_badge) in providers {
                 let integ = db.get_integration(p_id).unwrap_or_default();
@@ -764,6 +917,34 @@ pub async fn handle_rpc_call(
                     });
                 }
             }
+
+            let cfg = db.get_app_config().unwrap_or_default();
+            if let Some(ref ra_user) = cfg.retroachievements_username {
+                if !ra_user.trim().is_empty() {
+                    items.push(ConnectedLibraryItem {
+                        id: "retroachievements".to_string(),
+                        name: "RetroAchievements".to_string(),
+                        category: "emulation".to_string(),
+                        badge: "RA".to_string(),
+                        is_authenticated: true,
+                        last_sync: None,
+                    });
+                }
+            }
+
+            if let Ok(consoles) = db.get_configured_consoles() {
+                for c in consoles {
+                    items.push(ConnectedLibraryItem {
+                        id: format!("console:{}", c.id),
+                        name: c.name,
+                        category: "emulation".to_string(),
+                        badge: c.manufacturer,
+                        is_authenticated: true,
+                        last_sync: None,
+                    });
+                }
+            }
+
             Ok(serde_json::to_value(items).map_err(|e| e.to_string())?)
         }
 
@@ -798,15 +979,14 @@ pub async fn handle_rpc_call(
             Ok(serde_json::to_value(profile).map_err(|e| e.to_string())?)
         }
         "get_hunter_profile" => {
-            let all = db.get_all_games()?;
+            let all = db.get_all_games_summary()?;
             let profile = db.get_hunter_profile(&all)?;
             Ok(serde_json::to_value(profile).map_err(|e| e.to_string())?)
         }
         "get_game_achievement_summary" => {
             let game_id = get_str_param(&params, &["gameId", "game_id"])
                 .ok_or_else(|| "Missing gameId".to_string())?;
-            let all = db.get_all_games()?;
-            let game = all.into_iter().find(|g| g.id == game_id).ok_or_else(|| "Game not found".to_string())?;
+            let game = db.get_game_by_id(&game_id)?.ok_or_else(|| "Game not found".to_string())?;
             let summary = db.get_game_achievement_summary(&game)?;
             Ok(serde_json::to_value(summary).map_err(|e| e.to_string())?)
         }
@@ -825,6 +1005,23 @@ pub async fn handle_rpc_call(
                 .ok_or_else(|| "Missing themeId".to_string())?;
             themes::set_active_theme(db, &theme_id)?;
             cloud_sync::spawn_background_export(db.clone());
+            Ok(serde_json::Value::Null)
+        }
+        "get_active_console_theme_id" => {
+            let active = themes::get_active_console_theme_id(db);
+            Ok(serde_json::json!(active))
+        }
+        "set_active_console_theme" => {
+            let theme_id = get_str_param(&params, &["themeId", "theme_id"])
+                .ok_or_else(|| "Missing themeId".to_string())?;
+            themes::set_active_console_theme(db, &theme_id)?;
+            cloud_sync::spawn_background_export(db.clone());
+            Ok(serde_json::Value::Null)
+        }
+        "system_power_action" => {
+            let action = get_str_param(&params, &["action"])
+                .ok_or_else(|| "Missing action".to_string())?;
+            crate::execute_system_power_action(&action)?;
             Ok(serde_json::Value::Null)
         }
         "get_theme_config" => {

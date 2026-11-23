@@ -97,11 +97,12 @@ Below is a complete, fully commented `theme.json` reference:
 ### Manifest Fields Reference:
 | Field | Type | Required | Description |
 | :--- | :--- | :---: | :--- |
-| `id` | String | **Yes** | Unique identifier (lowercase alphanumeric, hyphens, underscores). |
+| `id` | String | **Yes** | Unique identifier (lowercase alphanumeric, hyphens, underscores). Reserved built-in IDs: `default`, `console-default`. |
 | `name` | String | **Yes** | Display name shown in OpenPlay. |
 | `version` | String | **Yes** | SemVer string (e.g. `1.0.0`, `1.2.1`). |
 | `author` | String | **Yes** | Your developer or community name. |
 | `description` | String | **Yes** | Summary of the theme's aesthetics and features. |
+| `mode` | String | No | Target interface mode: `"desktop"` (default if omitted) or `"console"` for Fullscreen Console Mode themes. |
 | `icon` | String | **Yes** | Relative path to the icon file (SVG, PNG, or JPG). |
 | `screenshots` | Array | **Yes** | Array of relative image paths. **Must contain at least 3 entries.** |
 | `css` | String | No | Stylesheet filename (defaults to `"theme.css"`). |
@@ -191,6 +192,24 @@ OpenPlay provides semantic data attributes so themes can target and customize sp
 | `[data-theme-part="edit-game-modal"]` | The Edit Game metadata dialog overlay. |
 | `[data-theme-part="sidebar"]` | The sliding navigation sidebar drawer. |
 | `[data-theme-part="game-card"]` | Individual game poster cards in the grid. |
+
+### Console Mode Selectors (`mode: "console"` & `data-console-part`):
+Console themes set `"mode": "console"` in `theme.json` and appear automatically under the **Console** tab of the Themes Manager. When Console Mode is active, OpenPlay sets `[data-theme-mode="console"]` and `[data-theme-id="<your-theme-id>"]` on `<html>`, along with CSS variables `--console-accent`, `--console-bg-dim`, `--console-bg-blur`, `--console-safe-width`, `--console-card-width`, `--console-card-radius`, and `--console-selection-glow`.
+
+| Selector | Targets |
+| :--- | :--- |
+| `[data-console-part="root"]` | Fullscreen Console Mode Home container. |
+| `[data-console-part="splash"]` | Boot Splash screen container. |
+| `[data-console-part="profile-screen"]` | Local Profile Selection ("Who's playing?") screen. |
+| `[data-console-part="hero-backdrop"]` | Full-bleed edge-to-edge hero artwork background layer. |
+| `[data-console-part="top-bar"]` | Floating top status bar (profile badge, filter presets, clock, menu). |
+| `[data-console-part="hero-stage"]` | Upper hero logo, metadata pills, and quick actions area. |
+| `[data-console-part="carousel"]` | Horizontal 2:3 cover ribbon. |
+| `[data-console-part="grid"]` | Expanded fullscreen 2:3 cover grid container. |
+| `[data-console-part="card"]` | Individual 2:3 game poster card (`[data-selected="true"]` when focused). |
+| `[data-console-part="details"]` | Cinematic fullscreen Game Details screen. |
+| `[data-console-part="system-menu"]` | Slide-in Console System Menu (`Start` overlay). |
+| `[data-console-part="hud"]` | Bottom centered console button prompt bar. |
 
 Example customization:
 ```css

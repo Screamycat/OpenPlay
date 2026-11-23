@@ -1,7 +1,6 @@
 use crate::models::Achievement;
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::time::Duration;
 
 pub struct PartialEpicMetadata {
     pub description: Option<String>,
@@ -120,11 +119,7 @@ impl EpicMetadataFetcher {
     }
 
     pub async fn fetch_metadata_by_title(title: &str) -> Result<PartialEpicMetadata, String> {
-        let client = reqwest::Client::builder()
-            .http1_only()
-            .timeout(Duration::from_secs(12))
-            .build()
-            .map_err(|e| e.to_string())?;
+        let client = crate::http::http1_client();
 
         // 1. Try store-content CDN first via slug (extremely fast, unauthenticated, rich 4K covers & heroes)
         let primary_slug = Self::make_slug(title);
@@ -374,11 +369,7 @@ impl EpicMetadataFetcher {
         account_id: Option<&str>,
         access_token: Option<&str>,
     ) -> Result<Vec<Achievement>, String> {
-        let client = reqwest::Client::builder()
-            .http1_only()
-            .timeout(Duration::from_secs(12))
-            .build()
-            .map_err(|e| e.to_string())?;
+        let client = crate::http::http1_client();
 
         // 1. Fetch master achievements schema & productId from Epic Store GraphQL
         let store_query = r#"

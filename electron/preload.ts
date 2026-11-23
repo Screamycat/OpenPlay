@@ -32,7 +32,12 @@ contextBridge.exposeInMainWorld("openplayAPI", {
     return `openplay://file${encodeURI(leadingSlash)}`;
   },
   minimize: () => ipcRenderer.invoke("openplay:window:minimize"),
+  restore: () => ipcRenderer.invoke("openplay:window:restore"),
   maximize: () => ipcRenderer.invoke("openplay:window:maximize"),
   close: () => ipcRenderer.invoke("openplay:window:close"),
   isMaximized: () => ipcRenderer.invoke("openplay:window:isMaximized"),
+  setFullscreen: (enabled: boolean, displayId?: string) =>
+    ipcRenderer.invoke("openplay:window:setFullscreen", enabled, displayId),
+  isFullscreen: () => ipcRenderer.invoke("openplay:window:isFullscreen"),
+  getDisplays: () => ipcRenderer.invoke("openplay:window:getDisplays"),
 });

@@ -1,10 +1,25 @@
 // OpenPlay Universal IPC Bridge (Electron <-> Tauri <-> Browser fallback)
 
+export interface DisplayInfo {
+  id: string;
+  label: string;
+  width: number;
+  height: number;
+  x: number;
+  y: number;
+  isPrimary: boolean;
+}
+
 export interface WindowControls {
   minimize: () => Promise<void>;
+  restore: () => Promise<void>;
   toggleMaximize: () => Promise<void>;
   maximize: () => Promise<void>;
   isMaximized: () => Promise<boolean>;
+  setFullscreen: (enabled: boolean, displayId?: string) => Promise<boolean>;
+  isFullscreen: () => Promise<boolean>;
+  getDisplays: () => Promise<DisplayInfo[]>;
+  onResized: (handler: () => void) => Promise<() => void>;
   close: () => Promise<void>;
   startDragging: () => Promise<void>;
 }
@@ -16,9 +31,13 @@ declare global {
       listen: (event: string, callback: (eventData: { payload: any }) => void) => () => void;
       convertFileSrc: (filePath: string) => string;
       minimize: () => Promise<void>;
+      restore?: () => Promise<void>;
       maximize: () => Promise<boolean>;
       close: () => Promise<void>;
       isMaximized: () => Promise<boolean>;
+      setFullscreen?: (enabled: boolean, displayId?: string) => Promise<boolean>;
+      isFullscreen?: () => Promise<boolean>;
+      getDisplays?: () => Promise<DisplayInfo[]>;
     };
     __TAURI_INTERNALS__?: any;
   }
@@ -133,6 +152,11 @@ export function getCurrentWindow(): WindowControls {
         await window.openplayAPI.minimize();
       }
     },
+    restore: async () => {
+      if (typeof window !== "undefined" && window.openplayAPI?.restore) {
+        await window.openplayAPI.restore();
+      }
+    },
     toggleMaximize: async () => {
       if (typeof window !== "undefined" && window.openplayAPI?.maximize) {
         await window.openplayAPI.maximize();
@@ -148,6 +172,40 @@ export function getCurrentWindow(): WindowControls {
         return await window.openplayAPI.isMaximized();
       }
       return false;
+    },
+    setFullscreen: async (enabled: boolean, displayId?: string) => {
+      if (typeof window !== "undefined" && window.openplayAPI?.setFullscreen) {
+        return await window.openplayAPI.setFullscreen(enabled, displayId);
+      }
+      try {
+        if (enabled && !document.fullscreenElement) {
+          await document.documentElement.requestFullscreen();
+          return true;
+        } else if (!enabled && document.fullscreenElement) {
+          await document.exitFullscreen();
+          return false;
+        }
+      } catch {}
+      return enabled;
+    },
+    isFullscreen: async () => {
+      if (typeof window !== "undefined" && window.openplayAPI?.isFullscreen) {
+        return await window.openplayAPI.isFullscreen();
+      }
+      return Boolean(typeof document !== "undefined" && document.fullscreenElement);
+    },
+    getDisplays: async () => {
+      if (typeof window !== "undefined" && window.openplayAPI?.getDisplays) {
+        return await window.openplayAPI.getDisplays();
+      }
+      return [];
+    },
+    onResized: async (handler: () => void) => {
+      if (typeof window !== "undefined") {
+        window.addEventListener("resize", handler);
+        return () => window.removeEventListener("resize", handler);
+      }
+      return () => {};
     },
     close: async () => {
       if (typeof window !== "undefined" && window.openplayAPI?.close) {

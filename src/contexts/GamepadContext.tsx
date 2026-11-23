@@ -63,7 +63,7 @@ interface GamepadContextValue {
     onCaptured: (button: PhysicalGamepadButton) => void
   ) => void;
   cancelListeningForKeybind: () => void;
-  openVirtualKeyboard: (session: VirtualKeyboardSession) => void;
+  openVirtualKeyboard: (session: VirtualKeyboardSession | null) => void;
   openFilePicker: (request: ControllerFilePickerRequest) => void;
 }
 
@@ -448,6 +448,10 @@ export const GamepadProvider: React.FC<GamepadProviderProps> = ({
       | "left-drawer"
       | "modal"
       | "achievement-hub"
+      | "console-splash"
+      | "console-profile"
+      | "console-details"
+      | "console-home"
       | "workspace";
     container: HTMLElement | null;
   } => {
@@ -500,6 +504,32 @@ export const GamepadProvider: React.FC<GamepadProviderProps> = ({
     );
     if (hub) {
       return { layer: "achievement-hub", container: hub };
+    }
+
+    // Check Console Mode layers (in z-index priority order)
+    const consoleSplash = document.querySelector<HTMLElement>(
+      '[data-gamepad-zone="console-splash"]'
+    );
+    if (consoleSplash) {
+      return { layer: "console-splash", container: consoleSplash };
+    }
+    const consoleProfile = document.querySelector<HTMLElement>(
+      '[data-gamepad-zone="console-profile"]'
+    );
+    if (consoleProfile) {
+      return { layer: "console-profile", container: consoleProfile };
+    }
+    const consoleDetails = document.querySelector<HTMLElement>(
+      '[data-gamepad-zone="console-details"]'
+    );
+    if (consoleDetails) {
+      return { layer: "console-details", container: consoleDetails };
+    }
+    const consoleHome = document.querySelector<HTMLElement>(
+      '[data-gamepad-zone="console-home"]'
+    );
+    if (consoleHome) {
+      return { layer: "console-home", container: consoleHome };
     }
 
     // Default: Base Workspace Zone (top-nav, game-grid, game-details)
@@ -672,12 +702,34 @@ export const GamepadProvider: React.FC<GamepadProviderProps> = ({
         return;
       }
 
-      const currentCard =
-        (s.selectedGame &&
-          cardEls.find(
-            (c) => c.dataset.gamepadCardId === s.selectedGame?.id
-          )) ||
-        cardEls[0];
+      const currIdx = s.selectedGame
+        ? cardEls.findIndex((c) => c.dataset.gamepadCardId === s.selectedGame?.id)
+        : 0;
+      const validIdx = currIdx >= 0 ? currIdx : 0;
+      const currentCard = cardEls[validIdx];
+
+      // Left / Right in the Game Grid wraps across rows (last column -> first column of next row, and vice versa)
+      if (direction === "right") {
+        if (validIdx + 1 < cardEls.length) {
+          const nextEl = cardEls[validIdx + 1];
+          if (nextEl.dataset.gamepadCardId) {
+            s.onSelectGame(nextEl.dataset.gamepadCardId);
+            scrollElementIntoContainerView(nextEl);
+          }
+        }
+        return;
+      }
+
+      if (direction === "left") {
+        if (validIdx > 0) {
+          const prevEl = cardEls[validIdx - 1];
+          if (prevEl.dataset.gamepadCardId) {
+            s.onSelectGame(prevEl.dataset.gamepadCardId);
+            scrollElementIntoContainerView(prevEl);
+          }
+        }
+        return;
+      }
 
       const nextCard = findNextSpatialElement(currentCard, cardEls, direction);
       if (nextCard && nextCard.dataset.gamepadCardId) {
@@ -703,19 +755,6 @@ export const GamepadProvider: React.FC<GamepadProviderProps> = ({
         const focusables = getFocusableElementsInContainer(topNavEl);
         if (focusables.length > 0) {
           setFocusedElement(focusables[0]);
-        }
-      } else if (direction === "right" && s.viewMode === "split") {
-        // Seamless right-edge crossing from Grid into Game Details
-        setWorkspaceZone("game-details");
-        const detailsEl = document.querySelector<HTMLElement>(
-          '[data-gamepad-zone="game-details"]'
-        );
-        const primaryBtn =
-          detailsEl?.querySelector<HTMLElement>(
-            '[data-gamepad-primary-action="true"]'
-          ) || getFocusableElementsInContainer(detailsEl)[0];
-        if (primaryBtn) {
-          setFocusedElement(primaryBtn);
         }
       }
     },
@@ -946,6 +985,18 @@ export const GamepadProvider: React.FC<GamepadProviderProps> = ({
         return;
       }
 
+      if (layer === "console-splash") {
+        window.dispatchEvent(new CustomEvent("openplay-console-splash-skip"));
+        return;
+      }
+
+      if (layer === "console-home") {
+        window.dispatchEvent(
+          new CustomEvent("openplay-console-action", { detail: { action: direction } })
+        );
+        return;
+      }
+
       if (layer === "workspace" && s.workspaceZone === "game-grid") {
         navigateGameGrid(direction);
         return;
@@ -988,6 +1039,105 @@ export const GamepadProvider: React.FC<GamepadProviderProps> = ({
       }
       if (layer === "file-picker" && filePickerHandlerRef.current) {
         filePickerHandlerRef.current(action);
+        return;
+      }
+
+      // Console Mode Layers
+      if (layer === "console-splash") {
+        window.dispatchEvent(new CustomEvent("openplay-console-splash-skip"));
+        return;
+      }
+
+      if (layer === "console-profile" && container) {
+        if (action === "confirm") {
+          const candidates = getFocusableElementsInContainer(container);
+          const target =
+            focusedElementRef.current &&
+            container.contains(focusedElementRef.current)
+              ? focusedElementRef.current
+              : container.querySelector<HTMLElement>(
+                  '[data-console-default-focus="true"]'
+                ) || candidates[0];
+          activateFocusedDomElement(target);
+        } else if (action === "context_menu") {
+          const focused = focusedElementRef.current;
+          const profileId =
+            focused?.dataset?.consoleProfileId ||
+            focused
+              ?.closest<HTMLElement>("[data-console-profile-id]")
+              ?.dataset?.consoleProfileId;
+          window.dispatchEvent(
+            new CustomEvent("openplay-console-profile-edit", {
+              detail: { profileId },
+            })
+          );
+        }
+        return;
+      }
+
+      if (layer === "console-home") {
+        const mapped =
+          action === "confirm"
+            ? "confirm"
+            : action === "back"
+            ? "back"
+            : action === "launch"
+            ? "play"
+            : action === "context_menu"
+            ? "options"
+            : action === "prev_tab"
+            ? "prev_tab"
+            : action === "next_tab"
+            ? "next_tab"
+            : action === "quick_search"
+            ? "search"
+            : action === "main_menu"
+            ? "start"
+            : null;
+        if (mapped) {
+          window.dispatchEvent(
+            new CustomEvent("openplay-console-action", {
+              detail: { action: mapped },
+            })
+          );
+        }
+        return;
+      }
+
+      if (layer === "console-details" && container) {
+        if (action === "confirm") {
+          const candidates = getFocusableElementsInContainer(container);
+          const target =
+            focusedElementRef.current &&
+            container.contains(focusedElementRef.current)
+              ? focusedElementRef.current
+              : container.querySelector<HTMLElement>(
+                  '[data-console-default-focus="true"]'
+                ) || candidates[0];
+          activateFocusedDomElement(target);
+          return;
+        }
+        const mapped =
+          action === "back"
+            ? "back"
+            : action === "launch"
+            ? "play"
+            : action === "context_menu"
+            ? "options"
+            : action === "prev_tab"
+            ? "prev_tab"
+            : action === "next_tab"
+            ? "next_tab"
+            : action === "main_menu"
+            ? "start"
+            : null;
+        if (mapped) {
+          window.dispatchEvent(
+            new CustomEvent("openplay-console-action", {
+              detail: { action: mapped },
+            })
+          );
+        }
         return;
       }
 
@@ -1402,8 +1552,12 @@ export const GamepadProvider: React.FC<GamepadProviderProps> = ({
     setFocusedElement,
   ]);
 
-  // 60fps Gamepad Polling & Repeat Loop
+  // 60fps Gamepad Polling & Repeat Loop (completely halted while a game is running)
   useEffect(() => {
+    if (!controllerEnabled || (suspendInGame && isRunningOrLaunching)) {
+      return;
+    }
+
     let rafId: number | null = null;
     const prevButtonsRef: Record<string, boolean> = {};
     let heldDirection: NavigationDirection | null = null;
@@ -1523,7 +1677,9 @@ export const GamepadProvider: React.FC<GamepadProviderProps> = ({
           layer === "modal" ||
           layer === "achievement-hub" ||
           layer === "left-drawer" ||
-          layer === "popover"
+          layer === "popover" ||
+          layer === "console-details" ||
+          layer === "console-home"
         ) {
           const isScrollable = (el: HTMLElement | null): boolean => {
             if (!el) return false;
@@ -1541,6 +1697,9 @@ export const GamepadProvider: React.FC<GamepadProviderProps> = ({
               container?.querySelector<HTMLElement>("[data-gamepad-scroll]") ||
               null;
             if (explicitChild && isScrollable(explicitChild)) {
+              scrollTarget = explicitChild;
+            } else if (layer === "console-home") {
+              // In Console Home Grid view, RS strictly scrolls the right-hand Details Panel, never the Grid itself
               scrollTarget = explicitChild;
             } else if (isScrollable(container)) {
               scrollTarget = container;
@@ -1641,6 +1800,23 @@ export const GamepadProvider: React.FC<GamepadProviderProps> = ({
         selectUsedAsModifier = false;
       }
 
+      // Handle L3 (LS Click -> Filter) & R3 (RS Click -> Sort) in Console Mode Home
+      const isL3Down = Boolean(currentPressed.L3);
+      const wasL3Down = Boolean(prevButtonsRef.L3);
+      if (isL3Down && !wasL3Down && getActiveLayerInfo().layer === "console-home") {
+        window.dispatchEvent(
+          new CustomEvent("openplay-console-action", { detail: { action: "open_filter" } })
+        );
+      }
+
+      const isR3Down = Boolean(currentPressed.R3);
+      const wasR3Down = Boolean(prevButtonsRef.R3);
+      if (isR3Down && !wasR3Down && getActiveLayerInfo().layer === "console-home") {
+        window.dispatchEvent(
+          new CustomEvent("openplay-console-action", { detail: { action: "open_sort" } })
+        );
+      }
+
       Object.assign(prevButtonsRef, currentPressed);
     };
 
@@ -1648,7 +1824,14 @@ export const GamepadProvider: React.FC<GamepadProviderProps> = ({
     return () => {
       if (rafId !== null) window.cancelAnimationFrame(rafId);
     };
-  }, [getActiveLayerInfo, handleDirectionInput, handleLogicalAction]);
+  }, [
+    controllerEnabled,
+    suspendInGame,
+    isRunningOrLaunching,
+    getActiveLayerInfo,
+    handleDirectionInput,
+    handleLogicalAction,
+  ]);
 
   // Compute context-sensitive Bottom HUD prompts
   const hudInfo = useMemo((): {
@@ -1887,7 +2070,11 @@ export const GamepadProvider: React.FC<GamepadProviderProps> = ({
           controllerEnabled &&
           !keyboardSession &&
           !filePickerRequest &&
-          !selectSession
+          !selectSession &&
+          activeDomLayer !== "console-splash" &&
+          activeDomLayer !== "console-profile" &&
+          activeDomLayer !== "console-home" &&
+          activeDomLayer !== "console-details"
         }
         profile={glyphProfile}
         customBindings={customBindings}

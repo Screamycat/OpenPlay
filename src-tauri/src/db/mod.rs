@@ -31,6 +31,18 @@ impl Database {
             fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
         let conn = Connection::open(db_path).map_err(|e| e.to_string())?;
+        // Tune SQLite memory footprint & concurrency:
+        // - WAL mode for non-blocking reads/writes
+        // - 4 MiB page cache cap (-4096 KiB) to bound RSS
+        // - temp_store = FILE & mmap_size = 0 to avoid ballooning process RSS on large queries
+        let _ = conn.execute_batch(
+            "PRAGMA journal_mode = WAL;
+             PRAGMA synchronous = NORMAL;
+             PRAGMA cache_size = -4096;
+             PRAGMA temp_store = FILE;
+             PRAGMA mmap_size = 0;
+             PRAGMA busy_timeout = 5000;",
+        );
         let db = Database {
             conn: Mutex::new(conn),
         };
@@ -437,6 +449,20 @@ impl Database {
         auto_beaten, beaten_prompt_playtime, emulator_id, updated_at, playtime_by_device,
         cloud_save_enabled, cloud_save_retention_override, last_played_device_id";
 
+    /// Lean projection for library grids & listings: omits heavy detail-only columns
+    /// (`description`, `notes`, `links`, `screenshots`, `trailers`, `play_actions`) so SQLite
+    /// skips reading large overflow pages and RAM/IPC overhead stays minimal across 600+ games.
+    const GAME_SUMMARY_SELECT_COLUMNS: &'static str = "
+        id, title, sorting_title, source, source_id, install_directory, executable_path,
+        launch_arguments, is_installed, is_favorite, cover_image, background_image,
+        logo_image, icon_image, developer, publisher, release_date, genres, features,
+        platforms, community_score, user_rating, playtime_seconds, last_played,
+        date_added, completion_status, NULL, NULL, NULL, NULL, size_on_disk,
+        NULL, age_rating, critic_score, series, hltb_main, hltb_extra, hltb_completionist,
+        tags, categories, region, play_count, is_hidden, NULL,
+        auto_beaten, beaten_prompt_playtime, emulator_id, updated_at, playtime_by_device,
+        cloud_save_enabled, cloud_save_retention_override, last_played_device_id";
+
     pub fn is_other_device_id(last_played_device_id: Option<&str>, current_device_id: &str) -> bool {
         match last_played_device_id.map(str::trim).filter(|s| !s.is_empty()) {
             Some("external") => true,
@@ -450,6 +476,93 @@ impl Database {
             game.played_on_other_device =
                 Self::is_other_device_id(game.last_played_device_id.as_deref(), &current_device_id);
         }
+    }
+
+    pub fn get_games_count(&self) -> Result<usize, String> {
+        let conn = self.conn.lock().unwrap();
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM games", [], |r| r.get(0))
+            .map_err(|e| e.to_string())?;
+        Ok(count.max(0) as usize)
+    }
+
+    pub fn get_distinct_sources(&self) -> Result<Vec<String>, String> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare("SELECT DISTINCT LOWER(TRIM(source)) FROM games WHERE source IS NOT NULL AND TRIM(source) != ''")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |r| r.get::<_, String>(0))
+            .map_err(|e| e.to_string())?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
+    }
+
+    pub fn get_all_games_summary(&self) -> Result<Vec<Game>, String> {
+        let conn = self.conn.lock().unwrap();
+        let current_device_id = Self::get_or_create_device_id_conn(&conn)?;
+        let sql = format!("SELECT {} FROM games ORDER BY title ASC", Self::GAME_SUMMARY_SELECT_COLUMNS);
+        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+
+        let rows = stmt
+            .query_map([], Self::row_to_game)
+            .map_err(|e| e.to_string())?;
+
+        let mut games = Vec::new();
+        for r in rows {
+            if let Ok(mut g) = r {
+                g.played_on_other_device =
+                    Self::is_other_device_id(g.last_played_device_id.as_deref(), &current_device_id);
+                games.push(g);
+            }
+        }
+        Ok(games)
+    }
+
+    pub fn get_games_page(
+        &self,
+        limit: usize,
+        offset: usize,
+        include_heavy_fields: bool,
+    ) -> Result<Vec<Game>, String> {
+        let conn = self.conn.lock().unwrap();
+        let current_device_id = Self::get_or_create_device_id_conn(&conn)?;
+        let cols = if include_heavy_fields {
+            Self::GAME_SELECT_COLUMNS
+        } else {
+            Self::GAME_SUMMARY_SELECT_COLUMNS
+        };
+        let sql = format!("SELECT {} FROM games ORDER BY title ASC LIMIT ?1 OFFSET ?2", cols);
+        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+
+        let rows = stmt
+            .query_map(params![limit as i64, offset as i64], Self::row_to_game)
+            .map_err(|e| e.to_string())?;
+
+        let mut games = Vec::with_capacity(limit.min(512));
+        for r in rows {
+            if let Ok(mut g) = r {
+                g.played_on_other_device =
+                    Self::is_other_device_id(g.last_played_device_id.as_deref(), &current_device_id);
+                games.push(g);
+            }
+        }
+        Ok(games)
+    }
+
+    pub fn update_game_artwork_paths(
+        &self,
+        game_id: &str,
+        cover_image: Option<&str>,
+        background_image: Option<&str>,
+        logo_image: Option<&str>,
+    ) -> Result<(), String> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE games SET cover_image = ?1, background_image = ?2, logo_image = ?3 WHERE id = ?4",
+            params![cover_image, background_image, logo_image, game_id],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
     }
 
     pub fn get_all_games(&self) -> Result<Vec<Game>, String> {
@@ -519,13 +632,17 @@ impl Database {
                 ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44, ?45, ?46, ?47,
                 ?48, ?49, ?50, ?51, ?52
             ) ON CONFLICT(id) DO UPDATE SET
-                title = excluded.title,
-                sorting_title = COALESCE(excluded.sorting_title, games.sorting_title),
+                title = CASE
+                    WHEN games.title IS NOT NULL AND trim(games.title) != ''
+                    THEN games.title
+                    ELSE excluded.title
+                END,
+                sorting_title = COALESCE(games.sorting_title, excluded.sorting_title),
                 source = excluded.source,
                 source_id = COALESCE(excluded.source_id, games.source_id),
                 install_directory = COALESCE(excluded.install_directory, games.install_directory),
                 executable_path = COALESCE(excluded.executable_path, games.executable_path),
-                launch_arguments = COALESCE(excluded.launch_arguments, games.launch_arguments),
+                launch_arguments = COALESCE(games.launch_arguments, excluded.launch_arguments),
                 is_installed = excluded.is_installed,
                 cover_image = CASE
                     WHEN games.cover_image IS NOT NULL AND trim(games.cover_image) != ''
@@ -547,13 +664,25 @@ impl Database {
                     THEN games.icon_image
                     ELSE excluded.icon_image
                 END,
-                developer = COALESCE(excluded.developer, games.developer),
-                publisher = COALESCE(excluded.publisher, games.publisher),
-                release_date = COALESCE(excluded.release_date, games.release_date),
-                genres = CASE WHEN excluded.genres != '[]' THEN excluded.genres ELSE games.genres END,
-                features = CASE WHEN excluded.features != '[]' THEN excluded.features ELSE games.features END,
-                platforms = CASE WHEN excluded.platforms != '[]' THEN excluded.platforms ELSE games.platforms END,
-                community_score = COALESCE(excluded.community_score, games.community_score),
+                developer = CASE
+                    WHEN games.developer IS NOT NULL AND trim(games.developer) != ''
+                    THEN games.developer
+                    ELSE excluded.developer
+                END,
+                publisher = CASE
+                    WHEN games.publisher IS NOT NULL AND trim(games.publisher) != ''
+                    THEN games.publisher
+                    ELSE excluded.publisher
+                END,
+                release_date = CASE
+                    WHEN games.release_date IS NOT NULL AND trim(games.release_date) != ''
+                    THEN games.release_date
+                    ELSE excluded.release_date
+                END,
+                genres = CASE WHEN games.genres IS NOT NULL AND games.genres != '[]' THEN games.genres ELSE excluded.genres END,
+                features = CASE WHEN games.features IS NOT NULL AND games.features != '[]' THEN games.features ELSE excluded.features END,
+                platforms = CASE WHEN games.platforms IS NOT NULL AND games.platforms != '[]' THEN games.platforms ELSE excluded.platforms END,
+                community_score = COALESCE(games.community_score, excluded.community_score),
                 playtime_seconds = CASE WHEN excluded.playtime_seconds > games.playtime_seconds THEN excluded.playtime_seconds ELSE games.playtime_seconds END,
                 last_played = COALESCE(excluded.last_played, games.last_played),
                 date_added = COALESCE(games.date_added, excluded.date_added),
@@ -564,25 +693,25 @@ impl Database {
                     ELSE COALESCE(games.completion_status, excluded.completion_status)
                 END,
                 description = CASE WHEN games.description IS NOT NULL AND trim(games.description) != '' THEN games.description ELSE excluded.description END,
-                links = CASE WHEN excluded.links != '[]' THEN excluded.links ELSE games.links END,
-                screenshots = CASE WHEN excluded.screenshots != '[]' THEN excluded.screenshots ELSE games.screenshots END,
+                links = CASE WHEN games.links IS NOT NULL AND games.links != '[]' THEN games.links ELSE excluded.links END,
+                screenshots = CASE WHEN games.screenshots IS NOT NULL AND games.screenshots != '[]' THEN games.screenshots ELSE excluded.screenshots END,
                 size_on_disk = COALESCE(excluded.size_on_disk, games.size_on_disk),
                 trailers = CASE WHEN games.trailers IS NOT NULL AND games.trailers != '[]' THEN games.trailers ELSE excluded.trailers END,
-                age_rating = COALESCE(excluded.age_rating, games.age_rating),
-                critic_score = COALESCE(excluded.critic_score, games.critic_score),
-                series = COALESCE(excluded.series, games.series),
-                hltb_main = COALESCE(excluded.hltb_main, games.hltb_main),
-                hltb_extra = COALESCE(excluded.hltb_extra, games.hltb_extra),
-                hltb_completionist = COALESCE(excluded.hltb_completionist, games.hltb_completionist),
-                tags = CASE WHEN excluded.tags != '[]' THEN excluded.tags ELSE games.tags END,
-                categories = CASE WHEN excluded.categories != '[]' THEN excluded.categories ELSE games.categories END,
-                region = COALESCE(excluded.region, games.region),
-                play_count = COALESCE(excluded.play_count, games.play_count),
-                is_hidden = COALESCE(excluded.is_hidden, games.is_hidden),
-                play_actions = CASE WHEN excluded.play_actions != '[]' THEN excluded.play_actions ELSE games.play_actions END,
+                age_rating = COALESCE(games.age_rating, excluded.age_rating),
+                critic_score = COALESCE(games.critic_score, excluded.critic_score),
+                series = COALESCE(games.series, excluded.series),
+                hltb_main = COALESCE(games.hltb_main, excluded.hltb_main),
+                hltb_extra = COALESCE(games.hltb_extra, excluded.hltb_extra),
+                hltb_completionist = COALESCE(games.hltb_completionist, excluded.hltb_completionist),
+                tags = CASE WHEN games.tags IS NOT NULL AND games.tags != '[]' THEN games.tags ELSE excluded.tags END,
+                categories = CASE WHEN games.categories IS NOT NULL AND games.categories != '[]' THEN games.categories ELSE excluded.categories END,
+                region = COALESCE(games.region, excluded.region),
+                play_count = COALESCE(games.play_count, excluded.play_count),
+                is_hidden = games.is_hidden,
+                play_actions = CASE WHEN games.play_actions IS NOT NULL AND games.play_actions != '[]' THEN games.play_actions ELSE excluded.play_actions END,
                 auto_beaten = games.auto_beaten,
                 beaten_prompt_playtime = games.beaten_prompt_playtime,
-                emulator_id = COALESCE(excluded.emulator_id, games.emulator_id),
+                emulator_id = COALESCE(games.emulator_id, excluded.emulator_id),
                 updated_at = COALESCE(games.updated_at, excluded.updated_at),
                 playtime_by_device = COALESCE(games.playtime_by_device, excluded.playtime_by_device),
                 last_played_device_id = COALESCE(excluded.last_played_device_id, games.last_played_device_id)",
@@ -1219,6 +1348,15 @@ impl Database {
             || f64_diff(a.controller_deadzone, b.controller_deadzone)
             || a.controller_suspend_in_game != b.controller_suspend_in_game
             || a.controller_bindings != b.controller_bindings
+            || !str_eq(&a.active_console_theme_id, &b.active_console_theme_id)
+            || a.start_in_console_mode != b.start_in_console_mode
+            || a.console_boot_splash_enabled != b.console_boot_splash_enabled
+            || a.console_auto_sign_in != b.console_auto_sign_in
+            || a.console_ui_sounds != b.console_ui_sounds
+            || f64_diff(a.console_ui_volume, b.console_ui_volume)
+            || a.console_bg_music_enabled != b.console_bg_music_enabled
+            || f64_diff(a.console_bg_music_volume, b.console_bg_music_volume)
+            || a.console_profiles != b.console_profiles
     }
 
     pub fn get_app_config(&self) -> Result<AppConfig, String> {
@@ -1296,6 +1434,46 @@ impl Database {
         }
         if cfg.controller_suspend_in_game.is_none() {
             cfg.controller_suspend_in_game = Some(true);
+        }
+        if cfg.active_console_theme_id.as_deref().unwrap_or("").trim().is_empty() {
+            if let Ok(Some(cid)) = self.get_setting("active_console_theme_id") {
+                if !cid.trim().is_empty() {
+                    cfg.active_console_theme_id = Some(cid);
+                }
+            }
+        }
+        if cfg.active_console_theme_id.is_none() {
+            cfg.active_console_theme_id = Some("console-default".to_string());
+        }
+        if cfg.start_in_console_mode.is_none() {
+            cfg.start_in_console_mode = Some(false);
+        }
+        if cfg.console_boot_splash_enabled.is_none() {
+            cfg.console_boot_splash_enabled = Some(true);
+        }
+        if cfg.console_boot_video_path.as_deref().map(str::trim).unwrap_or("").is_empty() {
+            cfg.console_boot_video_path = Some("/videos/splash boot/OpenPlay_Console_2K.mp4".to_string());
+        }
+        if cfg.console_auto_sign_in.is_none() {
+            cfg.console_auto_sign_in = Some(false);
+        }
+        if cfg.console_login_bg_video_path.as_deref().map(str::trim).unwrap_or("").is_empty() {
+            cfg.console_login_bg_video_path = Some("/videos/login loop/50632-464085910_medium.mp4".to_string());
+        }
+        if cfg.console_ui_sounds.is_none() {
+            cfg.console_ui_sounds = Some(true);
+        }
+        if cfg.console_ui_volume.is_none() {
+            cfg.console_ui_volume = Some(0.45);
+        }
+        if cfg.console_bg_music_enabled.is_none() {
+            cfg.console_bg_music_enabled = Some(true);
+        }
+        if cfg.console_bg_music_volume.is_none() {
+            cfg.console_bg_music_volume = Some(0.25);
+        }
+        if cfg.console_display_id.is_none() {
+            cfg.console_display_id = Some("auto".to_string());
         }
 
         Ok(cfg)
