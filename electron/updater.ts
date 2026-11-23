@@ -235,7 +235,8 @@ export async function applyUpdateAndRestart(
     );
   }
 
-  const execPath = options.overrideExecPath || process.execPath;
+  const execPath =
+    options.overrideExecPath || process.env.OPENPLAY_TEST_EXEC_PATH || process.execPath;
   const installDir = testDir || path.dirname(execPath);
   const pid = options.overridePid ?? process.pid;
 

@@ -201,6 +201,31 @@ pub async fn run_daemon() {
     eprintln!("[openplay-core] Stdin closed (EOF). Shutting down daemon gracefully...");
 }
 
+fn detect_os_pretty_name() -> String {
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(content) = std::fs::read_to_string("/etc/os-release") {
+            for line in content.lines() {
+                if let Some(val) = line.strip_prefix("PRETTY_NAME=") {
+                    let clean = val.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !clean.is_empty() {
+                        return clean.to_string();
+                    }
+                }
+            }
+        }
+        return "Linux".to_string();
+    }
+    #[cfg(target_os = "windows")]
+    {
+        return sysinfo::System::long_os_version().unwrap_or_else(|| "Windows".to_string());
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+    {
+        return std::env::consts::OS.to_string();
+    }
+}
+
 /// Applies optional initial settings written by the OpenPlay custom installer wizard
 /// (`<data_dir>/OpenPlay/installer-seed.json`) non-destructively on first launch.
 fn apply_installer_seed_if_present(db: &Database) {
@@ -416,12 +441,22 @@ pub async fn handle_rpc_call(
 ) -> Result<serde_json::Value, String> {
     match method {
         "get_app_version" => {
-            Ok(serde_json::to_value(env!("CARGO_PKG_VERSION")).map_err(|e| e.to_string())?)
+            let ver = std::env::var("OPENPLAY_DEBUG_APP_VERSION")
+                .ok()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string());
+            Ok(serde_json::to_value(ver).map_err(|e| e.to_string())?)
         }
         "get_system_info" => {
+            let os_name = detect_os_pretty_name();
+            let ver = std::env::var("OPENPLAY_DEBUG_APP_VERSION")
+                .ok()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string());
             Ok(serde_json::json!({
-                "version": env!("CARGO_PKG_VERSION"),
+                "version": ver,
                 "os": std::env::consts::OS,
+                "os_name": os_name,
                 "arch": std::env::consts::ARCH,
                 "family": std::env::consts::FAMILY,
                 "is_appimage": std::env::var("APPIMAGE").is_ok(),

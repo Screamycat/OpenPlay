@@ -152,6 +152,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [systemInfo, setSystemInfo] = useState<{
     version: string;
     os: string;
+    os_name?: string;
     arch: string;
     is_appimage?: boolean;
   } | null>(null);
@@ -279,13 +280,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   const buildSystemInfoMarkdown = () => {
     const version = systemInfo?.version || updateResult?.current_version || appVersion || "unknown";
-    const os = systemInfo?.os || (navigator.userAgent.includes("Windows") ? "windows" : "linux");
+    const osLabel =
+      systemInfo?.os_name ||
+      systemInfo?.os ||
+      (navigator.userAgent.includes("Windows") ? "Windows" : "Linux");
     const arch = systemInfo?.arch || "x86_64";
-    const pkg = systemInfo?.is_appimage ? " (AppImage)" : "";
+    const pkg = systemInfo?.is_appimage ? " [AppImage]" : "";
     return [
       "### Environment",
       `- **OpenPlay Version:** v${version}`,
-      `- **OS / Arch:** ${os} (${arch})${pkg}`,
+      `- **Operating System:** ${osLabel} (${arch})${pkg}`,
     ].join("\n");
   };
 
@@ -2406,7 +2410,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       />
                       <span>
                         Include OS & version (
-                        {systemInfo ? `${systemInfo.os} / v${systemInfo.version}` : `v${appVersion || "1.0.0"}`}
+                        {systemInfo
+                          ? `${systemInfo.os_name || systemInfo.os} / v${systemInfo.version}`
+                          : `v${appVersion || "1.0.0"}`}
                         )
                       </span>
                     </label>

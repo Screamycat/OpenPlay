@@ -3880,12 +3880,20 @@ fn is_version_newer(latest: &str, current: &str) -> bool {
 }
 
 pub async fn check_for_app_updates_core() -> Result<UpdateCheckResult, String> {
-    let current_version = env!("CARGO_PKG_VERSION").to_string();
-    let url = "https://api.github.com/repos/Screamycat/OpenPlay/releases/latest";
+    let current_version = std::env::var("OPENPLAY_DEBUG_APP_VERSION")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string());
+    let url = std::env::var("OPENPLAY_DEBUG_RELEASE_URL")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| {
+            "https://api.github.com/repos/Screamycat/OpenPlay/releases/latest".to_string()
+        });
     let client = crate::http::client();
 
     let resp = client
-        .get(url)
+        .get(&url)
         .timeout(std::time::Duration::from_secs(10))
         .header("User-Agent", format!("OpenPlay/{}", current_version))
         .header("Accept", "application/vnd.github.v3+json")
