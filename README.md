@@ -63,15 +63,14 @@ A blazing-fast, cross-platform sanctuary for your entire game collection built o
 ### 🕹️ Native Emulation & Smart ROM Scanner
 *Seamlessly manage your retro collection alongside modern PC titles. OpenPlay automatically detects installed standalone emulators (Dolphin, PCSX2, DuckStation, RPCS3, mGBA, PPSSPP, Cemu, Ryujinx, Eden) and RetroArch Libretro cores. Point to any ROM directory: OpenPlay strips dump release tags, deduplicates multi-track `.bin` files, matches console platforms with dedicated hardware badges, and extracts local boxart or scrapes from SteamGridDB.*
 
+<img src="./docs/media/native-emulation.png" alt="OpenPlay Emulation Manager" />
+
 ---
 
 ### 🎨 Dual-Mode Theme Engine (Desktop & Console Themes)
 *Personalize Desktop Mode and Console Mode independently with live stylesheet hot-reloading, dedicated Desktop & Console tabs in the Themes Manager, and an immutable built-in **OpenPlay Console** Theme (`console-default`). Tweak geometry (poster corner radius, card scale, ultrawide content safe-zone, background dim/blur), smoke tints, and accent colors with real-time CSS variable bindings, or drop in custom `.zip` Desktop or Console theme packages.*
 
----
-
-### 🎮 Native Desktop Controller & Gamepad Navigation
-*Full keyboard-and-mouse parity from your controller in Desktop Mode. Navigate the 2D game grid, details pane, top bar, context menus, and multi-tab modals using Spatial + Zone navigation with seamless edge-crossing. Includes auto-detected Xbox, PlayStation, and Nintendo button glyphs, an auto-hiding contextual prompt bar, a built-in On-Screen Virtual Keyboard, an in-app Controller File & Folder Browser, automatic input suspension during gameplay, and full button remapping in Settings.*
+<img src="./docs/media/theme-manager.png" alt="OpenPlay Theme Manager" />
 
 ---
 
@@ -80,10 +79,16 @@ A blazing-fast, cross-platform sanctuary for your entire game collection built o
 - **Custom Boot Splash & Local Profile Screen**: Built-in OpenPlay boot animation (swappable with any `.mp4`/`.webm` video), offline local profiles with an ambient moving backdrop (also customizable to any looping video), and a **Game-Aware Profile Icon Picker** pulling icons and covers from your installed games & ROMs.
 - **Horizontal Carousel & Expanded 2:3 Cover Grid**: Full-bleed crossfading Hero Artwork paired with standard 2:3 vertical Steam-ratio game cards, `LB`/`RB` filter presets, cinematic fullscreen Game Details (`Overview`, `Achievements`, `Trailers`, `News`), subtle synthesized UI audio cues, and a Console System Menu (`Start`) with OS power controls.
 
+<img src="./docs/media/fullscreen-1.png" alt="OpenPlay Carousel View" />
+<img src="./docs/media/fullscreen-2.png" alt="OpenPlay Grid View" />
+<img src="./docs/media/fullscreen-3.png" alt="OpenPlay Game View" />
+
 ---
 
 ### 🚀 Custom Cross-Platform Installer Wizard
 *A sleek, OpenPlay-themed installer for both Windows and Linux with Express Install or Custom Setup, user-local installation (preserving your database across updates), and an optional Quick Setup step to pre-configure Cloud Sync and API keys before your first launch.*
+
+<img src="./docs/media/installer.png" alt="OpenPlay Installer Wizard" />
 
 </div>
 
@@ -162,7 +167,6 @@ We have developed a **1-click Playnite Backup Importer**:
 2. OpenPlay parses your categories, completion states, playtime records, and artwork links.
 3. Your entire library is instantly ready on Windows or native Linux with zero setup friction.
 
-> Built to preserve your library history as you move to a cross-platform setup.
 ---
 
 ## ☁️ Cross-Device Cloud Sync & Zero-Downtime Backups
