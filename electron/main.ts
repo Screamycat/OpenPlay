@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, protocol, dialog, shell, screen, nativeIma
 import * as path from "node:path";
 import * as fs from "node:fs";
 import * as os from "node:os";
+import { spawn } from "node:child_process";
 import { registerMediaProtocol } from "./protocol";
 import { startDaemon, stopDaemon, invoke as daemonInvoke, onDaemonEvent } from "./daemon";
 import { handleStoreOAuth } from "./oauth";
@@ -54,32 +55,79 @@ function resolveAppIconPath(): string | undefined {
   return candidates.find((p) => fs.existsSync(p));
 }
 
+function refreshLinuxDesktopCaches(appsDir: string, hicolorDir: string) {
+  const trySpawn = (cmd: string, args: string[]) => {
+    try {
+      const child = spawn(cmd, args, { stdio: "ignore", detached: true });
+      child.on("error", () => {});
+      child.unref();
+    } catch {
+      // ignore if tool is unavailable on this distro
+    }
+  };
+  trySpawn("update-desktop-database", [appsDir]);
+  trySpawn("gtk-update-icon-cache", ["-f", "-t", hicolorDir]);
+  trySpawn("kbuildsycoca6", []);
+  trySpawn("kbuildsycoca5", []);
+}
+
 function ensureLinuxDesktopEntry(iconPath?: string) {
   if (process.platform !== "linux" || !iconPath) return;
   try {
     const appsDir = path.join(os.homedir(), ".local", "share", "applications");
     fs.mkdirSync(appsDir, { recursive: true });
     const desktopFile = path.join(appsDir, "openplay.desktop");
-    const iconsDir = path.join(os.homedir(), ".local", "share", "icons", "hicolor", "256x256", "apps");
+    const hicolorDir = path.join(os.homedir(), ".local", "share", "icons", "hicolor");
+    const iconsDir = path.join(hicolorDir, "256x256", "apps");
     fs.mkdirSync(iconsDir, { recursive: true });
     const installedIcon = path.join(iconsDir, "openplay.png");
     fs.copyFileSync(iconPath, installedIcon);
 
-    const content = [
-      "[Desktop Entry]",
-      "Type=Application",
-      "Name=OpenPlay",
-      "Comment=Cross-Platform Game Library & Launcher",
-      `Icon=${installedIcon}`,
-      "Categories=Game;",
-      "StartupWMClass=openplay",
-      "NoDisplay=true",
-      "",
-    ].join("\n");
-
     const existing = fs.existsSync(desktopFile) ? fs.readFileSync(desktopFile, "utf8") : "";
-    if (!existing.includes(`Icon=${installedIcon}`) || !existing.includes("StartupWMClass=openplay")) {
-      fs.writeFileSync(desktopFile, content, "utf8");
+
+    if (app.isPackaged) {
+      // Packaged build (installed binary or AppImage): register a real, visible system app entry
+      const execTarget = process.env.APPIMAGE || process.execPath;
+      const content = [
+        "[Desktop Entry]",
+        "Version=1.0",
+        "Type=Application",
+        "Name=OpenPlay",
+        "GenericName=Game Library & Launcher",
+        "Comment=Open-source, offline-first cross-platform game launcher",
+        `Exec="${execTarget}" %U`,
+        `Icon=${installedIcon}`,
+        "Terminal=false",
+        "Categories=Game;",
+        "Keywords=games;launcher;library;steam;epic;gog;retro;console;",
+        "StartupNotify=true",
+        "StartupWMClass=openplay",
+        "",
+      ].join("\n");
+
+      if (existing !== content) {
+        fs.writeFileSync(desktopFile, content, "utf8");
+        refreshLinuxDesktopCaches(appsDir, hicolorDir);
+      }
+    } else {
+      // Dev mode: never overwrite an installed user .desktop entry (which has Exec= and is visible)
+      if (existing.includes("Exec=") && !existing.includes("NoDisplay=true")) {
+        return;
+      }
+      const devStub = [
+        "[Desktop Entry]",
+        "Type=Application",
+        "Name=OpenPlay",
+        "Comment=Cross-Platform Game Library & Launcher",
+        `Icon=${installedIcon}`,
+        "Categories=Game;",
+        "StartupWMClass=openplay",
+        "NoDisplay=true",
+        "",
+      ].join("\n");
+      if (!existing.includes(`Icon=${installedIcon}`) || !existing.includes("StartupWMClass=openplay")) {
+        fs.writeFileSync(desktopFile, devStub, "utf8");
+      }
     }
   } catch (err) {
     console.warn("[Linux Icon] Could not register openplay.desktop:", err);

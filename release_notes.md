@@ -1,39 +1,43 @@
-# 🎮 OpenPlay v1.0.0 — First Full Release
+The first full stable release of **OpenPlay** — an open-source, offline-first game library manager and launcher built for **Windows** and **Linux**.
 
-OpenPlay is now **v1.0.0** — an open-source, offline-first game library manager and launcher for **Windows** and **Linux**.
+## Highlights
 
----
+- **Cross-Platform Electron + Rust Core (`openplay-core`)**: Migrated the desktop shell to hardware-accelerated Electron (Chromium Skia) backed by a dedicated Rust daemon, bringing native Linux & SteamOS support (including Wine/Proton prefixes, DXVK/VKD3D, GameMode, and MangoHud) alongside Windows.
+- **Fullscreen Console Mode (`F12`)**: A couch- and ultrawide-ready (`16:9`–`32:9`) big-picture experience with a customizable boot splash, local profiles with a game-aware avatar picker, horizontal carousel & 2:3 cover grid, `LB`/`RB` filter presets, fullscreen game details, synthesized UI sounds, and its own built-in **`console-default`** theme.
+- **Save Location Discovery & Cloud Saves**: Automatic save/config detection across Windows, Linux XDG, Steam/Proton `compatdata`, Wine prefixes, and emulators (with cached PCGamingWiki lookups and manual routing), plus per-game opt-in SHA-256 deduplicated `.zip` save snapshots synced through your own cloud folder.
+- **Custom Cross-Platform Installer Wizard**: A themed, offline-capable installer for Windows and Linux with Express or Custom setup, system menu/shortcut registration, and an optional Quick Setup step for Cloud Sync and metadata API keys.
 
-## ✨ What's New Since `v0.1.4`
+## What's Changed Since `v0.1.4`
 
-### 📺 Fullscreen Console Mode (`F12`) & Console Themes
-- Dedicated fullscreen TV and ultrawide (`16:9` → `32:9`) interface toggleable anytime with `F12`, from the sidebar, or at launch.
-- Custom **OpenPlay Boot Splash** & **Local Profile Screen** with customizable looping video backdrops and a game-aware profile icon picker.
-- **Horizontal Carousel & 2:3 Cover Grid**, `LB`/`RB` filter presets, cinematic game details (`Overview`, `Achievements`, `Trailers`, `News`), synthesized UI audio cues, and a Console System Menu (`Start`).
-- Immutable built-in **`console-default`** theme alongside independent Desktop & Console tabs in the **Themes Manager**.
+### Added
+- **Fullscreen Console Mode & Dual-Mode Themes**: Independent Desktop and Console theme tabs in the Themes Manager with live hot-reloading and the protected built-in `console-default` theme.
+- **Desktop Controller & Gamepad Support**: Full 2D spatial/zone navigation in Desktop Mode with automatic Xbox/PlayStation/Nintendo button glyphs, contextual prompt bar, on-screen virtual keyboard, controller file browser, custom keybind remapping, and automatic suspension while in-game.
+- **Cross-OS Save Discovery & Versioned Cloud Saves**: Automatic backup/restore snapshots on Play & Exit with retention pruning, newer-peer detection before launch, and local pre-restore safety backups.
+- **Other-Device Play Indicator**: Subtle indicator on recently played titles when the last session occurred on a different device.
+- **Custom Installer Wizard & Linux Packages**: Self-extracting themed installers for Windows (`.exe`) and Linux (`.bin`), plus standalone Linux `.AppImage` and `.deb` builds.
+- **Feedback & Bug Reports**: New feedback card under **Settings → About OpenPlay** that pre-fills GitHub bug reports and feature requests with opt-in OS/version diagnostics.
+- **RetroAchievements Refresh**: Added RetroAchievements to the library refresh menu when signed in.
 
-### 🎮 Native Desktop Controller & Gamepad Navigation
-- Full 2D spatial + zone navigation across the desktop grid, details pane, top bar, context menus, and modals.
-- Auto-detected Xbox, PlayStation, and Nintendo glyphs, contextual prompt bar, On-Screen Virtual Keyboard, Controller File & Folder Browser, automatic input suspension while in-game, and full keybind remapping in Settings.
+### Improved
+- **In-App Auto-Updater (Windows & Linux)**: Coordinated Electron + `openplay-core` shutdown before applying updates, atomic `.part` download verification, and OS-aware asset selection (`.zip`/`.exe` on Windows; `.AppImage`/`.zip` on Linux).
+- **Verified Cloud Sync & Store Integrations**: Validated Multi-Leader CRDT cloud sync across devices along with Epic Games, GOG, and Xbox integrations.
+- **Linux Desktop Integration**: Proper application icon, `StartupWMClass`, and `.desktop` launcher registration so OpenPlay appears natively in system application search.
 
-### ☁️ Cross-OS Save Discovery & Versioned Cloud Saves
-- Automatic save & config folder discovery across Windows, Linux XDG, Steam `userdata` / Proton `compatdata`, OpenPlay Wine prefixes, and emulators (with cached PCGamingWiki lookup and manual multi-folder routing).
-- Per-game opt-in SHA-256 deduplicated `.zip` save snapshots on Play & Exit with retention pruning, newer-peer detection before launch, and pre-restore local safety backups.
+### Fixed
+- Fixed window failing to restore after exiting a game when **Minimize OpenPlay on game launch** is enabled.
+- Fixed taskbar restore issue where clicking the taskbar icon could fail to reopen the window.
+- Fixed random blank covers occurring on selected artwork.
+- Fixed double-clicking filter/sort dropdowns and UI panels accidentally maximizing the window.
+- Fixed Linux showing a generic Wayland icon instead of the OpenPlay icon.
+- Fixed Riot Games (League of Legends) installed-state detection and improved non-destructive Playnite backup & GOG metadata handling.
 
-### 🚀 Custom Cross-Platform Installer Wizard
-- Modern, OpenPlay-themed installer for **Windows** (`OpenPlay-Setup-1.0.0-win-x64.exe`) and **Linux** (`OpenPlay-Setup-1.0.0-linux-x64.bin`), alongside standalone `.AppImage` and `.deb` packages.
-- Supports **Express Install** or **Custom Setup**, user-local installation (keeping your library database untouched across updates), desktop/menu/startup shortcuts, and an optional **Quick Setup** step to pre-configure Cloud Sync and API keys (SteamGridDB, RetroAchievements, IGDB).
+## Downloads
 
-### 🔄 Reliable In-App Auto-Updater (Windows & Linux)
-- Coordinated Electron + `openplay-core` shutdown before applying updates (eliminating file-lock and timing races), atomic `.part` download verification, and full support for Windows `.zip`/`.exe` and Linux `.AppImage`/`.zip` updates.
+| Platform | Recommended Installer | Other Formats |
+| :--- | :--- | :--- |
+| **Windows (x64)** | `OpenPlay-Setup-1.0.0-win-x64.exe` | `OpenPlay-Update-1.0.0-win-x64.zip` *(portable / updater)* |
+| **Linux (x64)** | `OpenPlay-Setup-1.0.0-linux-x64.bin` | `OpenPlay-1.0.0-linux-x64.AppImage` · `OpenPlay-1.0.0-linux-x64.deb` · `OpenPlay-Update-1.0.0-linux-x64.zip` |
 
-### 💬 Feedback & Bug Reports + Quality-of-Life Polish
-- New **Feedback & Bug Reports** card under **Settings → About OpenPlay** with Bug/Feature templates and opt-in OS/version diagnostic info (including Linux distro detection).
-- Auto completion status with **Story Beaten** detection, subtle other-device play indicators, updated `README.md` showcase, and `openplay-core` networking improvements.
+> **Linux `.bin` quick start:** `chmod +x OpenPlay-Setup-1.0.0-linux-x64.bin && ./OpenPlay-Setup-1.0.0-linux-x64.bin`
 
----
-
-## 📦 Downloads
-
-- **Windows**: `OpenPlay-Setup-1.0.0-win-x64.exe` *(Custom Installer Wizard)* or `OpenPlay-Update-1.0.0-win-x64.zip`
-- **Linux**: `OpenPlay-Setup-1.0.0-linux-x64.bin` *(Custom Installer Wizard)*, `OpenPlay-1.0.0-linux-x64.AppImage`, or `OpenPlay-1.0.0-linux-x64.deb`
+**Full Changelog**: https://github.com/Screamycat/OpenPlay/compare/v0.1.4...v1.0.0

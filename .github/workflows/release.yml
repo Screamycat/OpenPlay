@@ -227,7 +227,7 @@ jobs:
           tag_name: ${{ inputs.tag || github.ref_name }}
           name: OpenPlay ${{ inputs.tag || github.ref_name }}
           body_path: ${{ steps.notes.outputs.has_notes == 'true' && 'release_notes.md' || '' }}
-          generate_release_notes: true
+          generate_release_notes: ${{ steps.notes.outputs.has_notes != 'true' }}
           draft: false
           prerelease: false
           files: release-assets/*

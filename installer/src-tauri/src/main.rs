@@ -543,20 +543,24 @@ fn configure_os_integration(
 
     let desktop_entry = format!(
         "[Desktop Entry]\n\
+         Version=1.0\n\
          Type=Application\n\
          Name=OpenPlay\n\
+         GenericName=Game Library & Launcher\n\
          Comment=Open-source, offline-first cross-platform game launcher\n\
          Exec=\"{exe}\" %U\n\
          Icon={icon}\n\
          Terminal=false\n\
          Categories=Game;\n\
+         Keywords=games;launcher;library;steam;epic;gog;retro;console;\n\
+         StartupNotify=true\n\
          StartupWMClass=openplay\n",
         exe = exe_path.to_string_lossy(),
         icon = icon_value,
     );
 
+    let apps_dir = home.join(".local/share/applications");
     if req.create_menu_shortcut {
-        let apps_dir = home.join(".local/share/applications");
         let _ = fs::create_dir_all(&apps_dir);
         let _ = fs::write(apps_dir.join("openplay.desktop"), &desktop_entry);
     }
@@ -576,6 +580,18 @@ fn configure_os_integration(
         let _ = fs::write(autostart_dir.join("openplay.desktop"), &desktop_entry);
     }
 
+    // Refresh desktop & icon caches so Fedora/KDE/GNOME search indexes OpenPlay immediately
+    let hicolor_dir = home.join(".local/share/icons/hicolor");
+    let _ = std::process::Command::new("update-desktop-database")
+        .arg(&apps_dir)
+        .output();
+    let _ = std::process::Command::new("gtk-update-icon-cache")
+        .args(["-f", "-t"])
+        .arg(&hicolor_dir)
+        .output();
+    let _ = std::process::Command::new("kbuildsycoca6").output();
+    let _ = std::process::Command::new("kbuildsycoca5").output();
+
     // Create ~/.local/bin/openplay symlink for CLI convenience
     let bin_dir = home.join(".local/bin");
     let _ = fs::create_dir_all(&bin_dir);
@@ -593,6 +609,8 @@ fn configure_os_integration(
          rm -f \"$HOME/.config/autostart/openplay.desktop\"\n\
          rm -f \"$HOME/Desktop/OpenPlay.desktop\"\n\
          rm -f \"$HOME/.local/bin/openplay\"\n\
+         command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database \"$HOME/.local/share/applications\" || true\n\
+         command -v kbuildsycoca6 >/dev/null 2>&1 && kbuildsycoca6 >/dev/null 2>&1 || true\n\
          rm -rf \"{dir}\"\n\
          echo \"OpenPlay has been uninstalled. Your library data in ~/.local/share/OpenPlay was preserved.\"\n",
         dir = install_dir.to_string_lossy(),
