@@ -37,6 +37,8 @@ win:
 linux:
   icon: src-tauri/icons/icon.png
   executableName: openplay
+  maintainer: ScreamyCat <screamys.cat@gmail.com>
+  vendor: ScreamyCat
   category: Game
   desktop:
     entry:
