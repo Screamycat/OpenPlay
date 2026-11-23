@@ -1,6 +1,10 @@
 <div align="center">
 
-<img src="./public/OpenPlayTitleOutline.svg" alt="OpenPlay" width="440" />
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./public/OpenPlayTitleOutline.svg" />
+  <source media="(prefers-color-scheme: light)" srcset="./public/OpenPlayTitle.svg" />
+  <img src="./public/OpenPlayTitleOutline.svg" alt="OpenPlay" width="440" />
+</picture>
 
 ### *The next-generation open-source game launcher and library manager.*  
 **Native Windows & Linux • Moving Cover Art • Built-in Superpowers • Zero Bloat**
