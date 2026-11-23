@@ -61,7 +61,7 @@ jobs:
         run: npm run build
 
       - name: Package Windows app directory with electron-builder
-        run: npx electron-builder --win dir --config electron-builder.yml
+        run: npx electron-builder --win dir --config electron-builder.yml --publish never
 
       - name: Create Windows Update ZIP payload
         shell: pwsh
@@ -160,7 +160,7 @@ jobs:
         run: npm run build
 
       - name: Package Linux packages with electron-builder
-        run: npx electron-builder --linux dir AppImage deb --config electron-builder.yml
+        run: npx electron-builder --linux dir AppImage deb --config electron-builder.yml --publish never
 
       - name: Create Linux Update ZIP & collect native packages
         run: |
