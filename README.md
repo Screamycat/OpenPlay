@@ -1,10 +1,11 @@
 <div align="center">
 
-# 🎮 OpenPlay
+<img src="./public/OpenPlayTitleOutline.svg" alt="OpenPlay" width="440" />
 
 ### *The next-generation open-source game launcher and library manager.*  
 **Native Windows & Linux • Moving Cover Art • Built-in Superpowers • Zero Bloat**
 
+[![Release](https://img.shields.io/github/v/release/Screamycat/OpenPlay?label=Release&color=783efe)](https://github.com/Screamycat/OpenPlay/releases/latest)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Electron](https://img.shields.io/badge/Desktop-Electron-47848F?logo=electron&logoColor=white)](https://www.electronjs.org/)
 [![Rust](https://img.shields.io/badge/Backend-Rust-DEA584?logo=rust&logoColor=white)](https://www.rust-lang.org)
@@ -39,23 +40,23 @@ A blazing-fast, cross-platform sanctuary for your entire game collection built o
 <div align="center">
 
 ### 🖥️ Desktop Split View
-*A sleek split layout designed for responsive library exploration. Navigate an adaptive grid of animated cover art on the left, paired with an immersive glassmorphic hero backdrop on the right featuring transparent clear logos, live Steam player counts, HowLongToBeat completion metrics, user and critic review scores, community patch notes, and instant video trailers.*
+*A sleek split layout designed for responsive library exploration. Navigate an adaptive grid of animated cover art on the left, paired with an immersive glassmorphic hero backdrop on the right featuring transparent clear logos, live Steam player counts, HowLongToBeat completion metrics, user and critic review scores, auto completion statuses with Story Beaten detection, subtle other-device play indicators, community patch notes, and instant video trailers.*
 
-<img src="https://i.imgur.com/3xwQqDW.gif">
+<img src="./docs/media/desktop-split-view.gif" alt="OpenPlay Desktop Split View" />
 
 ---
 
 ### 🎨 Live SteamGridDB Asset Explorer
 *Search, preview, and apply community-curated vertical covers, heroes, transparent clear logos, and animated WebM posters directly inside OpenPlay. Includes style categorization, and instant 1-click downloads with zero manual asset management.*
 
-<img src="https://i.imgur.com/bVsgGNL.jpeg">
+<img src="./docs/media/steamgriddb-explorer.jpg" alt="OpenPlay SteamGridDB Asset Explorer" />
 
 ---
 
 ### 🏆 Achievements Hub
-*Track your gaming legacy across modern storefronts and retro emulators in a single unified hall of fame. View global unlock rates, trophy rarity tiers, total gamerscore, and milestone completion percentages across Steam and RetroAchievements in real time.*
+*Track your gaming legacy across modern storefronts and retro emulators in a single unified hall of fame. View global unlock rates, trophy rarity tiers, total gamerscore, and milestone completion percentages across Steam, Epic Games, and RetroAchievements in real time.*
 
-<img src="https://i.imgur.com/6NA0erk.png">
+<img src="./docs/media/achievements-hub.png" alt="OpenPlay Achievements Hub" />
 
 ---
 
@@ -79,6 +80,11 @@ A blazing-fast, cross-platform sanctuary for your entire game collection built o
 - **Custom Boot Splash & Local Profile Screen**: Built-in OpenPlay boot animation (swappable with any `.mp4`/`.webm` video), offline local profiles with an ambient moving backdrop (also customizable to any looping video), and a **Game-Aware Profile Icon Picker** pulling icons and covers from your installed games & ROMs.
 - **Horizontal Carousel & Expanded 2:3 Cover Grid**: Full-bleed crossfading Hero Artwork paired with standard 2:3 vertical Steam-ratio game cards, `LB`/`RB` filter presets, cinematic fullscreen Game Details (`Overview`, `Achievements`, `Trailers`, `News`), subtle synthesized UI audio cues, and a Console System Menu (`Start`) with OS power controls.
 
+---
+
+### 🚀 Custom Cross-Platform Installer Wizard
+*A sleek, OpenPlay-themed installer for both Windows and Linux with Express Install or Custom Setup, user-local installation (preserving your database across updates), and an optional Quick Setup step to pre-configure Cloud Sync and API keys before your first launch.*
+
 </div>
 
 ---
@@ -95,7 +101,7 @@ Every launcher has its own design philosophy and purpose. Here is how they compa
 | **Technology Stack** | **Electron + Rust Core Daemon + React 19** | C# / WPF (.NET) | Python + GTK | Electron (Chromium + Node.js) |
 | **Memory Footprint (Idle)** | 🟢 **Optimized (~180–240MB with Skia GPU)** | 🟡 Moderate (~180–300MB) | 🟢 Low (~120–200MB) | 🔴 Higher (~350–600MB) |
 | **100% Offline-First (Local SQLite)** | ✅ **Yes (Zero Telemetry)** | ✅ **Yes** | ✅ **Yes** | ✅ **Yes** |
-| **Setup Experience** | ⚡ **All-in-One Out of Box** | 🔌 Requires 10+ Plugins | ⚙️ Runner / Script Setup | ⚡ Store Login Out of Box |
+| **Setup Experience** | ⚡ **Custom Themed Wizard + All-in-One Out of Box** | 🔌 Requires 10+ Plugins | ⚙️ Runner / Script Setup | ⚡ Store Login Out of Box |
 | *Library Unification & Management* | | | | |
 | **Universal Multi-Store Aggregator** | ✅ **All Stores + Local + Retro** | 🔌 Requires Store Plugins | ⚠️ Runner / Script Scraper | ❌ Epic, GOG & Amazon only |
 | **Native Emulation & ROM Scanner** | ✅ **Built-in (RetroArch & Standalones)** | 🔌 Built-in / Plugins | 👑 Runner Engine | ❌ *No* |
@@ -106,7 +112,7 @@ Every launcher has its own design philosophy and purpose. Here is how they compa
 | **Save Location Discovery & Cloud Save Versioning** | ✅ **Built-in (Cross-OS Auto-Detect, Manual Routing & Latest-X Snapshots)** | 🔌 Third-party (Ludusavi plugin) | ❌ Manual | ✅ Built-in (Store Cloud Saves) |
 | **Direct Store Downloading & Cloud Saves** | ⚠️ Directs to Store / Native Launch | ⚠️ Directs to Store Client | 🔌 Custom Scripts | 👑 **Built-in (Legendary/Nile)** |
 | **Wine / Proton Prefix Tuning** | ⚠️ Direct Execution / Steam Proton | ❌ N/A | 👑 **Advanced Deep Runner Tuning** | ✅ Integrated Wine/Proton Tools |
-| **Visuals, Media & Metadata** | | | | |
+| *Visuals, Media & Metadata* | | | | |
 | **Animated & Moving Video Covers** | ✅ **Built-in (WebM, MP4, APNG, GIF)** | ❌ Static Only  | ❌ Static Only | ❌ Static Only |
 | **In-App SteamGridDB Asset Explorer** | ✅ **Built-in (Animation support)** | 🔌 Requires Plugin  | ⚠️ Basic Scraper | ⚠️ Basic Image Selection |
 | **In-App Video Trailers** | ✅ **Built-in (Store / YouTube / Video files)** | 🔌 Requires Plugin | ❌ *No* | ❌ *No* |
@@ -156,7 +162,7 @@ We have developed a **1-click Playnite Backup Importer**:
 2. OpenPlay parses your categories, completion states, playtime records, and artwork links.
 3. Your entire library is instantly ready on Windows or native Linux with zero setup friction.
 
-> With more migration to come?
+> Built to preserve your library history as you move to a cross-platform setup.
 ---
 
 ## ☁️ Cross-Device Cloud Sync & Zero-Downtime Backups
@@ -198,7 +204,7 @@ graph TD
 ```
 
 - **Runtime & Desktop Shell**: [Electron](https://www.electronjs.org/) with Chromium GPU hardware acceleration and zero-copy custom protocol streaming (`openplay://file/...`)
-- **Backend Core**: [Rust](https://www.rust-lang.org/) daemon (`openplay-core`) managing multi-store scrapers, ChaCha20-Poly1305 sync, emulation engines, and background tasks
+- **Backend Core**: [Rust](https://www.rust-lang.org/) daemon (`openplay-core`) managing multi-store scrapers, Multi-Leader CRDT cloud sync & SHA-256 deduplicated saves, emulation engines, and background tasks
 - **Database**: Embedded local SQLite via `rusqlite` with offline-first indexing
 - **Frontend Framework**: [React 19](https://react.dev/) + [TypeScript](https://www.typescriptlang.org/)
 - **Styling**: [Tailwind CSS v4](https://tailwindcss.com/) with decoupled custom themes and Anti-Softlock immunity safeguards
@@ -206,23 +212,25 @@ graph TD
 
 ---
 
-## 🚀 Getting Started (Development)
+## 📥 Download & Installation
+
+Download the latest release from **[GitHub Releases](https://github.com/Screamycat/OpenPlay/releases/latest)**:
+- **Windows**: Run `OpenPlay-Setup-<version>-win-x64.exe` (custom OpenPlay installer wizard with optional Quick Setup for Cloud Sync & API keys).
+- **Linux**: Run `OpenPlay-Setup-<version>-linux-x64.bin` (custom OpenPlay installer wizard), or grab the standalone `.AppImage` or `.deb` package.
+
+---
+
+## 🛠️ Building from Source (Development)
 
 ### Prerequisites
 
 Ensure you have the following installed on your machine:
-- **Node.js** (v18+ recommended) & `npm`
+- **Node.js** (v20+ recommended) & `npm`
 - **Rust & Cargo** ([rustup.rs](https://rustup.rs/))
 - **Windows**: [Visual Studio C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/)
-- **Linux**: Standard build tools (`build-essential`, `curl`, `wget`, `file`, `libssl-dev`)
+- **Linux**: Standard build tools (`build-essential`, `curl`, `wget`, `file`, `libssl-dev`), plus `libwebkit2gtk-4.1-dev` and `libgtk-3-dev` if building the custom installer (`installer/`)
 
-### Installation (Windows & Linux)
-
-Download the latest release from **[GitHub Releases](https://github.com/Screamycat/OpenPlay/releases)**:
-- **Windows**: Run `OpenPlay-Setup-<version>-win-x64.exe` (custom OpenPlay installer wizard with optional quick-setup for Cloud Sync & API keys).
-- **Linux**: Run `OpenPlay-Setup-<version>-linux-x64.bin` (custom OpenPlay installer wizard), or grab the standalone `.AppImage` or `.deb` package.
-
-### Development Setup
+### Setup & Run
 
 1. **Clone the repository:**
    ```bash
