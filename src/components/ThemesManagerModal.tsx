@@ -547,7 +547,7 @@ export const ThemesManagerModal: React.FC<ThemesManagerModalProps> = ({
                           ? activeConsoleThemeId
                           : activeThemeId) && (
                         <span className="text-[10px] px-2 py-0.5 rounded-full theme-accent-pill font-mono font-bold tracking-wider">
-                          ACTIVE {getThemeMode(selectedTheme).toUpperCase()} THEME
+                          ACTIVE
                         </span>
                       )}
                     </div>

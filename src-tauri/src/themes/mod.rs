@@ -186,10 +186,17 @@ pub fn seed_default_theme_to(themes_dir: &Path, resource_dir: Option<&Path>) -> 
             }
         }
 
-        // Remove legacy generated SVG wireframes if superseded by bundled screenshots
-        for legacy_svg in ["screenshot_1.svg", "screenshot_2.svg", "screenshot_3.svg"] {
-            if !bundled_dir.join(legacy_svg).exists() {
-                let stale = default_dir.join(legacy_svg);
+        // Remove legacy screenshots if superseded by bundled screenshots
+        for legacy_file in [
+            "screenshot_1.svg",
+            "screenshot_2.svg",
+            "screenshot_3.svg",
+            "screenshot_1.gif",
+            "screenshot_2.jpg",
+            "screenshot_3.png",
+        ] {
+            if !bundled_dir.join(legacy_file).exists() {
+                let stale = default_dir.join(legacy_file);
                 if stale.exists() {
                     let _ = fs::remove_file(stale);
                 }
@@ -887,9 +894,12 @@ mod tests {
             "theme.json",
             "theme.css",
             "icon.svg",
-            "screenshot_1.gif",
-            "screenshot_2.jpg",
-            "screenshot_3.png",
+            "screenshot_1.svg",
+            "screenshot_2.svg",
+            "screenshot_3.svg",
+            "screenshot_4.svg",
+            "screenshot_5.svg",
+            "screenshot_6.svg",
         ] {
             let p = real_bundled_dir.join(expected);
             assert!(p.is_file(), "Missing bundled default theme file: {:?}", p);
@@ -900,7 +910,7 @@ mod tests {
             );
         }
 
-        // 2. Verify seed_default_theme_to copies every asset from resource_dir and removes legacy SVG wireframes
+        // 2. Verify seed_default_theme_to copies every asset from resource_dir and removes legacy screenshot files
         let temp_root = std::env::temp_dir().join(format!(
             "openplay_theme_seed_test_{}",
             uuid::Uuid::new_v4()
@@ -913,18 +923,25 @@ mod tests {
         fs::create_dir_all(&mock_bundled).unwrap();
         fs::create_dir_all(&target_default_dir).unwrap();
 
-        // Pre-populate stale wireframe SVGs from older OpenPlay installs
-        fs::write(target_default_dir.join("screenshot_1.svg"), "<svg>legacy</svg>").unwrap();
-        fs::write(target_default_dir.join("screenshot_2.svg"), "<svg>legacy</svg>").unwrap();
-        fs::write(target_default_dir.join("screenshot_3.svg"), "<svg>legacy</svg>").unwrap();
+        // Pre-populate stale screenshots from older OpenPlay installs
+        fs::write(target_default_dir.join("screenshot_1.gif"), b"legacy").unwrap();
+        fs::write(target_default_dir.join("screenshot_2.jpg"), b"legacy").unwrap();
+        fs::write(target_default_dir.join("screenshot_3.png"), b"legacy").unwrap();
 
         // Populate mock resource bundle
-        fs::copy(real_bundled_dir.join("theme.json"), mock_bundled.join("theme.json")).unwrap();
-        fs::copy(real_bundled_dir.join("theme.css"), mock_bundled.join("theme.css")).unwrap();
-        fs::copy(real_bundled_dir.join("icon.svg"), mock_bundled.join("icon.svg")).unwrap();
-        fs::write(mock_bundled.join("screenshot_1.gif"), b"GIF89a-mock").unwrap();
-        fs::write(mock_bundled.join("screenshot_2.jpg"), b"\xFF\xD8\xFF-mock").unwrap();
-        fs::write(mock_bundled.join("screenshot_3.png"), b"\x89PNG-mock").unwrap();
+        for asset in [
+            "theme.json",
+            "theme.css",
+            "icon.svg",
+            "screenshot_1.svg",
+            "screenshot_2.svg",
+            "screenshot_3.svg",
+            "screenshot_4.svg",
+            "screenshot_5.svg",
+            "screenshot_6.svg",
+        ] {
+            fs::copy(real_bundled_dir.join(asset), mock_bundled.join(asset)).unwrap();
+        }
 
         seed_default_theme_to(&target_themes_dir, Some(&mock_res_dir)).unwrap();
 
@@ -932,9 +949,12 @@ mod tests {
             "theme.json",
             "theme.css",
             "icon.svg",
-            "screenshot_1.gif",
-            "screenshot_2.jpg",
-            "screenshot_3.png",
+            "screenshot_1.svg",
+            "screenshot_2.svg",
+            "screenshot_3.svg",
+            "screenshot_4.svg",
+            "screenshot_5.svg",
+            "screenshot_6.svg",
         ] {
             assert!(
                 target_default_dir.join(expected).is_file(),
@@ -942,10 +962,10 @@ mod tests {
                 expected
             );
         }
-        for legacy in ["screenshot_1.svg", "screenshot_2.svg", "screenshot_3.svg"] {
+        for legacy in ["screenshot_1.gif", "screenshot_2.jpg", "screenshot_3.png"] {
             assert!(
                 !target_default_dir.join(legacy).exists(),
-                "Expected legacy wireframe {} to be cleaned up",
+                "Expected legacy screenshot {} to be cleaned up",
                 legacy
             );
         }

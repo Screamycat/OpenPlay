@@ -4,7 +4,7 @@
   "name": "OpenPlay Console",
   "version": "1.0.0",
   "author": "OpenPlay Developers",
-  "description": "The official built-in fullscreen console theme for OpenPlay. Engineered for both 16:9 living-room TVs and 32:9 ultrawide displays with dynamic hero backdrops, Steam-ratio vertical box art, and fluid carousel-to-grid transitions.",
+  "description": "The official built-in fullscreen console theme for OpenPlay.",
   "icon": "icon.svg",
   "screenshots": [
     "screenshot_1.svg",

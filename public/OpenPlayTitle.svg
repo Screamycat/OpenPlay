@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 4308.432 1054.883">
+  <defs>
+    <style>
+      .cls-1{fill:none;stroke:#000000;stroke-width:70;stroke-miterlimit:10}
+      .cls-2{fill:none;stroke:#000000;stroke-width:70;stroke-linecap:round;stroke-miterlimit:10}
+      .cls-3{fill:#000000;stroke:#000000;stroke-width:50;stroke-linecap:round;stroke-miterlimit:10}
+      .cls-4{font-family:&apos;Source Sans 3&apos;, sans-serif;font-size:12px;fill:#000000}
+      .cls-5{font-family:Nunito, sans-serif;font-size:750px;fill:#000000}
+    </style>
+  </defs>
+  <title>Artboard 1</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <path d="M513.791 795.415 C469.16 795.415 429.371 792.759 393.006 808.881 C350.845 827.572 334.152 867.764 306.624 903.02 C282.582 933.812 248.292 975.475 194.698 977.81 C194.697 977.81 102.436 985.081 78.406 906.811 C58.829 843.046 70.201 732.94 78.406 658.405 C91.023 543.778 98.322 441.323 187.353 375.54 C232.315 342.318 296.3 337.592 356.691 363.197 C357.218 363.261 357.805 363.255 358.312 363.461 C408.92 384.109 441.616 393.902 513.791 393.902 C585.966 393.902 618.662 384.109 669.27 363.461 C669.777 363.255 670.364 363.261 670.891 363.197 C731.282 337.592 795.267 342.318 840.229 375.54 C929.26 441.323 936.559 543.778 949.176 658.405 C957.381 732.94 968.753 843.046 949.176 906.811 C925.146 985.081 832.885 977.81 832.884 977.81 C779.29 975.475 745 933.812 720.958 903.02 C693.43 867.764 676.737 827.572 634.576 808.881 C598.211 792.759 558.422 795.415 513.791 795.415 Z" class="cls-1"/>
+    <path d="M733.994 205.863 C733.994 81.529 633.202 51.777 508.868 51.777 C384.534 51.777 283.741 81.529 283.741 205.863 L283.741 338.369" class="cls-2"/>
+    <line x1="183.741" y1="582.418" x2="383.741" y2="582.418" class="cls-2"/>
+    <line x1="283.741" y1="682.418" x2="283.741" y2="482.418" class="cls-2"/>
+    <circle cx="772.119" cy="507.418" r="25" class="cls-3"/>
+    <circle cx="687.187" cy="643.932" r="25" class="cls-3"/>
+    <text transform="matrix(1 0 0 1 2416.547 -3.912)" x="0" y="0" xml:space="preserve" class="cls-4"><tspan x="0" y="0">https://fonts.google.com/</tspan></text>
+    <text transform="matrix(1 0 0 1 994.932 865.682)" x="0" y="0" xml:space="preserve" class="cls-5"><tspan x="0" y="0">OpenPlay</tspan></text>
+  </g>
+</svg>

@@ -6,9 +6,12 @@
   "description": "The official dark glassmorphic baseline theme for OpenPlay.",
   "icon": "icon.svg",
   "screenshots": [
-    "screenshot_1.gif",
-    "screenshot_2.jpg",
-    "screenshot_3.png"
+    "screenshot_1.svg",
+    "screenshot_2.svg",
+    "screenshot_3.svg",
+    "screenshot_4.svg",
+    "screenshot_5.svg",
+    "screenshot_6.svg"
   ],
   "css": "theme.css",
   "colors": {
