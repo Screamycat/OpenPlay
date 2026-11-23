@@ -706,8 +706,6 @@
       } else if (step === 1) {
         btnPrimary.textContent = "Continue";
       } else if (step === 2) {
-        btnSecondary.style.display = "inline-flex";
-        btnSecondary.textContent = "Skip & Install";
         btnPrimary.textContent = "Install OpenPlay";
       } else if (step === 3) {
         if (installedExePath) {
@@ -775,7 +773,7 @@
     });
 
     btnSecondary.addEventListener("click", () => {
-      if (step === 0 || step === 2) {
+      if (step === 0) {
         runInstall(true);
       }
     });
