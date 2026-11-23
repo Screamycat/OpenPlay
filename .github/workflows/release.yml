@@ -212,11 +212,21 @@ jobs:
       - name: List release assets
         run: ls -lh release-assets/
 
+      - name: Check for custom release notes
+        id: notes
+        run: |
+          if [ -f "release_notes.md" ]; then
+            echo "has_notes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_notes=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ inputs.tag || github.ref_name }}
           name: OpenPlay ${{ inputs.tag || github.ref_name }}
+          body_path: ${{ steps.notes.outputs.has_notes == 'true' && 'release_notes.md' || '' }}
           generate_release_notes: true
           draft: false
           prerelease: false
