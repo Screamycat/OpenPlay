@@ -155,16 +155,12 @@ async function createWindow() {
       }
     }
     if (!loaded) {
-      console.warn("[Electron] Could not connect to dev server, falling back to dist/index.html");
-      const indexPath = path.join(__dirname, "../dist/index.html");
-      if (fs.existsSync(indexPath)) {
-        await mainWindow.loadFile(indexPath);
-      }
+      console.warn("[Electron] Could not connect to dev server, falling back to openplay://app/index.html");
+      await mainWindow.loadURL("openplay://app/index.html");
     }
   } else {
-    const indexPath = path.join(__dirname, "../dist/index.html");
-    console.log("[Electron] Loading production file:", indexPath);
-    await mainWindow.loadFile(indexPath);
+    console.log("[Electron] Loading production bundle via openplay://app/index.html");
+    await mainWindow.loadURL("openplay://app/index.html");
   }
 }
 
