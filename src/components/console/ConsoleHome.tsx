@@ -36,6 +36,8 @@ import {
 } from "lucide-react";
 import { Game } from "../../types/game";
 import { ConsoleProfile } from "../../types/config";
+import { invoke } from "../../utils/ipc";
+import { resolveGameAchievementSummary } from "../../utils/merger";
 import {
   formatFileSize,
   formatPlaytime,
@@ -104,6 +106,7 @@ interface ConsoleHomeProps {
   onOpenSystemMenu: () => void;
   onOpenProfileSwitch: () => void;
   onOpenAchievementHub: () => void;
+  onRequestHydrateGame?: (gameId: string, siblingIds?: string[]) => void;
   isOverlayActive: boolean;
 }
 
@@ -168,6 +171,7 @@ export const ConsoleHome: React.FC<ConsoleHomeProps> = ({
   onOpenSystemMenu,
   onOpenProfileSwitch,
   onOpenAchievementHub,
+  onRequestHydrateGame,
   isOverlayActive,
 }) => {
   const {
@@ -429,9 +433,10 @@ export const ConsoleHome: React.FC<ConsoleHomeProps> = ({
   }, [visibleGames, selectedGameId]);
 
   const selectedGame = selectedIndex >= 0 ? visibleGames[selectedIndex] : null;
-  const selectedAchSummary = selectedGame
-    ? achievementSummaryMap[selectedGame.id] || null
-    : null;
+  const selectedAchSummary = useMemo(
+    () => resolveGameAchievementSummary(selectedGame, achievementSummaryMap),
+    [selectedGame, achievementSummaryMap]
+  );
   const selectedEffectiveStatus = useMemo(
     () =>
       selectedGame
@@ -439,6 +444,33 @@ export const ConsoleHome: React.FC<ConsoleHomeProps> = ({
         : null,
     [selectedGame, selectedAchSummary]
   );
+
+  // Hydrate full detail columns (description, trailers, screenshots, etc.) into the shared
+  // App.tsx single-source-of-truth cache whenever the focused Console game changes.
+  useEffect(() => {
+    if (!selectedGame || !onRequestHydrateGame) return;
+    const siblingIds = selectedGame.sibling_games?.map((s) => s.id);
+    const timer = window.setTimeout(() => {
+      onRequestHydrateGame(selectedGame.id, siblingIds);
+    }, 120);
+    return () => window.clearTimeout(timer);
+  }, [selectedGame?.id, onRequestHydrateGame]);
+
+  // Lazily fetch & persist missing HLTB once per game so Console & Desktop share identical data
+  const hltbRequestedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!selectedGame) return;
+    if (selectedGame.hltb_main !== undefined && selectedGame.hltb_main !== null) return;
+    if (hltbRequestedRef.current.has(selectedGame.id)) return;
+
+    const targetId = selectedGame.id;
+    const targetTitle = selectedGame.title;
+    const timer = window.setTimeout(() => {
+      hltbRequestedRef.current.add(targetId);
+      invoke<any>("get_game_hltb", { gameId: targetId, title: targetTitle }).catch(() => {});
+    }, 450);
+    return () => window.clearTimeout(timer);
+  }, [selectedGame?.id, selectedGame?.title, selectedGame?.hltb_main]);
 
   // Keep selectedGameId synced when filters narrow list
   useEffect(() => {
@@ -1731,7 +1763,7 @@ export const ConsoleHome: React.FC<ConsoleHomeProps> = ({
                         <GridInfoRow
                           icon={<ShieldAlert className="w-3 h-3" />}
                           label="Age Rating"
-                          value={selectedGame.age_rating}
+                          value={selectedGame.age_rating || "All Ages"}
                         />
                         <GridInfoRow
                           icon={<Calendar className="w-3 h-3" />}

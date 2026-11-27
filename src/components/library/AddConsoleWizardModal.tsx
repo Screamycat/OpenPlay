@@ -1,6 +1,12 @@
 import React, { useState, useMemo, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { ConfiguredConsole, ConsolePreset, ConsoleEmulatorOption } from "../../types/emulator";
+import {
+  ConfiguredConsole,
+  ConsolePreset,
+  ConsoleEmulatorOption,
+  InstalledEmulatorApp,
+  ResolvedEmulatorTarget,
+} from "../../types/emulator";
 import { CONSOLE_PRESETS, getMergedConsolePresets } from "../../data/consoles";
 import {
   X,
@@ -18,6 +24,7 @@ import {
   FileCode,
   Loader2,
   Sparkles,
+  AppWindow,
 } from "lucide-react";
 import { PlatformIcon } from "../icons/PlatformIcons";
 
@@ -30,12 +37,54 @@ interface AddConsoleWizardModalProps {
 type WizardStep = "console" | "emulator" | "customize";
 type SortMode = "popular" | "alpha" | "manufacturer";
 
+function normalizeCoreForOs(core: string | undefined, isLinux: boolean): string {
+  if (!core) return "";
+  const trimmed = core.trim();
+  if (!trimmed) return "";
+  if (isLinux && trimmed.toLowerCase().endsWith(".dll")) {
+    return `${trimmed.slice(0, -4)}.so`;
+  }
+  if (!isLinux && trimmed.toLowerCase().endsWith(".so")) {
+    return `${trimmed.slice(0, -3)}.dll`;
+  }
+  return trimmed;
+}
+
+function getDefaultArgsForOs(emu: ConsoleEmulatorOption, isLinux: boolean): string {
+  if (
+    isLinux &&
+    emu.emulator_type === "retroarch" &&
+    emu.default_args === '-L "cores/{core}" "{rom_path}"'
+  ) {
+    return '-L "{core}" "{rom_path}"';
+  }
+  return emu.default_args;
+}
+
 export const AddConsoleWizardModal: React.FC<AddConsoleWizardModalProps> = ({
   isOpen,
   onClose,
   onConsoleAdded,
 }) => {
   const [currentStep, setCurrentStep] = useState<WizardStep>("console");
+  const [isLinux, setIsLinux] = useState<boolean>(() => {
+    if (typeof navigator !== "undefined") {
+      const plat = (navigator.platform || navigator.userAgent || "").toLowerCase();
+      return plat.includes("linux");
+    }
+    return false;
+  });
+
+  useEffect(() => {
+    if (!isOpen) return;
+    invoke<{ os?: string }>("get_system_info")
+      .then((info) => {
+        if (info?.os) {
+          setIsLinux(info.os.toLowerCase() === "linux");
+        }
+      })
+      .catch(() => {});
+  }, [isOpen]);
 
   // Step 1: Console state
   const [allPresets, setAllPresets] = useState<ConsolePreset[]>(CONSOLE_PRESETS);
@@ -56,6 +105,11 @@ export const AddConsoleWizardModal: React.FC<AddConsoleWizardModalProps> = ({
   const [availableCores, setAvailableCores] = useState<string[]>([]);
   const [isLoadingCores, setIsLoadingCores] = useState(false);
   const [isEmulatorPickerOpen, setIsEmulatorPickerOpen] = useState(false);
+  const [installedLinuxApps, setInstalledLinuxApps] = useState<InstalledEmulatorApp[]>([]);
+  const [isInstalledAppsOpen, setIsInstalledAppsOpen] = useState(false);
+  const [isLoadingLinuxApps, setIsLoadingLinuxApps] = useState(false);
+  const [linuxAppsError, setLinuxAppsError] = useState<string | null>(null);
+  const [linuxAppSearch, setLinuxAppSearch] = useState("");
 
   // Step 3: Customize state
   const [tabName, setTabName] = useState("");
@@ -69,48 +123,86 @@ export const AddConsoleWizardModal: React.FC<AddConsoleWizardModalProps> = ({
   const handleSelectConsole = (preset: ConsolePreset) => {
     setSelectedConsole(preset);
     setTabName(preset.name);
+    setIsInstalledAppsOpen(false);
 
     const defaultEmu = preset.emulators[0] || null;
     setSelectedEmulator(defaultEmu);
     if (defaultEmu) {
-      setCustomArgs(defaultEmu.default_args);
-      setSelectedCore(defaultEmu.recommended_core || "");
+      setCustomArgs(getDefaultArgsForOs(defaultEmu, isLinux));
+      setSelectedCore(normalizeCoreForOs(defaultEmu.recommended_core, isLinux));
     } else {
       setCustomArgs('"{rom_path}"');
       setSelectedCore("");
     }
   };
 
-  // If RetroArch executable path changes, scan cores folder
+  // If RetroArch executable path changes, scan cores folder (portable, system, Flatpak, Snap)
   useEffect(() => {
     if (selectedEmulator?.emulator_type === "retroarch" && executablePath.trim()) {
       setIsLoadingCores(true);
       invoke<string[]>("scan_retroarch_cores", { retroarchPath: executablePath.trim() })
         .then((cores) => {
-          setAvailableCores(cores || []);
-          if (!selectedCore && cores && cores.length > 0) {
-            setSelectedCore(cores[0]);
+          const list = cores || [];
+          setAvailableCores(list);
+          if (list.length > 0) {
+            setSelectedCore((prev) => {
+              const prevStem = prev
+                .trim()
+                .replace(/\\/g, "/")
+                .split("/")
+                .pop()
+                ?.replace(/\.(dll|so|dylib)$/i, "")
+                .toLowerCase();
+              if (prevStem) {
+                const exact = list.find(
+                  (c) => c.replace(/\.(dll|so|dylib)$/i, "").toLowerCase() === prevStem
+                );
+                if (exact) return exact;
+              }
+              return prev.trim() ? prev : list[0];
+            });
           }
         })
         .catch((err) => console.warn("Failed to scan cores:", err))
         .finally(() => setIsLoadingCores(false));
+    } else if (selectedEmulator?.emulator_type !== "retroarch") {
+      setAvailableCores([]);
     }
   }, [executablePath, selectedEmulator]);
 
-  // Browse executable (.exe)
+  // Browse executable (cross-platform: .exe on Windows; ELF binary, AppImage, .sh, .desktop, or .exe on Linux)
   const handleBrowseExecutable = async () => {
     try {
-      const selected = await invoke<string | null>("select_file", {
-        filter: "Executable Files (*.exe;*.AppImage;*)|*.exe;*.AppImage;*|All files (*.*)|*.*",
-      });
+      const filter = isLinux
+        ? "Executable Files (*.AppImage;*.sh;*.desktop;*.exe;*)|*.AppImage;*.sh;*.desktop;*.exe;*|All files (*.*)|*.*"
+        : "Executable Files (*.exe;*.bat;*.cmd)|*.exe;*.bat;*.cmd|All files (*.*)|*.*";
+      const selected = await invoke<string | null>("select_file", { filter });
       if (selected) {
-        setExecutablePath(selected);
+        let finalCommand = selected;
+        let resolvedName: string | null = null;
+
+        if (isLinux && selected.toLowerCase().endsWith(".desktop")) {
+          try {
+            const resolved = await invoke<ResolvedEmulatorTarget>("resolve_linux_emulator_target", {
+              path: selected,
+            });
+            if (resolved?.command) {
+              finalCommand = resolved.command;
+              resolvedName = resolved.name || null;
+            }
+          } catch (err) {
+            console.warn("Failed to resolve .desktop target:", err);
+          }
+        }
+
+        setExecutablePath(finalCommand);
+        setIsInstalledAppsOpen(false);
 
         // If 'Custom Standalone' or no emulator selected, automatically sniff the name from the binary stem
         if (!selectedEmulator || selectedEmulator.name.toLowerCase().includes("custom")) {
-          const parts = selected.replace(/\\/g, "/").split("/");
+          const parts = finalCommand.replace(/\\/g, "/").split("/");
           const filename = parts[parts.length - 1] || "";
-          const stem = filename.replace(/\.[^/.]+$/, "");
+          const stem = resolvedName || filename.replace(/\.[^/.]+$/, "");
           if (stem) {
             setSelectedEmulator({
               name: `${stem} (Standalone)`,
@@ -124,6 +216,99 @@ export const AddConsoleWizardModal: React.FC<AddConsoleWizardModalProps> = ({
       console.warn("Browse executable error:", err);
     }
   };
+
+  // Toggle on-demand Linux installed apps / Flatpaks picker
+  const handleToggleInstalledApps = async () => {
+    const nextOpen = !isInstalledAppsOpen;
+    setIsInstalledAppsOpen(nextOpen);
+    if (nextOpen && (installedLinuxApps.length === 0 || linuxAppsError)) {
+      setIsLoadingLinuxApps(true);
+      setLinuxAppsError(null);
+      try {
+        const apps = await invoke<InstalledEmulatorApp[]>("list_installed_linux_emulators");
+        setInstalledLinuxApps(apps || []);
+      } catch (err: any) {
+        console.warn("Failed to list installed Linux emulators:", err);
+        const msg = typeof err === "string" ? err : err?.message || "Failed to query installed apps";
+        setLinuxAppsError(
+          msg.includes("not recognized")
+            ? "Backend (openplay-core) needs to be rebuilt and restarted to enable installed emulator discovery."
+            : msg
+        );
+      } finally {
+        setIsLoadingLinuxApps(false);
+      }
+    }
+  };
+
+  const handlePickInstalledLinuxApp = (app: InstalledEmulatorApp) => {
+    setExecutablePath(app.command);
+    setIsInstalledAppsOpen(false);
+
+    if (!selectedEmulator || selectedEmulator.name.toLowerCase().includes("custom")) {
+      const isRa =
+        app.name.toLowerCase().includes("retroarch") ||
+        app.command.toLowerCase().includes("retroarch");
+      setSelectedEmulator({
+        name: `${app.name} (${app.source})`,
+        emulator_type: isRa ? "retroarch" : "standalone",
+        default_args: isRa ? '-L "{core}" "{rom_path}"' : customArgs || '"{rom_path}"',
+      });
+      if (isRa) {
+        setCustomArgs('-L "{core}" "{rom_path}"');
+      }
+    }
+  };
+
+  // Browse Libretro core (.so on Linux, .dll on Windows)
+  const handleBrowseCore = async () => {
+    try {
+      const filter = isLinux
+        ? "Libretro Core (*.so)|*.so|All files (*.*)|*.*"
+        : "Libretro Core (*.dll)|*.dll|All files (*.*)|*.*";
+      const selected = await invoke<string | null>("select_file", { filter });
+      if (selected) {
+        setSelectedCore(selected);
+      }
+    } catch (err) {
+      console.warn("Browse core error:", err);
+    }
+  };
+
+  const sortedInstalledLinuxApps = useMemo(() => {
+    let list = [...installedLinuxApps];
+    if (linuxAppSearch.trim()) {
+      const q = linuxAppSearch.toLowerCase().trim();
+      list = list.filter(
+        (a) =>
+          a.name.toLowerCase().includes(q) ||
+          a.command.toLowerCase().includes(q) ||
+          a.source.toLowerCase().includes(q)
+      );
+    }
+
+    // Float entries matching the currently chosen emulator preset to the top
+    const emuKeyword = (selectedEmulator?.name || "")
+      .toLowerCase()
+      .replace(/\(.*?\)/g, "")
+      .trim()
+      .split(/\s+/)[0];
+
+    if (emuKeyword && emuKeyword !== "custom") {
+      list.sort((a, b) => {
+        const aMatch =
+          a.name.toLowerCase().includes(emuKeyword) ||
+          a.command.toLowerCase().includes(emuKeyword);
+        const bMatch =
+          b.name.toLowerCase().includes(emuKeyword) ||
+          b.command.toLowerCase().includes(emuKeyword);
+        if (aMatch !== bMatch) return aMatch ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      });
+    }
+
+    return list;
+  }, [installedLinuxApps, linuxAppSearch, selectedEmulator]);
 
   // Browse ROM directory
   const handleBrowseRomDirectory = async () => {
@@ -163,7 +348,7 @@ export const AddConsoleWizardModal: React.FC<AddConsoleWizardModalProps> = ({
     }
 
     return list;
-  }, [searchQuery, sortMode]);
+  }, [allPresets, searchQuery, sortMode]);
 
   // Validation
   const isStep1Valid = Boolean(selectedConsole);
@@ -186,9 +371,12 @@ export const AddConsoleWizardModal: React.FC<AddConsoleWizardModalProps> = ({
         emulator_name: selectedEmulator.name,
         emulator_type: selectedEmulator.emulator_type,
         executable_path: executablePath.trim(),
-        core_name: selectedEmulator.emulator_type === "retroarch" ? selectedCore || undefined : undefined,
+        core_name:
+          selectedEmulator.emulator_type === "retroarch"
+            ? selectedCore.trim() || undefined
+            : undefined,
         rom_directory: romDirectory.trim(),
-        arguments_template: customArgs.trim() || selectedEmulator.default_args,
+        arguments_template: customArgs.trim() || getDefaultArgsForOs(selectedEmulator, isLinux),
         extensions: selectedConsole.extensions,
         created_at: new Date().toISOString(),
       };
@@ -517,8 +705,8 @@ export const AddConsoleWizardModal: React.FC<AddConsoleWizardModalProps> = ({
                             key={emu.name}
                             onClick={() => {
                               setSelectedEmulator(emu);
-                              setCustomArgs(emu.default_args);
-                              setSelectedCore(emu.recommended_core || "");
+                              setCustomArgs(getDefaultArgsForOs(emu, isLinux));
+                              setSelectedCore(normalizeCoreForOs(emu.recommended_core, isLinux));
                               setIsEmulatorPickerOpen(false);
                             }}
                             className={`p-2.5 rounded-xl border text-xs cursor-pointer flex items-center justify-between transition-all ${
@@ -536,64 +724,171 @@ export const AddConsoleWizardModal: React.FC<AddConsoleWizardModalProps> = ({
                   )}
                 </div>
 
-                {/* 2. Choose Executable (.exe) Card */}
-                <div className="p-4 bg-[#141826] border border-white/10 rounded-2xl space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-3">
-                      <FileCode className="w-5 h-5 text-indigo-400" />
-                      <div>
-                        <div className="text-xs font-bold text-white">Executable File (.exe)</div>
-                        <div className="text-[11px] text-zinc-400 truncate max-w-md">
-                          {executablePath || "Browse to locate the emulator executable"}
+                {/* 2. Choose Executable / Command Card */}
+                <div className="p-4 bg-[#141826] border border-white/10 rounded-2xl space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center space-x-3 min-w-0">
+                      <FileCode className="w-5 h-5 text-indigo-400 shrink-0" />
+                      <div className="min-w-0">
+                        <div className="text-xs font-bold text-white">
+                          {isLinux ? "Emulator Executable / Command" : "Executable File (.exe)"}
+                        </div>
+                        <div className="text-[11px] text-zinc-400 truncate">
+                          {isLinux
+                            ? "Pick an installed app/Flatpak, browse for a binary or AppImage, or enter a command"
+                            : "Browse to locate the emulator executable"}
                         </div>
                       </div>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={handleBrowseExecutable}
-                      className="px-3.5 py-1.5 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-semibold cursor-pointer shrink-0 transition-colors border border-white/10"
-                    >
-                      Browse...
-                    </button>
+                    <div className="flex items-center space-x-2 shrink-0">
+                      {isLinux && (
+                        <button
+                          type="button"
+                          onClick={handleToggleInstalledApps}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-semibold cursor-pointer transition-colors border flex items-center space-x-1.5 ${
+                            isInstalledAppsOpen
+                              ? "theme-accent-subtle-bg theme-accent-text theme-accent-subtle-border"
+                              : "bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border-emerald-500/30"
+                          }`}
+                        >
+                          <AppWindow className="w-3.5 h-3.5" />
+                          <span>Installed Apps</span>
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={handleBrowseExecutable}
+                        className="px-3.5 py-1.5 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-semibold cursor-pointer transition-colors border border-white/10"
+                      >
+                        Browse...
+                      </button>
+                    </div>
                   </div>
+
+                  {/* Direct Path / Command Input */}
+                  <input
+                    type="text"
+                    value={executablePath}
+                    onChange={(e) => setExecutablePath(e.target.value)}
+                    placeholder={
+                      isLinux
+                        ? "e.g. flatpak run org.DolphinEmu.dolphin-emu, /usr/bin/retroarch, or ~/Apps/PCSX2.AppImage"
+                        : "e.g. C:\\Emulators\\Dolphin\\Dolphin.exe"
+                    }
+                    className="w-full bg-[#111420] border border-white/10 text-white font-mono text-[11px] rounded-xl px-3 py-2 focus:outline-none focus:border-[var(--app-accent-color)] placeholder-zinc-500"
+                  />
+
+                  {/* On-Demand Installed Linux Apps / Flatpaks Picker */}
+                  {isLinux && isInstalledAppsOpen && (
+                    <div className="pt-3 border-t border-white/10 space-y-2">
+                      <div className="relative">
+                        <Search className="w-3.5 h-3.5 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="text"
+                          value={linuxAppSearch}
+                          onChange={(e) => setLinuxAppSearch(e.target.value)}
+                          placeholder="Filter installed Flatpak, Snap, or system emulators..."
+                          className="w-full bg-[#111420] border border-white/10 rounded-xl pl-8 pr-3 py-1.5 text-[11px] text-white placeholder-zinc-500 focus:outline-none focus:border-[var(--app-accent-color)]"
+                        />
+                      </div>
+
+                      {isLoadingLinuxApps ? (
+                        <div className="py-4 flex items-center justify-center space-x-2 text-[11px] text-zinc-400">
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>Scanning installed emulators & Flatpaks...</span>
+                        </div>
+                      ) : linuxAppsError ? (
+                        <div className="py-3 px-2 text-center text-[11px] text-amber-300/90 bg-amber-500/10 border border-amber-500/20 rounded-xl">
+                          {linuxAppsError}
+                        </div>
+                      ) : sortedInstalledLinuxApps.length === 0 ? (
+                        <div className="py-3 text-center text-[11px] text-zinc-400">
+                          No installed emulators found in desktop entries. Use <strong>Browse...</strong> to pick an AppImage or binary, or type a command above.
+                        </div>
+                      ) : (
+                        <div className="max-h-40 overflow-y-auto space-y-1 pr-1">
+                          {sortedInstalledLinuxApps.map((app) => {
+                            const isPicked = executablePath.trim() === app.command;
+                            return (
+                              <button
+                                key={`${app.source}-${app.command}`}
+                                type="button"
+                                onClick={() => handlePickInstalledLinuxApp(app)}
+                                className={`w-full text-left p-2 rounded-xl border transition-all cursor-pointer flex items-center justify-between gap-2 ${
+                                  isPicked
+                                    ? "theme-accent-subtle-bg border-[var(--app-accent-color)]"
+                                    : "bg-white/[0.03] border-white/5 hover:bg-white/10"
+                                }`}
+                              >
+                                <div className="min-w-0">
+                                  <div className="text-xs font-semibold text-white truncate">
+                                    {app.name}
+                                  </div>
+                                  <div className="text-[10px] font-mono text-zinc-400 truncate">
+                                    {app.command}
+                                  </div>
+                                </div>
+                                <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider shrink-0 bg-white/5 text-zinc-300 border border-white/10">
+                                  {app.source}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {/* 3. Choose Core (Only for RetroArch) */}
                 {selectedEmulator?.emulator_type === "retroarch" && (
                   <div className="p-4 bg-[#141826] border border-white/10 rounded-2xl space-y-2">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center space-x-3">
-                        <Layers className="w-5 h-5 text-emerald-400" />
-                        <div>
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center space-x-3 min-w-0">
+                        <Layers className="w-5 h-5 text-emerald-400 shrink-0" />
+                        <div className="min-w-0">
                           <div className="text-xs font-bold text-white">Choose Libretro Core</div>
-                          <div className="text-[11px] text-zinc-400">
+                          <div className="text-[11px] text-zinc-400 truncate">
                             {selectedCore || "Default core"}
                           </div>
                         </div>
                       </div>
 
-                      {availableCores.length > 0 ? (
-                        <select
-                          value={selectedCore}
-                          onChange={(e) => setSelectedCore(e.target.value)}
-                          className="bg-[#111420] border border-white/10 text-white text-xs rounded-xl px-3 py-1.5 focus:outline-none focus:border-[var(--app-accent-color)] cursor-pointer"
+                      <div className="flex items-center space-x-2 shrink-0">
+                        {availableCores.length > 0 ? (
+                          <select
+                            value={selectedCore}
+                            onChange={(e) => setSelectedCore(e.target.value)}
+                            className="bg-[#111420] border border-white/10 text-white text-xs rounded-xl px-3 py-1.5 focus:outline-none focus:border-[var(--app-accent-color)] cursor-pointer max-w-[200px]"
+                          >
+                            {selectedCore && !availableCores.includes(selectedCore) && (
+                              <option value={selectedCore}>{selectedCore}</option>
+                            )}
+                            {availableCores.map((c) => (
+                              <option key={c} value={c}>
+                                {c}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <input
+                            type="text"
+                            value={selectedCore}
+                            onChange={(e) => setSelectedCore(e.target.value)}
+                            placeholder={isLinux ? "e.g. snes9x_libretro.so" : "e.g. snes9x_libretro.dll"}
+                            className="bg-[#111420] border border-white/10 text-white font-mono text-[11px] rounded-xl px-3 py-1.5 focus:outline-none focus:border-[var(--app-accent-color)] w-48 truncate"
+                          />
+                        )}
+                        <button
+                          type="button"
+                          onClick={handleBrowseCore}
+                          title={isLinux ? "Browse for a .so Libretro core file" : "Browse for a .dll Libretro core file"}
+                          className="px-2.5 py-1.5 bg-white/10 hover:bg-white/20 text-white rounded-xl text-[11px] font-semibold cursor-pointer transition-colors border border-white/10"
                         >
-                          {availableCores.map((c) => (
-                            <option key={c} value={c}>
-                              {c}
-                            </option>
-                          ))}
-                        </select>
-                      ) : (
-                        <input
-                          type="text"
-                          value={selectedCore}
-                          onChange={(e) => setSelectedCore(e.target.value)}
-                          placeholder="e.g. snes9x_libretro.dll"
-                          className="bg-[#111420] border border-white/10 text-white font-mono text-[11px] rounded-xl px-3 py-1.5 focus:outline-none focus:border-[var(--app-accent-color)] w-48 truncate"
-                        />
-                      )}
+                          Browse...
+                        </button>
+                      </div>
                     </div>
                     {isLoadingCores && (
                       <div className="text-[10px] text-zinc-400 flex items-center space-x-1.5">
@@ -628,7 +923,7 @@ export const AddConsoleWizardModal: React.FC<AddConsoleWizardModalProps> = ({
                         type="text"
                         value={customArgs}
                         onChange={(e) => setCustomArgs(e.target.value)}
-                        placeholder='-L "cores/{core}" "{rom_path}"'
+                        placeholder={isLinux ? '-L "{core}" "{rom_path}"' : '-L "cores/{core}" "{rom_path}"'}
                         className="w-full bg-[#111420] border border-white/10 text-white font-mono text-[11px] rounded-xl px-3 py-2 focus:outline-none focus:border-[var(--app-accent-color)]"
                       />
                       <span className="text-[10px] text-zinc-500">

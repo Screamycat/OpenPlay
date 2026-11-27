@@ -111,6 +111,7 @@ export interface AppConfig {
   console_bg_music_volume?: number;
   console_bg_music_path?: string | null;
   console_display_id?: string | null;
+  console_audio_output_id?: string | null;
   console_profiles?: ConsoleProfile[];
   console_active_profile_id?: string | null;
 }
@@ -156,6 +157,7 @@ export const DEFAULT_APP_CONFIG: AppConfig = {
   console_bg_music_volume: 0.25,
   console_bg_music_path: null,
   console_display_id: "auto",
+  console_audio_output_id: "auto",
   console_profiles: [],
   console_active_profile_id: null,
   launch_on_startup: false,

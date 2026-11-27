@@ -83,6 +83,7 @@ interface ConsoleGameDetailsProps {
   onOpenSaveManager: (game: Game) => void;
   onSelectSiblingGame?: (sibling: Game) => void;
   onTrailerActiveChange?: (active: boolean) => void;
+  onRequestHydrateGame?: (gameId: string, siblingIds?: string[]) => void;
   isOverlayActive: boolean;
 }
 
@@ -122,6 +123,7 @@ export const ConsoleGameDetails: React.FC<ConsoleGameDetailsProps> = ({
   onOpenSaveManager,
   onSelectSiblingGame,
   onTrailerActiveChange,
+  onRequestHydrateGame,
   isOverlayActive,
 }) => {
   const { glyphProfile, isControllerActive, customBindings, nintendoSwap } = useGamepad();
@@ -131,6 +133,9 @@ export const ConsoleGameDetails: React.FC<ConsoleGameDetailsProps> = ({
   const [selectedArticle, setSelectedArticle] = useState<SteamNewsItem | null>(null);
   const [activeTrailerIdx, setActiveTrailerIdx] = useState(0);
   const [playerCount, setPlayerCount] = useState<number | null>(null);
+  const [liveAchSummary, setLiveAchSummary] = useState<AchievementSummaryLite | null>(
+    achievementSummary || null
+  );
   const [isLoadingHltb, setIsLoadingHltb] = useState(false);
   const [hltbData, setHltbData] = useState<{
     main?: number;
@@ -150,12 +155,13 @@ export const ConsoleGameDetails: React.FC<ConsoleGameDetailsProps> = ({
     return () => onTrailerActiveChange?.(false);
   }, [activeTab, game.trailers?.length, onTrailerActiveChange]);
 
-  // Reset & load Desktop-parity live metadata (Live Players + HLTB)
+  // Reset & load Desktop-parity live metadata (Hydration + Live Players + Achievements + HLTB)
   useEffect(() => {
     setActiveTab("overview");
     setActiveTrailerIdx(0);
     setSelectedArticle(null);
     setPlayerCount(null);
+    setLiveAchSummary(achievementSummary || null);
     setHltbData({
       main: game.hltb_main,
       extra: game.hltb_extra,
@@ -163,11 +169,30 @@ export const ConsoleGameDetails: React.FC<ConsoleGameDetailsProps> = ({
     });
     if (scrollPaneRef.current) scrollPaneRef.current.scrollTop = 0;
 
+    if (onRequestHydrateGame) {
+      onRequestHydrateGame(
+        game.id,
+        game.sibling_games?.map((s) => s.id)
+      );
+    }
+
     let cancelled = false;
     const steamAppId =
       game.source.toLowerCase() === "steam"
         ? game.source_id || null
         : game.sibling_games?.find((s) => s.source.toLowerCase() === "steam")?.source_id || null;
+
+    invoke<any>("get_game_achievement_summary", { gameId: game.id })
+      .then((res) => {
+        if (!cancelled && res) {
+          setLiveAchSummary({
+            total_achievements: res.total_achievements,
+            unlocked_achievements: res.unlocked_achievements,
+            is_perfect: res.is_perfect,
+          });
+        }
+      })
+      .catch(() => {});
 
     invoke<number>("get_game_current_players", {
       title: game.title,
@@ -203,7 +228,7 @@ export const ConsoleGameDetails: React.FC<ConsoleGameDetailsProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [game.id]);
+  }, [game.id, onRequestHydrateGame]);
 
   // Keep HLTB synced if game prop updates
   useEffect(() => {
@@ -214,25 +239,22 @@ export const ConsoleGameDetails: React.FC<ConsoleGameDetailsProps> = ({
     });
   }, [game.hltb_main, game.hltb_extra, game.hltb_completionist]);
 
-  // Fetch news lazily when News tab is opened
+  // Fetch news lazily when News tab is opened (same parameter contract as Desktop GameDetails)
   useEffect(() => {
     if (activeTab !== "news") return;
     let cancelled = false;
+    const steamAppId =
+      game.source.toLowerCase() === "steam"
+        ? game.source_id || null
+        : game.sibling_games?.find((s) => s.source.toLowerCase() === "steam")?.source_id || null;
+
     const loadNews = async () => {
       setIsLoadingNews(true);
       try {
         const items = await invoke<SteamNewsItem[]>("get_game_news", {
           gameId: game.id,
-          source: game.source,
-          sourceId: game.source_id || null,
           title: game.title,
-        }).catch(async () => {
-          if (game.source.toLowerCase() === "steam" && game.source_id) {
-            return await invoke<SteamNewsItem[]>("get_steam_news", {
-              appId: game.source_id,
-            });
-          }
-          return [];
+          appid: steamAppId ? String(steamAppId) : null,
         });
         if (!cancelled) {
           setNewsItems(Array.isArray(items) ? items : []);
@@ -259,9 +281,10 @@ export const ConsoleGameDetails: React.FC<ConsoleGameDetailsProps> = ({
     return Array.from(map.values());
   }, [game]);
 
+  const resolvedAchSummary = liveAchSummary || achievementSummary || null;
   const effectiveStatus = useMemo(
-    () => getEffectiveCompletionStatus(game, achievementSummary),
-    [game, achievementSummary]
+    () => getEffectiveCompletionStatus(game, resolvedAchSummary),
+    [game, resolvedAchSummary]
   );
 
   const isRunning = runningGameId === game.id;
@@ -829,7 +852,7 @@ export const ConsoleGameDetails: React.FC<ConsoleGameDetailsProps> = ({
                   <DetailRow
                     icon={<ShieldAlert className="w-3 h-3" />}
                     label="Age Rating"
-                    value={game.age_rating}
+                    value={game.age_rating || "All Ages"}
                   />
                   <DetailRow
                     icon={<Calendar className="w-3 h-3" />}

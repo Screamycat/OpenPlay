@@ -1,4 +1,4 @@
-use crate::models::{DiscoveredRom, EmulatorProfile};
+use crate::models::{DiscoveredRom, EmulatorProfile, InstalledEmulatorApp, ResolvedEmulatorTarget};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -354,28 +354,147 @@ impl EmulatorService {
         }
     }
 
-    /// Scan a RetroArch installation directory for installed Libretro cores
-    pub fn scan_retroarch_cores(retroarch_path: &str) -> Vec<String> {
-        let mut cores = Vec::new();
-        let path = Path::new(retroarch_path);
+    /// Parse `libretro_directory = "..."` from a `retroarch.cfg` file if present
+    fn parse_retroarch_cfg_cores_dir(cfg_path: &Path, relative_base: Option<&Path>) -> Option<PathBuf> {
+        let content = fs::read_to_string(cfg_path).ok()?;
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with('#') {
+                continue;
+            }
+            if let Some(rest) = trimmed.strip_prefix("libretro_directory") {
+                let rest = rest.trim();
+                if let Some(val_raw) = rest.strip_prefix('=') {
+                    let val = val_raw.trim().trim_matches('"').trim_matches('\'').trim();
+                    if val.is_empty() || val.eq_ignore_ascii_case("default") {
+                        return None;
+                    }
+                    if let Some(stripped) = val.strip_prefix("~/") {
+                        if let Some(home) = dirs::home_dir() {
+                            return Some(home.join(stripped));
+                        }
+                    } else if let Some(stripped) = val.strip_prefix(":/") {
+                        if let Some(base) = relative_base.or_else(|| cfg_path.parent()) {
+                            return Some(base.join(stripped));
+                        }
+                    } else {
+                        return Some(PathBuf::from(val));
+                    }
+                }
+            }
+        }
+        None
+    }
 
-        let base_dir = if path.is_file() {
-            path.parent()
-        } else {
-            Some(path)
+    /// Collect candidate RetroArch Libretro core directories in priority order for the given installation path/command
+    pub fn get_retroarch_cores_dirs(retroarch_path: &str) -> Vec<PathBuf> {
+        let mut cores_dirs: Vec<PathBuf> = Vec::new();
+        let mut push_unique = |p: PathBuf| {
+            if !cores_dirs.contains(&p) {
+                cores_dirs.push(p);
+            }
         };
 
-        let mut cores_dirs = Vec::new();
-        if let Some(b) = base_dir {
-            cores_dirs.push(b.join("cores"));
+        let trimmed = retroarch_path.trim();
+        let path = Path::new(trimmed);
+        if !trimmed.is_empty() {
+            let base_dir = if path.is_file() {
+                path.parent()
+            } else if path.is_dir() {
+                Some(path)
+            } else {
+                None
+            };
+            if let Some(b) = base_dir {
+                if !b.as_os_str().is_empty() {
+                    push_unique(b.join("cores"));
+                    if let Some(cfg_dir) = Self::parse_retroarch_cfg_cores_dir(&b.join("retroarch.cfg"), Some(b)) {
+                        push_unique(cfg_dir);
+                    }
+                }
+            }
         }
 
         #[cfg(target_os = "windows")]
         {
             if let Ok(appdata) = std::env::var("APPDATA") {
-                cores_dirs.push(PathBuf::from(appdata).join(r"RetroArch\cores"));
+                let ra_dir = PathBuf::from(appdata).join("RetroArch");
+                if let Some(cfg_dir) = Self::parse_retroarch_cfg_cores_dir(&ra_dir.join("retroarch.cfg"), Some(&ra_dir)) {
+                    push_unique(cfg_dir);
+                }
+                push_unique(ra_dir.join("cores"));
             }
         }
+
+        #[cfg(target_os = "linux")]
+        {
+            let lower = trimmed.to_lowercase();
+            let is_flatpak = lower.contains("org.libretro.retroarch") || lower.contains("flatpak");
+            let is_snap = lower.contains("snap");
+
+            if let Some(home) = dirs::home_dir() {
+                let flatpak_cfg_dir = home.join(".var/app/org.libretro.RetroArch/config/retroarch");
+                let native_cfg_dir = home.join(".config/retroarch");
+                let snap_cfg_dir = home.join("snap/retroarch/current/.config/retroarch");
+
+                if is_flatpak {
+                    if let Some(cfg_dir) = Self::parse_retroarch_cfg_cores_dir(
+                        &flatpak_cfg_dir.join("retroarch.cfg"),
+                        Some(&flatpak_cfg_dir),
+                    ) {
+                        push_unique(cfg_dir);
+                    }
+                    push_unique(flatpak_cfg_dir.join("cores"));
+                    push_unique(home.join(".local/share/flatpak/app/org.libretro.RetroArch/current/active/files/lib/libretro"));
+                    push_unique(PathBuf::from("/var/lib/flatpak/app/org.libretro.RetroArch/current/active/files/lib/libretro"));
+                }
+
+                if is_snap {
+                    if let Some(cfg_dir) = Self::parse_retroarch_cfg_cores_dir(
+                        &snap_cfg_dir.join("retroarch.cfg"),
+                        Some(&snap_cfg_dir),
+                    ) {
+                        push_unique(cfg_dir);
+                    }
+                    push_unique(snap_cfg_dir.join("cores"));
+                }
+
+                if let Some(cfg_dir) = Self::parse_retroarch_cfg_cores_dir(
+                    &native_cfg_dir.join("retroarch.cfg"),
+                    Some(&native_cfg_dir),
+                ) {
+                    push_unique(cfg_dir);
+                }
+                push_unique(native_cfg_dir.join("cores"));
+                push_unique(home.join(".local/share/retroarch/cores"));
+
+                // Also check Flatpak user cores as fallback if not already checked above
+                if !is_flatpak {
+                    push_unique(flatpak_cfg_dir.join("cores"));
+                }
+            }
+
+            // System-installed libretro core packages (pacman, apt, dnf, zypper, etc.)
+            for sys_dir in [
+                "/usr/lib/libretro",
+                "/usr/lib64/libretro",
+                "/usr/lib/x86_64-linux-gnu/libretro",
+                "/usr/lib/aarch64-linux-gnu/libretro",
+                "/usr/local/lib/libretro",
+                "/usr/share/libretro/cores",
+            ] {
+                push_unique(PathBuf::from(sys_dir));
+            }
+        }
+
+        cores_dirs
+    }
+
+    /// Scan a RetroArch installation (portable, system, Flatpak, or Snap) for installed Libretro cores
+    pub fn scan_retroarch_cores(retroarch_path: &str) -> Vec<String> {
+        let mut cores = Vec::new();
+        let is_windows_exe = retroarch_path.trim().to_lowercase().ends_with(".exe");
+        let cores_dirs = Self::get_retroarch_cores_dirs(retroarch_path);
 
         for cdir in cores_dirs {
             if cdir.is_dir() {
@@ -384,10 +503,16 @@ impl EmulatorService {
                         let p = entry.path();
                         if p.is_file() {
                             let name = p.file_name().unwrap_or_default().to_string_lossy().to_string();
-                            if name.contains("_libretro") && (name.ends_with(".dll") || name.ends_with(".so")) {
-                                if !cores.contains(&name) {
-                                    cores.push(name);
-                                }
+                            let lower = name.to_lowercase();
+                            let valid_ext = if cfg!(target_os = "windows") || is_windows_exe {
+                                lower.ends_with(".dll")
+                            } else if cfg!(target_os = "macos") {
+                                lower.ends_with(".dylib") || lower.ends_with(".so")
+                            } else {
+                                lower.ends_with(".so")
+                            };
+                            if lower.contains("_libretro") && valid_ext && !cores.contains(&name) {
+                                cores.push(name);
                             }
                         }
                     }
@@ -397,6 +522,376 @@ impl EmulatorService {
 
         cores.sort();
         cores
+    }
+
+    /// Resolve a Libretro core filename (or absolute path) to its actual file path on disk
+    pub fn resolve_retroarch_core_path(retroarch_path: &str, core_name: &str) -> Option<PathBuf> {
+        let trimmed = core_name.trim().trim_matches('"').trim_matches('\'');
+        if trimmed.is_empty() {
+            return None;
+        }
+
+        let direct = PathBuf::from(trimmed);
+        if direct.is_file() {
+            return Some(direct);
+        }
+
+        let is_windows_exe = retroarch_path.trim().to_lowercase().ends_with(".exe");
+        let prefer_dll = cfg!(target_os = "windows") || is_windows_exe;
+        let preferred_ext = if prefer_dll { "dll" } else { "so" };
+
+        let mut candidates: Vec<String> = Vec::new();
+        let file_only = Path::new(trimmed)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(trimmed);
+        candidates.push(file_only.to_string());
+
+        let lower = file_only.to_lowercase();
+        if prefer_dll && lower.ends_with(".so") {
+            let swapped = format!("{}.dll", &file_only[..file_only.len() - 3]);
+            candidates.push(swapped);
+        } else if !prefer_dll && lower.ends_with(".dll") {
+            let swapped = format!("{}.so", &file_only[..file_only.len() - 4]);
+            candidates.push(swapped);
+        } else if !lower.ends_with(".so") && !lower.ends_with(".dll") && !lower.ends_with(".dylib") {
+            candidates.push(format!("{}.{}", file_only, preferred_ext));
+            if !lower.ends_with("_libretro") {
+                candidates.push(format!("{}_libretro.{}", file_only, preferred_ext));
+            }
+        }
+
+        let cores_dirs = Self::get_retroarch_cores_dirs(retroarch_path);
+        for cdir in cores_dirs {
+            if !cdir.is_dir() {
+                continue;
+            }
+            for cand in &candidates {
+                let full = cdir.join(cand);
+                if full.is_file() {
+                    return Some(full);
+                }
+            }
+        }
+
+        None
+    }
+
+    /// Tokenize a Linux .desktop Exec= line respecting single and double quotes
+    fn tokenize_desktop_exec(raw: &str) -> Vec<String> {
+        let mut tokens = Vec::new();
+        let mut current = String::new();
+        let mut in_quote: Option<char> = None;
+        let mut chars = raw.chars().peekable();
+
+        while let Some(c) = chars.next() {
+            if let Some(q) = in_quote {
+                if c == '\\' && q == '"' {
+                    if let Some(next_c) = chars.next() {
+                        current.push(next_c);
+                    }
+                } else if c == q {
+                    in_quote = None;
+                } else {
+                    current.push(c);
+                }
+            } else if c == '"' || c == '\'' {
+                in_quote = Some(c);
+            } else if c.is_whitespace() {
+                if !current.is_empty() {
+                    tokens.push(std::mem::take(&mut current));
+                }
+            } else {
+                current.push(c);
+            }
+        }
+        if !current.is_empty() {
+            tokens.push(current);
+        }
+        tokens
+    }
+
+    /// Parse a Linux `.desktop` file into `(display_name, clean_exec_command, optional_flatpak_app_id)`
+    pub fn parse_desktop_exec_command(desktop_path: &Path) -> Option<(String, String, Option<String>)> {
+        let content = fs::read_to_string(desktop_path).ok()?;
+        let mut in_desktop_entry = false;
+        let mut name: Option<String> = None;
+        let mut exec: Option<String> = None;
+        let mut x_flatpak: Option<String> = None;
+        let mut entry_type: Option<String> = None;
+        let mut no_display = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                continue;
+            }
+            if trimmed.starts_with('[') && trimmed.ends_with(']') {
+                in_desktop_entry = trimmed == "[Desktop Entry]";
+                continue;
+            }
+            if !in_desktop_entry {
+                continue;
+            }
+            if let Some((key, val)) = trimmed.split_once('=') {
+                let k = key.trim();
+                let v = val.trim();
+                match k {
+                    "Type" => entry_type = Some(v.to_string()),
+                    "Name" if name.is_none() => name = Some(v.to_string()),
+                    "Exec" if exec.is_none() => exec = Some(v.to_string()),
+                    "X-Flatpak" if x_flatpak.is_none() => x_flatpak = Some(v.to_string()),
+                    "NoDisplay" => no_display = v.eq_ignore_ascii_case("true"),
+                    _ => {}
+                }
+            }
+        }
+
+        if entry_type.as_deref() != Some("Application") || no_display {
+            return None;
+        }
+
+        let display_name = name.unwrap_or_else(|| {
+            desktop_path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("Emulator")
+                .to_string()
+        });
+        let raw_exec = exec?;
+        let tokens = Self::tokenize_desktop_exec(&raw_exec);
+        if tokens.is_empty() {
+            return None;
+        }
+
+        let first_bin = Path::new(&tokens[0])
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(&tokens[0])
+            .to_lowercase();
+
+        // Normalize Flatpak desktop Exec lines into clean `flatpak run <app-id>`
+        if first_bin == "flatpak" && tokens.iter().any(|t| t == "run") {
+            let run_idx = tokens.iter().position(|t| t == "run").unwrap_or(0);
+            let detected_app_id = x_flatpak.clone().or_else(|| {
+                tokens[run_idx + 1..]
+                    .iter()
+                    .find(|t| !t.starts_with('-') && !t.starts_with("@@") && !t.starts_with('%'))
+                    .cloned()
+            });
+            if let Some(app_id) = detected_app_id {
+                return Some((display_name, format!("flatpak run {}", app_id), Some(app_id)));
+            }
+        }
+
+        // Clean XDG field codes (%u, %U, %f, %F, %i, %c, %k, etc.) and @@ markers
+        let mut clean_tokens: Vec<String> = Vec::new();
+        for tok in tokens {
+            if tok == "@@" || tok == "@@u" || tok.starts_with('%') {
+                continue;
+            }
+            if tok.contains(' ') {
+                clean_tokens.push(format!("\"{}\"", tok));
+            } else {
+                clean_tokens.push(tok);
+            }
+        }
+
+        if clean_tokens.is_empty() {
+            return None;
+        }
+
+        Some((display_name, clean_tokens.join(" "), x_flatpak))
+    }
+
+    /// Resolve a user-selected file path (converting Linux `.desktop` files into clean launch commands)
+    pub fn resolve_emulator_target(path_str: &str) -> ResolvedEmulatorTarget {
+        let trimmed = path_str.trim();
+        if trimmed.to_lowercase().ends_with(".desktop") {
+            let p = Path::new(trimmed);
+            if p.is_file() {
+                if let Some((name, cmd, _)) = Self::parse_desktop_exec_command(p) {
+                    return ResolvedEmulatorTarget {
+                        command: cmd,
+                        name: Some(name),
+                    };
+                }
+            }
+        }
+        ResolvedEmulatorTarget {
+            command: trimmed.to_string(),
+            name: None,
+        }
+    }
+
+    /// List installed Linux emulators from Flatpak, Snap, and system `.desktop` entries (on-demand user picker)
+    pub fn list_installed_linux_emulators() -> Vec<InstalledEmulatorApp> {
+        #[cfg(not(target_os = "linux"))]
+        {
+            Vec::new()
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            use std::collections::HashSet;
+
+            let mut results: Vec<InstalledEmulatorApp> = Vec::new();
+            let mut seen_commands: HashSet<String> = HashSet::new();
+
+            let mut app_dirs: Vec<(PathBuf, &str)> = vec![
+                (PathBuf::from("/var/lib/flatpak/exports/share/applications"), "Flatpak"),
+                (PathBuf::from("/var/lib/snapd/desktop/applications"), "Snap"),
+                (PathBuf::from("/usr/local/share/applications"), "System"),
+                (PathBuf::from("/usr/share/applications"), "System"),
+            ];
+
+            if let Some(home) = dirs::home_dir() {
+                app_dirs.insert(1, (home.join(".local/share/flatpak/exports/share/applications"), "Flatpak"));
+                app_dirs.push((home.join(".local/share/applications"), "System"));
+            }
+
+            if let Ok(xdg_dirs) = std::env::var("XDG_DATA_DIRS") {
+                for base in xdg_dirs.split(':').filter(|s| !s.trim().is_empty()) {
+                    let apps_dir = PathBuf::from(base).join("applications");
+                    if !app_dirs.iter().any(|(existing, _)| existing == &apps_dir) {
+                        let label = if base.contains("flatpak") {
+                            "Flatpak"
+                        } else if base.contains("snap") {
+                            "Snap"
+                        } else {
+                            "System"
+                        };
+                        app_dirs.push((apps_dir, label));
+                    }
+                }
+            }
+
+            let emulator_keywords = [
+                "retroarch", "dolphin-emu", "dolphin emulator", "org.dolphinemu",
+                "pcsx2", "duckstation", "rpcs3", "ppsspp",
+                "vita3k", "mgba", "melonds", "desmume", "citra", "lime3ds", "azahar",
+                "panda3ds", "cemu", "ryujinx", "yuzu", "suyu", "sudachi", "eden",
+                "citron", "snes9x", "bsnes", "ares", "mesen", "fceux", "rmg",
+                "mupen", "simple64", "sameboy", "vbam", "visualboy", "flycast",
+                "redream", "mednafen", "yabasanshiro", "blastem", "xemu", "xenia",
+                "mame", "fbneo", "stella", "epsxe", "scummvm", "dosbox", "shadps4",
+                "openmsx", "hatari", "vice", "fs-uae", "amiberry", "bizhawk",
+                "gopher64", "project64", "kega", "emulator",
+            ];
+
+            for (dir, source_label) in app_dirs {
+                if !dir.is_dir() {
+                    continue;
+                }
+                let Ok(entries) = fs::read_dir(&dir) else {
+                    continue;
+                };
+                for entry in entries.flatten() {
+                    let p = entry.path();
+                    if !p.is_file() || p.extension().and_then(|e| e.to_str()) != Some("desktop") {
+                        continue;
+                    }
+                    let Ok(content) = fs::read_to_string(&p) else {
+                        continue;
+                    };
+
+                    let mut categories_lower = String::new();
+                    for line in content.lines() {
+                        let t = line.trim();
+                        if let Some(cats) = t.strip_prefix("Categories=") {
+                            categories_lower = cats.to_lowercase();
+                            break;
+                        }
+                    }
+
+                    // Exclude file managers (e.g. KDE Dolphin File Manager) and system utilities
+                    if categories_lower.contains("filemanager")
+                        || categories_lower.contains("webbrowser")
+                        || categories_lower.contains("texteditor")
+                    {
+                        continue;
+                    }
+
+                    let Some((name, command, app_id)) = Self::parse_desktop_exec_command(&p) else {
+                        continue;
+                    };
+
+                    let hay = format!(
+                        "{} {} {}",
+                        name.to_lowercase(),
+                        command.to_lowercase(),
+                        app_id.as_deref().unwrap_or("").to_lowercase()
+                    );
+
+                    let is_emulator = categories_lower.contains("emulator")
+                        || emulator_keywords.iter().any(|k| hay.contains(k));
+
+                    if !is_emulator {
+                        continue;
+                    }
+
+                    let cmd_key = command.to_lowercase();
+                    if seen_commands.contains(&cmd_key) {
+                        continue;
+                    }
+                    seen_commands.insert(cmd_key);
+
+                    let effective_source = if app_id.is_some() || command.to_lowercase().starts_with("flatpak ") {
+                        "Flatpak"
+                    } else if command.to_lowercase().contains("snap") {
+                        "Snap"
+                    } else {
+                        source_label
+                    };
+
+                    results.push(InstalledEmulatorApp {
+                        name,
+                        command,
+                        source: effective_source.to_string(),
+                        desktop_file: Some(p.to_string_lossy().to_string()),
+                        app_id,
+                    });
+                }
+            }
+
+            // Fallback: also query `flatpak list --app` in case Flatpak .desktop exports are in a non-standard path
+            if let Ok(output) = std::process::Command::new("flatpak")
+                .args(["list", "--app", "--columns=application,name"])
+                .output()
+            {
+                if output.status.success() {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    for line in stdout.lines() {
+                        let mut parts = line.splitn(2, '\t');
+                        let app_id = parts.next().unwrap_or("").trim();
+                        let app_name = parts.next().unwrap_or(app_id).trim();
+                        if app_id.is_empty() {
+                            continue;
+                        }
+                        let hay = format!("{} {}", app_id.to_lowercase(), app_name.to_lowercase());
+                        if !emulator_keywords.iter().any(|k| hay.contains(k)) {
+                            continue;
+                        }
+                        let command = format!("flatpak run {}", app_id);
+                        let cmd_key = command.to_lowercase();
+                        if seen_commands.contains(&cmd_key) {
+                            continue;
+                        }
+                        seen_commands.insert(cmd_key);
+                        results.push(InstalledEmulatorApp {
+                            name: app_name.to_string(),
+                            command,
+                            source: "Flatpak".to_string(),
+                            desktop_file: None,
+                            app_id: Some(app_id.to_string()),
+                        });
+                    }
+                }
+            }
+
+            results.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+            results
+        }
     }
 
     /// Best matching default RetroArch core for a given platform

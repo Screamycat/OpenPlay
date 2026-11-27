@@ -2,12 +2,23 @@
 
 export interface DisplayInfo {
   id: string;
+  outputName?: string;
   label: string;
   width: number;
   height: number;
+  logicalWidth?: number;
+  logicalHeight?: number;
+  scaleFactor?: number;
   x: number;
   y: number;
   isPrimary: boolean;
+  isDisabled?: boolean;
+}
+
+export interface AudioOutputInfo {
+  id: string;
+  label: string;
+  isDefault: boolean;
 }
 
 export interface WindowControls {
@@ -19,6 +30,9 @@ export interface WindowControls {
   setFullscreen: (enabled: boolean, displayId?: string) => Promise<boolean>;
   isFullscreen: () => Promise<boolean>;
   getDisplays: () => Promise<DisplayInfo[]>;
+  getAudioOutputs: () => Promise<AudioOutputInfo[]>;
+  setAudioOutput: (sinkId?: string) => Promise<boolean>;
+  restoreAudioOutput: () => Promise<void>;
   onResized: (handler: () => void) => Promise<() => void>;
   close: () => Promise<void>;
   startDragging: () => Promise<void>;
@@ -38,6 +52,9 @@ declare global {
       setFullscreen?: (enabled: boolean, displayId?: string) => Promise<boolean>;
       isFullscreen?: () => Promise<boolean>;
       getDisplays?: () => Promise<DisplayInfo[]>;
+      getAudioOutputs?: () => Promise<AudioOutputInfo[]>;
+      setAudioOutput?: (sinkId?: string) => Promise<boolean>;
+      restoreAudioOutput?: () => Promise<void>;
     };
     __TAURI_INTERNALS__?: any;
   }
@@ -199,6 +216,23 @@ export function getCurrentWindow(): WindowControls {
         return await window.openplayAPI.getDisplays();
       }
       return [];
+    },
+    getAudioOutputs: async () => {
+      if (typeof window !== "undefined" && window.openplayAPI?.getAudioOutputs) {
+        return await window.openplayAPI.getAudioOutputs();
+      }
+      return [];
+    },
+    setAudioOutput: async (sinkId?: string) => {
+      if (typeof window !== "undefined" && window.openplayAPI?.setAudioOutput) {
+        return await window.openplayAPI.setAudioOutput(sinkId);
+      }
+      return false;
+    },
+    restoreAudioOutput: async () => {
+      if (typeof window !== "undefined" && window.openplayAPI?.restoreAudioOutput) {
+        await window.openplayAPI.restoreAudioOutput();
+      }
     },
     onResized: async (handler: () => void) => {
       if (typeof window !== "undefined") {

@@ -199,6 +199,17 @@ fn matches_file_filter(path: &Path, filter: Option<&str>) -> bool {
         return ext == "zip";
     }
 
+    if (trimmed.contains(".so") || trimmed.contains(".dll")) && !trimmed.contains(".exe") {
+        #[cfg(target_os = "windows")]
+        {
+            return ext == "dll";
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            return matches!(ext.as_str(), "so" | "dylib" | "dll");
+        }
+    }
+
     if trimmed.contains(".exe") {
         #[cfg(target_os = "windows")]
         {

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, protocol, dialog, shell, screen, nativeImage } from "electron";
+import { app, BrowserWindow, ipcMain, protocol, dialog, shell, nativeImage } from "electron";
 import * as path from "node:path";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -7,6 +7,20 @@ import { registerMediaProtocol } from "./protocol";
 import { startDaemon, stopDaemon, invoke as daemonInvoke, onDaemonEvent } from "./daemon";
 import { handleStoreOAuth } from "./oauth";
 import { applyUpdateAndRestart } from "./updater";
+import {
+  getEnrichedDisplays,
+  enterFullscreenOnTargetDisplay,
+  reapplyTargetDisplayFullscreen,
+  exitTargetDisplayFullscreen,
+  restorePrimaryDisplaySync,
+  hasActiveTargetDisplay,
+} from "./displayManager";
+import {
+  getAudioOutputs,
+  switchAudioOutput,
+  restoreAudioOutputAsync,
+  restoreAudioOutputSync,
+} from "./audioManager";
 
 // 1. Register openplay:// scheme privileges before app is ready
 protocol.registerSchemesAsPrivileged([
@@ -225,7 +239,7 @@ ipcMain.handle("openplay:window:minimize", () => {
   }
 });
 
-ipcMain.handle("openplay:window:restore", () => {
+ipcMain.handle("openplay:window:restore", async () => {
   if (mainWindow && !mainWindow.isDestroyed()) {
     if (mainWindow.isMinimized()) {
       mainWindow.restore();
@@ -235,9 +249,18 @@ ipcMain.handle("openplay:window:restore", () => {
     }
     if (wasFullscreenBeforeMinimize) {
       wasFullscreenBeforeMinimize = false;
-      mainWindow.setFullScreen(true);
+      if (hasActiveTargetDisplay()) {
+        await new Promise((r) => setTimeout(r, 120));
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          await reapplyTargetDisplayFullscreen(mainWindow);
+        }
+      } else {
+        mainWindow.setFullScreen(true);
+      }
     }
-    mainWindow.focus();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.focus();
+    }
   }
 });
 
@@ -269,20 +292,11 @@ ipcMain.handle("openplay:window:isMaximized", () => {
 let previousBoundsBeforeFullscreen: Electron.Rectangle | null = null;
 let previousMaximizedBeforeFullscreen = false;
 
-ipcMain.handle("openplay:window:getDisplays", () => {
-  const primary = screen.getPrimaryDisplay();
-  return screen.getAllDisplays().map((d, idx) => ({
-    id: String(d.id),
-    label: d.label || `Display ${idx + 1}`,
-    width: d.bounds.width,
-    height: d.bounds.height,
-    x: d.bounds.x,
-    y: d.bounds.y,
-    isPrimary: d.id === primary.id,
-  }));
+ipcMain.handle("openplay:window:getDisplays", async () => {
+  return await getEnrichedDisplays();
 });
 
-ipcMain.handle("openplay:window:setFullscreen", (_event, enabled: boolean, displayId?: string) => {
+ipcMain.handle("openplay:window:setFullscreen", async (_event, enabled: boolean, displayId?: string) => {
   if (mainWindow && !mainWindow.isDestroyed()) {
     const wantFs = Boolean(enabled);
     if (wantFs) {
@@ -294,37 +308,15 @@ ipcMain.handle("openplay:window:setFullscreen", (_event, enabled: boolean, displ
         previousBoundsBeforeFullscreen = mainWindow.getBounds();
       }
 
-      if (displayId && displayId !== "auto") {
-        const target = screen
-          .getAllDisplays()
-          .find((d) => String(d.id) === String(displayId));
-        if (target) {
-          if (mainWindow.isFullScreen()) {
-            mainWindow.setFullScreen(false);
-          }
-          mainWindow.setBounds({
-            x: target.bounds.x + 40,
-            y: target.bounds.y + 40,
-            width: Math.min(1280, target.bounds.width - 80),
-            height: Math.min(720, target.bounds.height - 80),
-          });
-        }
-      }
-
-      mainWindow.setFullScreen(true);
+      return await enterFullscreenOnTargetDisplay(mainWindow, displayId);
     } else {
-      mainWindow.setFullScreen(false);
-      if (previousBoundsBeforeFullscreen) {
-        const bounds = previousBoundsBeforeFullscreen;
-        previousBoundsBeforeFullscreen = null;
-        mainWindow.setBounds(bounds);
-      }
-      if (previousMaximizedBeforeFullscreen) {
-        previousMaximizedBeforeFullscreen = false;
-        mainWindow.maximize();
-      }
+      const bounds = previousBoundsBeforeFullscreen;
+      const prevMax = previousMaximizedBeforeFullscreen;
+      previousBoundsBeforeFullscreen = null;
+      previousMaximizedBeforeFullscreen = false;
+      await exitTargetDisplayFullscreen(mainWindow, bounds, prevMax);
+      return !mainWindow.isDestroyed() && mainWindow.isFullScreen();
     }
-    return mainWindow.isFullScreen();
   }
   return false;
 });
@@ -334,6 +326,18 @@ ipcMain.handle("openplay:window:isFullscreen", () => {
     return mainWindow.isFullScreen();
   }
   return false;
+});
+
+ipcMain.handle("openplay:audio:getOutputs", async () => {
+  return await getAudioOutputs();
+});
+
+ipcMain.handle("openplay:audio:setOutput", async (_event, sinkId?: string) => {
+  return await switchAudioOutput(sinkId);
+});
+
+ipcMain.handle("openplay:audio:restore", async () => {
+  await restoreAudioOutputAsync();
 });
 
 // Primary RPC Dispatcher
@@ -359,11 +363,22 @@ ipcMain.handle("openplay:invoke", async (_event, command: string, args: any) => 
     const parseDialogFilters = (rawFilter?: string) => {
       if (!rawFilter) return [];
       const parsed: { name: string; extensions: string[] }[] = [];
+      // On Linux, Libretro cores use .so shared libraries
+      if (
+        process.platform === "linux" &&
+        (rawFilter.includes(".so") || rawFilter.includes(".dll")) &&
+        !rawFilter.includes(".exe")
+      ) {
+        return [
+          { name: "Libretro Cores (*.so)", extensions: ["so"] },
+          { name: "All Files", extensions: ["*"] },
+        ];
+      }
       // On Linux, native binaries often have no extension; default executable pickers to All Files first
-      if (process.platform === "linux" && rawFilter.includes(".exe")) {
+      if (process.platform === "linux" && (rawFilter.includes(".exe") || rawFilter.includes(".AppImage"))) {
         return [
           { name: "All Files & Linux Executables", extensions: ["*"] },
-          { name: "Packages & Scripts", extensions: ["AppImage", "sh", "desktop", "bin", "run", "exe"] },
+          { name: "Packages & Scripts", extensions: ["AppImage", "appimage", "sh", "desktop", "bin", "run", "x86_64", "exe"] },
         ];
       }
       // Support pipe-delimited filters like "Executable (*.exe;*.lnk;*.bat)|*.exe;*.lnk;*.bat|All files (*.*)|*.*"
@@ -480,5 +495,19 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", () => {
+  restoreAudioOutputSync();
+  restorePrimaryDisplaySync();
   stopDaemon();
+});
+
+process.on("SIGINT", () => {
+  restoreAudioOutputSync();
+  restorePrimaryDisplaySync();
+  app.quit();
+});
+
+process.on("SIGTERM", () => {
+  restoreAudioOutputSync();
+  restorePrimaryDisplaySync();
+  app.quit();
 });

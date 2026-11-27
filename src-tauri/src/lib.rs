@@ -3800,6 +3800,16 @@ fn scan_retroarch_cores(retroarch_path: String) -> Result<Vec<String>, String> {
 }
 
 #[tauri::command]
+fn list_installed_linux_emulators() -> Result<Vec<models::InstalledEmulatorApp>, String> {
+    Ok(EmulatorService::list_installed_linux_emulators())
+}
+
+#[tauri::command]
+fn resolve_linux_emulator_target(path: String) -> Result<models::ResolvedEmulatorTarget, String> {
+    Ok(EmulatorService::resolve_emulator_target(&path))
+}
+
+#[tauri::command]
 fn scan_rom_directory(dir_path: String, state: State<'_, AppState>) -> Result<Vec<DiscoveredRom>, String> {
     let configured = state.db.get_emulator_profiles().unwrap_or_default();
     EmulatorService::scan_rom_directory(&dir_path, &configured)
@@ -7280,6 +7290,8 @@ pub fn run() {
             save_community_systems,
             open_systems_folder,
             scan_retroarch_cores,
+            list_installed_linux_emulators,
+            resolve_linux_emulator_target,
             scan_rom_directory,
             get_provider_integration,
             save_provider_integration,

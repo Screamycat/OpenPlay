@@ -185,8 +185,20 @@ export function mergeDuplicateGames(
       if (!primary.publisher?.trim() && sib.publisher?.trim()) {
         primary.publisher = sib.publisher;
       }
+      if (!primary.series?.trim() && sib.series?.trim()) {
+        primary.series = sib.series;
+      }
+      if (!primary.age_rating?.trim() && sib.age_rating?.trim()) {
+        primary.age_rating = sib.age_rating;
+      }
       if (!primary.release_date?.trim() && sib.release_date?.trim()) {
         primary.release_date = sib.release_date;
+      }
+      if (!primary.date_added?.trim() && sib.date_added?.trim()) {
+        primary.date_added = sib.date_added;
+      }
+      if (!primary.last_played?.trim() && sib.last_played?.trim()) {
+        primary.last_played = sib.last_played;
       }
       if ((!primary.genres || primary.genres.length === 0) && sib.genres && sib.genres.length > 0) {
         primary.genres = sib.genres;
@@ -276,4 +288,74 @@ export function findMergeCandidate(
 
     return true;
   });
+}
+
+/**
+ * Builds a unified view of a selected sibling copy while preserving all shared metadata
+ * inherited by its merged parent (description, artwork, scores, HLTB, trailers, etc.),
+ * matching Desktop Mode's activeGame + parent merged metadata parity.
+ */
+export function resolveMergedSiblingView(parentMerged: Game, selectedCopy: Game): Game {
+  if (parentMerged.id === selectedCopy.id) {
+    return parentMerged;
+  }
+  const otherSiblings = [
+    parentMerged,
+    ...(parentMerged.sibling_games || []).filter((s) => s.id !== selectedCopy.id),
+  ];
+
+  return {
+    ...selectedCopy,
+    cover_image: selectedCopy.cover_image?.trim() ? selectedCopy.cover_image : parentMerged.cover_image,
+    background_image: selectedCopy.background_image?.trim()
+      ? selectedCopy.background_image
+      : parentMerged.background_image,
+    logo_image: selectedCopy.logo_image?.trim() ? selectedCopy.logo_image : parentMerged.logo_image,
+    icon_image: selectedCopy.icon_image?.trim() ? selectedCopy.icon_image : parentMerged.icon_image,
+    description: selectedCopy.description?.trim() ? selectedCopy.description : parentMerged.description,
+    developer: selectedCopy.developer?.trim() ? selectedCopy.developer : parentMerged.developer,
+    publisher: selectedCopy.publisher?.trim() ? selectedCopy.publisher : parentMerged.publisher,
+    series: selectedCopy.series?.trim() ? selectedCopy.series : parentMerged.series,
+    age_rating: selectedCopy.age_rating?.trim() ? selectedCopy.age_rating : parentMerged.age_rating,
+    release_date: selectedCopy.release_date?.trim() ? selectedCopy.release_date : parentMerged.release_date,
+    date_added: selectedCopy.date_added?.trim() ? selectedCopy.date_added : parentMerged.date_added,
+    genres: selectedCopy.genres?.length ? selectedCopy.genres : parentMerged.genres,
+    tags: selectedCopy.tags?.length ? selectedCopy.tags : parentMerged.tags,
+    categories: selectedCopy.categories?.length ? selectedCopy.categories : parentMerged.categories,
+    features: selectedCopy.features?.length ? selectedCopy.features : parentMerged.features,
+    trailers: selectedCopy.trailers?.length ? selectedCopy.trailers : parentMerged.trailers,
+    screenshots: selectedCopy.screenshots?.length ? selectedCopy.screenshots : parentMerged.screenshots,
+    links: selectedCopy.links?.length ? selectedCopy.links : parentMerged.links,
+    critic_score: selectedCopy.critic_score ?? parentMerged.critic_score,
+    community_score: selectedCopy.community_score ?? parentMerged.community_score,
+    user_rating: selectedCopy.user_rating ?? parentMerged.user_rating,
+    hltb_main: selectedCopy.hltb_main ?? parentMerged.hltb_main,
+    hltb_extra: selectedCopy.hltb_extra ?? parentMerged.hltb_extra,
+    hltb_completionist: selectedCopy.hltb_completionist ?? parentMerged.hltb_completionist,
+    notes: selectedCopy.notes?.trim() ? selectedCopy.notes : parentMerged.notes,
+    platforms: parentMerged.platforms?.length ? parentMerged.platforms : selectedCopy.platforms,
+    is_favorite: selectedCopy.is_favorite || parentMerged.is_favorite,
+    sibling_games: otherSiblings,
+  };
+}
+
+/**
+ * Resolves the achievement summary for a game from the shared summary map,
+ * falling back to siblings for merged multi-platform games so Desktop & Console match.
+ */
+export function resolveGameAchievementSummary<
+  T extends { total_achievements: number; unlocked_achievements: number; is_perfect: boolean }
+>(game: Game | null | undefined, summaryMap: Record<string, T>): T | null {
+  if (!game) return null;
+  const direct = summaryMap[game.id];
+  if (direct && direct.total_achievements > 0) return direct;
+  if (game.sibling_games && game.sibling_games.length > 0) {
+    for (const sib of game.sibling_games) {
+      const sibSum = summaryMap[sib.id];
+      if (sibSum && sibSum.total_achievements > 0) {
+        return sibSum;
+      }
+    }
+  }
+  return direct || null;
 }

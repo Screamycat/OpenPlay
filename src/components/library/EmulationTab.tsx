@@ -231,9 +231,11 @@ export const EmulationTab: React.FC<EmulationTabProps> = ({
                   <div className="space-y-1.5 pt-1 text-xs">
                     <div className="flex items-center justify-between text-zinc-400">
                       <span className="text-zinc-500 font-medium">Emulator:</span>
-                      <span className="font-semibold text-zinc-200">
+                      <span className="font-semibold text-zinc-200 truncate max-w-[200px]" title={conf.core_name || conf.emulator_name}>
                         {conf.emulator_name}
-                        {conf.core_name ? ` (${conf.core_name})` : ""}
+                        {conf.core_name
+                          ? ` (${conf.core_name.replace(/\\/g, "/").split("/").pop()})`
+                          : ""}
                       </span>
                     </div>
 

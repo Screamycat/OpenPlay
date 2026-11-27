@@ -334,15 +334,22 @@ export const GamepadProvider: React.FC<GamepadProviderProps> = ({
 
   // Switch back to Mouse/Pointer mode immediately on mouse movement or keyboard navigation
   useEffect(() => {
+    let hasInit = false;
     let lastMouseX = 0;
     let lastMouseY = 0;
 
     const handleMouseMove = (e: MouseEvent) => {
+      if (!hasInit) {
+        lastMouseX = e.clientX;
+        lastMouseY = e.clientY;
+        hasInit = true;
+        return;
+      }
       const dx = Math.abs(e.clientX - lastMouseX);
       const dy = Math.abs(e.clientY - lastMouseY);
       lastMouseX = e.clientX;
       lastMouseY = e.clientY;
-      if ((dx > 4 || dy > 4) && isControllerActiveRef.current) {
+      if ((dx > 5 || dy > 5) && isControllerActiveRef.current) {
         setIsControllerActive(false);
       }
     };

@@ -33,7 +33,7 @@ import {
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow, DisplayInfo, getVersion } from "../utils/ipc";
+import { getCurrentWindow, DisplayInfo, AudioOutputInfo, getVersion } from "../utils/ipc";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { AppConfig, DEFAULT_APP_CONFIG, RunnerInfo } from "../types/config";
 import {
@@ -108,13 +108,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [showSgdbKey, setShowSgdbKey] = useState(false);
   const [showIgdbSecret, setShowIgdbSecret] = useState(false);
   const [displays, setDisplays] = useState<DisplayInfo[]>([]);
+  const [audioOutputs, setAudioOutputs] = useState<AudioOutputInfo[]>([]);
 
   useEffect(() => {
     if (!isOpen) return;
-    getCurrentWindow()
+    const win = getCurrentWindow();
+    win
       .getDisplays()
       .then((list) => setDisplays(list || []))
       .catch(() => setDisplays([]));
+    win
+      .getAudioOutputs()
+      .then((list) => setAudioOutputs(list || []))
+      .catch(() => setAudioOutputs([]));
   }, [isOpen]);
   const [isSavedNotice, setIsSavedNotice] = useState(false);
   const [appVersion, setAppVersion] = useState<string>("");
@@ -1652,21 +1658,90 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         <span>Target Display</span>
                       </div>
                       <div className="text-[11px] text-zinc-500">
-                        Force Console Mode to open fullscreen on a specific monitor or living-room TV.
+                        Open Console Mode and launched games fullscreen on a specific monitor or TV. Disabled TVs auto-enable on entry and turn back off on exit.
                       </div>
                     </div>
                     <select
-                      value={formConfig.console_display_id || "auto"}
+                      value={(() => {
+                        const raw = formConfig.console_display_id || "auto";
+                        if (raw === "auto") return "auto";
+                        const matched = displays.find(
+                          (d) => (d.outputName && d.outputName === raw) || d.id === raw
+                        );
+                        return matched ? matched.outputName || matched.id : raw;
+                      })()}
                       onChange={(e) => updateField("console_display_id", e.target.value)}
-                      className="px-3 py-1.5 rounded-xl bg-black/40 border border-white/15 text-xs text-white focus:outline-none cursor-pointer max-w-[240px]"
+                      className="px-3 py-1.5 rounded-xl bg-black/40 border border-white/15 text-xs text-white focus:outline-none cursor-pointer max-w-[280px]"
                     >
                       <option value="auto">Current Display (Auto)</option>
-                      {displays.map((d, idx) => (
-                        <option key={d.id} value={d.id}>
-                          {d.label || `Display ${idx + 1}`} — {d.width}×{d.height}
-                          {d.isPrimary ? " (Primary)" : ""}
+                      {displays.map((d, idx) => {
+                        const optionValue = d.outputName || d.id;
+                        const baseLabel = d.label || d.outputName || `Display ${idx + 1}`;
+                        const showConnector =
+                          d.outputName &&
+                          !baseLabel.toLowerCase().includes(d.outputName.toLowerCase());
+                        const resPart =
+                          d.width > 0 && d.height > 0 ? ` — ${d.width}×${d.height}` : "";
+                        const statePart = d.isDisabled
+                          ? " (Disabled · Auto-Enable)"
+                          : d.isPrimary
+                          ? " (Primary)"
+                          : "";
+                        return (
+                          <option key={optionValue} value={optionValue}>
+                            {baseLabel}
+                            {showConnector ? ` (${d.outputName})` : ""}
+                            {resPart}
+                            {statePart}
+                          </option>
+                        );
+                      })}
+                      {formConfig.console_display_id &&
+                        formConfig.console_display_id !== "auto" &&
+                        !displays.some(
+                          (d) =>
+                            d.outputName === formConfig.console_display_id ||
+                            d.id === formConfig.console_display_id
+                        ) && (
+                          <option value={formConfig.console_display_id}>
+                            {formConfig.console_display_id} (Currently Disconnected)
+                          </option>
+                        )}
+                    </select>
+                  </div>
+
+                  <div className="border-t border-white/5" />
+
+                  {/* Target Audio Output Selector */}
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="space-y-0.5">
+                      <div className="font-semibold text-zinc-200 flex items-center gap-1.5">
+                        <Volume2 className="w-3.5 h-3.5 text-zinc-400" />
+                        <span>Target Audio Output</span>
+                      </div>
+                      <div className="text-[11px] text-zinc-500">
+                        Stream Console Mode and game audio to a specific output (e.g. TV HDMI, soundbar, or speakers). Restores on exit.
+                      </div>
+                    </div>
+                    <select
+                      value={formConfig.console_audio_output_id || "auto"}
+                      onChange={(e) => updateField("console_audio_output_id", e.target.value)}
+                      className="px-3 py-1.5 rounded-xl bg-black/40 border border-white/15 text-xs text-white focus:outline-none cursor-pointer max-w-[280px]"
+                    >
+                      <option value="auto">System Default (Auto)</option>
+                      {audioOutputs.map((out) => (
+                        <option key={out.id} value={out.id}>
+                          {out.label}
+                          {out.isDefault ? " (Default)" : ""}
                         </option>
                       ))}
+                      {formConfig.console_audio_output_id &&
+                        formConfig.console_audio_output_id !== "auto" &&
+                        !audioOutputs.some((o) => o.id === formConfig.console_audio_output_id) && (
+                          <option value={formConfig.console_audio_output_id}>
+                            Saved Output (Currently Offline)
+                          </option>
+                        )}
                     </select>
                   </div>
 

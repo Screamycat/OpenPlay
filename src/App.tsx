@@ -203,6 +203,10 @@ export function App() {
       if (!currentlyFs || (targetDisplayId && targetDisplayId !== "auto")) {
         await win.setFullscreen(true, targetDisplayId || undefined);
       }
+      const targetAudioId = appConfigRef.current.console_audio_output_id ?? "auto";
+      if (targetAudioId && targetAudioId !== "auto") {
+        await win.setAudioOutput(targetAudioId).catch(() => {});
+      }
     } catch (err) {
       console.warn("Could not toggle native fullscreen for Console Mode:", err);
     }
@@ -216,7 +220,11 @@ export function App() {
     setIsHunterHubOpen(false);
     try {
       const win = getCurrentWindow();
-      await win.setFullscreen(wasFullscreenBeforeConsoleRef.current);
+      await win.restoreAudioOutput().catch(() => {});
+      await win.setFullscreen(false);
+      if (wasFullscreenBeforeConsoleRef.current) {
+        await win.setFullscreen(true);
+      }
     } catch (err) {
       console.warn("Could not restore window fullscreen state:", err);
     }
@@ -436,9 +444,63 @@ export function App() {
     }
   }, []);
 
-  // Bounded 8-entry LRU cache of full game records (description, screenshots, trailers, links, notes, play_actions)
-  // hydrated on-demand when a game is selected.
+  // Bounded 16-entry LRU cache of full game records (description, screenshots, trailers, links, notes, play_actions)
+  // hydrated on-demand and shared between Desktop Mode and Console Mode as a single source of truth.
   const [hydratedGames, setHydratedGames] = useState<Record<string, Game>>({});
+  const hydratedGamesRef = useRef<Record<string, Game>>({});
+  const hydratingIdsRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    hydratedGamesRef.current = hydratedGames;
+  }, [hydratedGames]);
+
+  const hydrateGameById = useCallback(
+    async (gameId: string, siblingIds?: string[]) => {
+      if (!gameId) return;
+      const fetchOne = async (id: string): Promise<Game | null> => {
+        if (hydratedGamesRef.current[id]) return hydratedGamesRef.current[id];
+        if (hydratingIdsRef.current.has(id)) return null;
+        hydratingIdsRef.current.add(id);
+        try {
+          const full = await invoke<Game | null>("get_game_by_id", { gameId: id });
+          if (full) {
+            setHydratedGames((prev) => {
+              const keys = Object.keys(prev).filter((k) => k !== full.id);
+              const next: Record<string, Game> = {};
+              // Keep at most 15 previous entries + the new entry = 16 max
+              const startIdx = Math.max(0, keys.length - 15);
+              for (let i = startIdx; i < keys.length; i++) {
+                next[keys[i]] = prev[keys[i]];
+              }
+              next[full.id] = full;
+              return next;
+            });
+          }
+          return full;
+        } catch {
+          return null;
+        } finally {
+          hydratingIdsRef.current.delete(id);
+        }
+      };
+
+      const primary = await fetchOne(gameId);
+      // If a merged game's primary copy lacks description or trailers, also hydrate siblings
+      // so merged metadata inheritance populates identically in both Desktop and Console Mode.
+      if (
+        siblingIds &&
+        siblingIds.length > 0 &&
+        (!primary?.description?.trim() || !primary?.trailers?.length)
+      ) {
+        for (const sibId of siblingIds.slice(0, 2)) {
+          if (sibId && sibId !== gameId) {
+            await fetchOne(sibId);
+          }
+        }
+      }
+    },
+    []
+  );
 
   // Load games, application config and integration state on mount
   const loadInitialData = async () => {
@@ -451,6 +513,7 @@ export function App() {
         const cfg = await invoke<AppConfig>("get_app_config");
         if (cfg) {
           loadedCfg = { ...DEFAULT_APP_CONFIG, ...cfg };
+          appConfigRef.current = loadedCfg;
           setAppConfig(loadedCfg);
 
           if (cfg.view_mode) setViewMode(cfg.view_mode as ViewMode);
@@ -718,6 +781,15 @@ export function App() {
       }
     });
 
+    let achRefreshTimer: number | null = null;
+    const unlistenAchievementsUpdated = listen("achievements-updated", () => {
+      if (achRefreshTimer) window.clearTimeout(achRefreshTimer);
+      achRefreshTimer = window.setTimeout(() => {
+        achRefreshTimer = null;
+        loadHunterStats();
+      }, 400);
+    });
+
     const unlistenCloudSync = listen("cloud-sync-completed", async () => {
       try {
         if (saveConfigTimeoutRef.current) {
@@ -813,15 +885,41 @@ export function App() {
       unlistenProgress.then((f) => f());
       unlistenSyncComplete.then((f) => f());
       unlistenLibraryUpdated.then((f) => f());
+      unlistenAchievementsUpdated.then((f) => f());
+      if (achRefreshTimer) window.clearTimeout(achRefreshTimer);
       unlistenCloudSync.then((f) => f());
     };
   }, []);
 
-  // Zero-GPU In-Game Hibernate: pause all background videos and CSS/blur shaders while a game is running
+  const [isWindowFocused, setIsWindowFocused] = useState<boolean>(() =>
+    typeof document !== "undefined" ? document.hasFocus() : true
+  );
+
   useEffect(() => {
-    const isGameActive = runningGameIds.length > 0;
-    if (isGameActive) {
+    const onFocus = () => setIsWindowFocused(true);
+    const onBlur = () => setIsWindowFocused(false);
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, []);
+
+  // Zero-GPU In-Game Hibernate: pause all background videos immediately when launching/playing,
+  // and freeze all CSS animations & blur shaders once the game is running on top (or window loses focus).
+  useEffect(() => {
+    const isGameSessionActive = runningGameIds.length > 0 || isLaunchingId !== null;
+    const shouldFreezeAnimations =
+      runningGameIds.length > 0 && (!isLaunchingId || !isWindowFocused);
+
+    if (shouldFreezeAnimations) {
       document.documentElement.dataset.gameRunning = "true";
+    } else {
+      delete document.documentElement.dataset.gameRunning;
+    }
+
+    if (isGameSessionActive) {
       document.querySelectorAll<HTMLVideoElement>("video").forEach((v) => {
         if (!v.paused) {
           v.dataset.pausedForGame = "true";
@@ -829,7 +927,6 @@ export function App() {
         }
       });
     } else {
-      delete document.documentElement.dataset.gameRunning;
       document
         .querySelectorAll<HTMLVideoElement>('video[data-paused-for-game="true"]')
         .forEach((v) => {
@@ -839,7 +936,7 @@ export function App() {
           }
         });
     }
-  }, [runningGameIds.length]);
+  }, [runningGameIds.length, isLaunchingId, isWindowFocused]);
 
   // Periodic sync of running games to guarantee immediate state reconciliation
   useEffect(() => {
@@ -1180,7 +1277,10 @@ export function App() {
         );
       }
 
-      if (appConfig.minimize_on_game_launch || isConsoleModeRef.current) {
+      // In Desktop Mode, honor the user's minimize-on-launch preference.
+      // In Console Mode, stay fullscreen behind the game showing the Launching overlay (0% GPU hibernate once focused away)
+      // so the desktop wallpaper is never exposed.
+      if (appConfig.minimize_on_game_launch && !isConsoleModeRef.current) {
         try {
           await getCurrentWindow().minimize();
         } catch (e) {}
@@ -1420,6 +1520,7 @@ export function App() {
       setIsFetchingMetaId(gameId);
       const updated = await invoke<Game>("fetch_game_metadata", { gameId });
       setGames((prev) => prev.map((g) => (g.id === gameId ? updated : g)));
+      setHydratedGames((prev) => ({ ...prev, [updated.id]: updated }));
     } catch (err) {
       console.error("Failed to fetch metadata:", err);
     } finally {
@@ -1435,6 +1536,9 @@ export function App() {
       setGames((prev) =>
         prev.map((g) => (g.id === gameId ? { ...g, ...updated } : g))
       );
+      setHydratedGames((prev) =>
+        prev[gameId] ? { ...prev, [gameId]: { ...prev[gameId], ...updated } } : prev
+      );
       await loadHunterStats();
     } catch (err) {
       console.error("Failed to refresh game live data:", err);
@@ -1443,100 +1547,107 @@ export function App() {
     }
   }, []);
 
+  // Always hydrate the full SQLite record before opening EditGameModal so lean summary rows
+  // can never overwrite description, screenshots, trailers, notes, or play_actions on save.
+  const handleOpenEditGame = useCallback(async (game: Game) => {
+    try {
+      const full =
+        hydratedGamesRef.current[game.id] ||
+        (await invoke<Game | null>("get_game_by_id", { gameId: game.id }));
+      if (full) {
+        setHydratedGames((prev) => ({ ...prev, [full.id]: full }));
+        setEditingGame({ ...game, ...full });
+        return;
+      }
+    } catch {}
+    setEditingGame(game);
+  }, []);
+
   // Save edited game
   const handleSaveGame = async (updated: Game) => {
     try {
-      await invoke("save_game", { game: updated });
+      const savedPrimary = (await invoke<Game>("save_game", { game: updated })) || updated;
+
+      // Keep hydrated cache in sync immediately
+      setHydratedGames((prev) => ({
+        ...prev,
+        [savedPrimary.id]: savedPrimary,
+      }));
 
       // If this game belongs to a merged multi-platform group, sync shared metadata across its siblings
-      const mergedGroup = filteredGames.find(
-        (g) => g.id === updated.id || g.sibling_games?.some((s) => s.id === updated.id)
+      const mergedGroup = allMergedGames.find(
+        (g) => g.id === savedPrimary.id || g.sibling_games?.some((s) => s.id === savedPrimary.id)
       );
 
       if (mergedGroup && mergedGroup.sibling_games && mergedGroup.sibling_games.length > 0) {
         const allGroupCopies = [mergedGroup, ...mergedGroup.sibling_games];
-        const siblingCopies = allGroupCopies.filter((c) => c.id !== updated.id);
+        const siblingCopies = allGroupCopies.filter((c) => c.id !== savedPrimary.id);
+        const savedSiblings: Record<string, Game> = {};
 
         for (const sib of siblingCopies) {
+          // Hydrate sibling first so sibling-specific play_actions / fields are never lost
+          const fullSib =
+            hydratedGamesRef.current[sib.id] ||
+            (await invoke<Game | null>("get_game_by_id", { gameId: sib.id }).catch(() => null)) ||
+            sib;
+
           const syncedSib: Game = {
-            ...sib,
-            title: updated.title,
-            sorting_title: updated.sorting_title,
-            cover_image: updated.cover_image,
-            background_image: updated.background_image,
-            logo_image: updated.logo_image,
-            icon_image: updated.icon_image,
-            description: updated.description,
-            notes: updated.notes,
-            developer: updated.developer,
-            publisher: updated.publisher,
-            release_date: updated.release_date,
-            genres: updated.genres,
-            tags: updated.tags,
-            categories: updated.categories,
-            features: updated.features,
-            critic_score: updated.critic_score,
-            community_score: updated.community_score,
-            user_rating: updated.user_rating,
-            completion_status: updated.completion_status,
-            auto_beaten: updated.auto_beaten,
-            is_favorite: updated.is_favorite,
-            is_hidden: updated.is_hidden,
-            hltb_main: updated.hltb_main,
-            hltb_extra: updated.hltb_extra,
-            hltb_completionist: updated.hltb_completionist,
-            links: updated.links,
-            trailers: updated.trailers,
-            screenshots: updated.screenshots,
+            ...fullSib,
+            title: savedPrimary.title,
+            sorting_title: savedPrimary.sorting_title,
+            cover_image: savedPrimary.cover_image,
+            background_image: savedPrimary.background_image,
+            logo_image: savedPrimary.logo_image,
+            icon_image: savedPrimary.icon_image,
+            description: savedPrimary.description,
+            notes: savedPrimary.notes,
+            developer: savedPrimary.developer,
+            publisher: savedPrimary.publisher,
+            series: savedPrimary.series,
+            age_rating: savedPrimary.age_rating,
+            release_date: savedPrimary.release_date,
+            genres: savedPrimary.genres,
+            tags: savedPrimary.tags,
+            categories: savedPrimary.categories,
+            features: savedPrimary.features,
+            critic_score: savedPrimary.critic_score,
+            community_score: savedPrimary.community_score,
+            user_rating: savedPrimary.user_rating,
+            completion_status: savedPrimary.completion_status,
+            auto_beaten: savedPrimary.auto_beaten,
+            is_favorite: savedPrimary.is_favorite,
+            is_hidden: savedPrimary.is_hidden,
+            hltb_main: savedPrimary.hltb_main,
+            hltb_extra: savedPrimary.hltb_extra,
+            hltb_completionist: savedPrimary.hltb_completionist,
+            links: savedPrimary.links,
+            trailers: savedPrimary.trailers,
+            screenshots: savedPrimary.screenshots,
             // Individual platform fields (playtime_seconds, last_played, install_directory, executable_path, play_actions, is_installed) are untouched!
           };
+          savedSiblings[sib.id] = syncedSib;
           invoke("save_game", { game: syncedSib }).catch((e) =>
             console.warn("Failed to sync sibling metadata in SQLite:", e)
           );
         }
 
-        const sibIds = new Set(siblingCopies.map((s) => s.id));
+        setHydratedGames((prev) => {
+          const next = { ...prev, [savedPrimary.id]: savedPrimary };
+          for (const [sid, sGame] of Object.entries(savedSiblings)) {
+            if (prev[sid]) next[sid] = sGame;
+          }
+          return next;
+        });
+
         setGames((prev) =>
           prev.map((g) => {
-            if (g.id === updated.id) return updated;
-            if (sibIds.has(g.id)) {
-              return {
-                ...g,
-                title: updated.title,
-                sorting_title: updated.sorting_title,
-                cover_image: updated.cover_image,
-                background_image: updated.background_image,
-                logo_image: updated.logo_image,
-                icon_image: updated.icon_image,
-                description: updated.description,
-                notes: updated.notes,
-                developer: updated.developer,
-                publisher: updated.publisher,
-                release_date: updated.release_date,
-                genres: updated.genres,
-                tags: updated.tags,
-                categories: updated.categories,
-                features: updated.features,
-                critic_score: updated.critic_score,
-                community_score: updated.community_score,
-                user_rating: updated.user_rating,
-                completion_status: updated.completion_status,
-                auto_beaten: updated.auto_beaten,
-                is_favorite: updated.is_favorite,
-                is_hidden: updated.is_hidden,
-                hltb_main: updated.hltb_main,
-                hltb_extra: updated.hltb_extra,
-                hltb_completionist: updated.hltb_completionist,
-                links: updated.links,
-                trailers: updated.trailers,
-                screenshots: updated.screenshots,
-              };
-            }
+            if (g.id === savedPrimary.id) return savedPrimary;
+            if (savedSiblings[g.id]) return savedSiblings[g.id];
             return g;
           })
         );
       } else {
-        setGames((prev) => prev.map((g) => (g.id === updated.id ? updated : g)));
+        setGames((prev) => prev.map((g) => (g.id === savedPrimary.id ? savedPrimary : g)));
       }
     } catch (err) {
       console.error("Failed to save game:", err);
@@ -1614,8 +1725,12 @@ export function App() {
 
   const handleSaveTrailersGlobal = async (trailers: GameTrailer[]) => {
     if (!trailerGame) return;
+    const base =
+      hydratedGamesRef.current[trailerGame.id] ||
+      (await invoke<Game | null>("get_game_by_id", { gameId: trailerGame.id }).catch(() => null)) ||
+      trailerGame;
     const updated = {
-      ...trailerGame,
+      ...base,
       trailers,
     };
     await handleSaveGame(updated);
@@ -1661,11 +1776,14 @@ export function App() {
     }
   };
 
-  // Auto-save user notes
+  // Auto-save user notes (always hydrate full record first so description/trailers/screenshots are preserved)
   const handleSaveNotes = async (gameId: string, notes: string) => {
-    const game = games.find((g) => g.id === gameId);
-    if (!game) return;
-    const updated = { ...game, notes };
+    const base =
+      hydratedGamesRef.current[gameId] ||
+      (await invoke<Game | null>("get_game_by_id", { gameId }).catch(() => null)) ||
+      games.find((g) => g.id === gameId);
+    if (!base) return;
+    const updated = { ...base, notes };
     await handleSaveGame(updated);
   };
 
@@ -1750,25 +1868,39 @@ export function App() {
     );
   }, [showFavoritesOnly, showHiddenOnly, selectedGenres, selectedDevelopers, selectedSources]);
 
-  // Merged list for Console Mode (preserves multi-platform siblings cleanly)
-  const consoleMergedGames = useMemo(
-    () =>
-      mergeDuplicateGames(
-        games,
-        appConfig.merge_duplicates ?? true,
-        appConfig.unmerged_game_ids ?? []
-      ),
-    [games, appConfig.merge_duplicates, appConfig.unmerged_game_ids]
-  );
+  // Single Source of Truth: overlay hydrated full records onto games BEFORE merging duplicates,
+  // so Desktop Mode and Console Mode ALWAYS receive identical per-game metadata.
+  const allMergedGames = useMemo(() => {
+    const hydratedList =
+      Object.keys(hydratedGames).length === 0
+        ? games
+        : games.map((g) => {
+            const full = hydratedGames[g.id];
+            if (!full) return g;
+            return {
+              ...g,
+              description: g.description ?? full.description,
+              notes: g.notes ?? full.notes,
+              links: g.links?.length ? g.links : full.links,
+              screenshots: g.screenshots?.length ? g.screenshots : full.screenshots,
+              trailers: g.trailers?.length ? g.trailers : full.trailers,
+              play_actions: g.play_actions?.length ? g.play_actions : full.play_actions,
+              hltb_main: g.hltb_main ?? full.hltb_main,
+              hltb_extra: g.hltb_extra ?? full.hltb_extra,
+              hltb_completionist: g.hltb_completionist ?? full.hltb_completionist,
+            };
+          });
 
-  // Filter and sort games
-  const filteredGames = useMemo(() => {
-    // 1. Merge duplicate titles across platforms first so all platform copies (siblings) are preserved
-    const mergedList = mergeDuplicateGames(
-      games,
+    return mergeDuplicateGames(
+      hydratedList,
       appConfig.merge_duplicates ?? true,
       appConfig.unmerged_game_ids ?? []
     );
+  }, [games, hydratedGames, appConfig.merge_duplicates, appConfig.unmerged_game_ids]);
+
+  // Filter and sort games (Desktop Mode derives directly from allMergedGames)
+  const filteredGames = useMemo(() => {
+    const mergedList = allMergedGames;
 
     // 2. Filter merged titles
     const list = mergedList.filter((g) => {
@@ -1871,7 +2003,7 @@ export function App() {
 
     return sorted;
   }, [
-    games,
+    allMergedGames,
     statusFilter,
     showFavoritesOnly,
     showHiddenGames,
@@ -1882,8 +2014,6 @@ export function App() {
     searchQuery,
     sortBy,
     sortDirection,
-    appConfig.merge_duplicates,
-    appConfig.unmerged_game_ids,
   ]);
 
   // Keep selectedGame valid when filtered games change
@@ -1910,49 +2040,15 @@ export function App() {
   }, [filteredGames, games, selectedGameId]);
 
   // Hydrate full detail columns (description, screenshots, trailers, links, notes, play_actions)
-  // on-demand for the selected game only, keeping a bounded 8-entry cache in RAM.
+  // on-demand for the selected Desktop game via the shared hydrateGameById cache.
   useEffect(() => {
     const targetId = selectedGameBase?.id;
     if (!targetId) return;
-    if (hydratedGames[targetId]) return;
+    const siblingIds = selectedGameBase.sibling_games?.map((s) => s.id);
+    hydrateGameById(targetId, siblingIds);
+  }, [selectedGameBase?.id, hydrateGameById]);
 
-    let cancelled = false;
-    invoke<Game | null>("get_game_by_id", { gameId: targetId })
-      .then((full) => {
-        if (cancelled || !full) return;
-        setHydratedGames((prev) => {
-          const keys = Object.keys(prev);
-          const next: Record<string, Game> = {};
-          // Keep at most 7 previous entries + the new entry = 8 max
-          const startIdx = Math.max(0, keys.length - 7);
-          for (let i = startIdx; i < keys.length; i++) {
-            next[keys[i]] = prev[keys[i]];
-          }
-          next[full.id] = full;
-          return next;
-        });
-      })
-      .catch(() => {});
-
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedGameBase?.id, hydratedGames]);
-
-  const selectedGame = useMemo(() => {
-    if (!selectedGameBase) return null;
-    const full = hydratedGames[selectedGameBase.id];
-    if (!full) return selectedGameBase;
-    return {
-      ...selectedGameBase,
-      description: selectedGameBase.description ?? full.description,
-      notes: selectedGameBase.notes ?? full.notes,
-      links: selectedGameBase.links?.length ? selectedGameBase.links : full.links,
-      screenshots: selectedGameBase.screenshots?.length ? selectedGameBase.screenshots : full.screenshots,
-      trailers: selectedGameBase.trailers?.length ? selectedGameBase.trailers : full.trailers,
-      play_actions: selectedGameBase.play_actions?.length ? selectedGameBase.play_actions : full.play_actions,
-    };
-  }, [selectedGameBase, hydratedGames]);
+  const selectedGame = selectedGameBase;
 
   const selectedHeroUrl = resolveImageSrc(selectedGame?.background_image);
 
@@ -2082,12 +2178,14 @@ export function App() {
         {isConsoleMode ? (
           <>
             <ConsoleModeRoot
-              games={consoleMergedGames}
+              games={allMergedGames}
               appConfig={appConfig}
               activeConsoleTheme={activeConsoleTheme}
               achievementSummaryMap={achievementSummaryMap}
               runningGameId={runningGameIds[0] || null}
               launchingGameId={isLaunchingId}
+              isWindowFocused={isWindowFocused}
+              onRequestHydrateGame={hydrateGameById}
               isRefreshing={isScanning || isFullRefreshing || isSyncingMetadata}
               isExternalModalOpen={
                 isSettingsOpen ||
@@ -2281,7 +2379,7 @@ export function App() {
                     onInstall={handleInstallGame}
                     onStop={handleStopGame}
                     onToggleFavorite={handleToggleFavorite}
-                    onOpenEdit={(g) => setEditingGame(g)}
+                    onOpenEdit={(g) => handleOpenEditGame(g)}
                     onRemoveGame={handleRemoveGame}
                     onFetchMetadata={handleFetchMetadata}
                     onRefreshGame={handleRefreshGameLive}
@@ -2485,11 +2583,35 @@ export function App() {
         isAuthenticatingEpic={isAuthenticatingEpic}
         config={appConfig}
         onSaveConfig={(updated) => {
+          const prevDisplayId = appConfigRef.current.console_display_id || "auto";
+          const nextDisplayId = updated.console_display_id || "auto";
+          const prevAudioId = appConfigRef.current.console_audio_output_id || "auto";
+          const nextAudioId = updated.console_audio_output_id || "auto";
+          appConfigRef.current = updated;
           setAppConfig(updated);
           invoke("save_app_config", { config: updated }).catch((e) =>
             console.warn("Failed to persist config:", e)
           );
           if (updated.view_mode) setViewMode(updated.view_mode as ViewMode);
+          if (isConsoleModeRef.current && prevDisplayId !== nextDisplayId) {
+            const win = getCurrentWindow();
+            if (nextDisplayId === "auto") {
+              win
+                .setFullscreen(false)
+                .then(() => win.setFullscreen(true))
+                .catch(() => {});
+            } else {
+              win.setFullscreen(true, nextDisplayId).catch(() => {});
+            }
+          }
+          if (isConsoleModeRef.current && prevAudioId !== nextAudioId) {
+            const win = getCurrentWindow();
+            if (nextAudioId === "auto") {
+              win.restoreAudioOutput().catch(() => {});
+            } else {
+              win.setAudioOutput(nextAudioId).catch(() => {});
+            }
+          }
         }}
         onSyncRetroAchievements={handleSyncRetroAchievements}
         isSyncingRa={isSyncingRa}
@@ -2530,11 +2652,35 @@ export function App() {
         totalGames={games.length}
         config={appConfig}
         onSaveConfig={(updated) => {
+          const prevDisplayId = appConfigRef.current.console_display_id || "auto";
+          const nextDisplayId = updated.console_display_id || "auto";
+          const prevAudioId = appConfigRef.current.console_audio_output_id || "auto";
+          const nextAudioId = updated.console_audio_output_id || "auto";
+          appConfigRef.current = updated;
           setAppConfig(updated);
           invoke("save_app_config", { config: updated }).catch((e) =>
             console.warn("Failed to persist config:", e)
           );
           if (updated.view_mode) setViewMode(updated.view_mode as ViewMode);
+          if (isConsoleModeRef.current && prevDisplayId !== nextDisplayId) {
+            const win = getCurrentWindow();
+            if (nextDisplayId === "auto") {
+              win
+                .setFullscreen(false)
+                .then(() => win.setFullscreen(true))
+                .catch(() => {});
+            } else {
+              win.setFullscreen(true, nextDisplayId).catch(() => {});
+            }
+          }
+          if (isConsoleModeRef.current && prevAudioId !== nextAudioId) {
+            const win = getCurrentWindow();
+            if (nextAudioId === "auto") {
+              win.restoreAudioOutput().catch(() => {});
+            } else {
+              win.setAudioOutput(nextAudioId).catch(() => {});
+            }
+          }
         }}
       />
 
@@ -2588,7 +2734,7 @@ export function App() {
           isFetchingMeta={isFetchingMetaId === contextMenu.game.id}
           onRefreshGame={handleRefreshGameLive}
           isRefreshing={refreshingGameIds.includes(contextMenu.game.id)}
-          onOpenEdit={(g) => setEditingGame(g)}
+          onOpenEdit={(g) => handleOpenEditGame(g)}
           onOpenSaveManager={(g) => setSaveManagerGame(g)}
           onRemoveGame={handleRemoveGame}
           onToggleHide={handleToggleHideGame}

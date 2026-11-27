@@ -1475,6 +1475,9 @@ impl Database {
         if cfg.console_display_id.is_none() {
             cfg.console_display_id = Some("auto".to_string());
         }
+        if cfg.console_audio_output_id.is_none() {
+            cfg.console_audio_output_id = Some("auto".to_string());
+        }
 
         Ok(cfg)
     }

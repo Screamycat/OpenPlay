@@ -43,3 +43,18 @@ pub struct DiscoveredRom {
     pub file_size_bytes: u64,
     pub local_cover_path: Option<String>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InstalledEmulatorApp {
+    pub name: String,
+    pub command: String,
+    pub source: String, // "Flatpak" | "System" | "Snap"
+    pub desktop_file: Option<String>,
+    pub app_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResolvedEmulatorTarget {
+    pub command: String,
+    pub name: Option<String>,
+}

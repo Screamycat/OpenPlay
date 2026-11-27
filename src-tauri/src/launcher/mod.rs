@@ -41,6 +41,7 @@ pub struct RunningGameInfo {
     pub install_directory: Option<String>,
     pub prefix_path: Option<String>,
     pub runner_path: Option<String>,
+    pub flatpak_app_id: Option<String>,
     pub start_time: Instant,
 }
 
@@ -455,6 +456,22 @@ pub fn resolve_executable_command(exe_str: &str) -> Option<(std::path::PathBuf, 
     None
 }
 
+fn extract_flatpak_app_id(exe_path: &Path, args: &[String]) -> Option<String> {
+    let bin_name = exe_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    if bin_name != "flatpak" {
+        return None;
+    }
+    let run_idx = args.iter().position(|a| a == "run")?;
+    args[run_idx + 1..]
+        .iter()
+        .find(|a| !a.starts_with('-'))
+        .cloned()
+}
+
 impl GameLauncher {
     pub fn is_game_running(game_id: &str) -> bool {
         let map = running_games_map().lock().unwrap();
@@ -587,6 +604,7 @@ impl GameLauncher {
                             install_directory: install_directory.clone(),
                             prefix_path: None,
                             runner_path: None,
+                            flatpak_app_id: None,
                             start_time,
                         },
                     );
@@ -712,6 +730,7 @@ impl GameLauncher {
                             install_directory: install_directory.clone(),
                             prefix_path: None,
                             runner_path: None,
+                            flatpak_app_id: None,
                             start_time,
                         },
                     );
@@ -786,18 +805,8 @@ impl GameLauncher {
                 None
             };
 
-            let (exe_path, args_template, emu_name) = if let Some(conf) = configured {
-                let mut args = conf.arguments_template.clone();
-                args = args.replace("{rom_path}", &rom_path);
-                if let Some(ref core) = conf.core_name {
-                    args = args.replace("{core}", core);
-                }
-                if let Some(ref custom_args) = launch_arguments {
-                    if !custom_args.trim().is_empty() {
-                        args = format!("{} {}", args, custom_args.trim());
-                    }
-                }
-                (conf.executable_path, args, conf.name)
+            let (raw_exe_path, mut args_template, emu_name, core_opt) = if let Some(conf) = configured {
+                (conf.executable_path, conf.arguments_template, conf.name, conf.core_name)
             } else {
                 let emulator_profiles = db.get_emulator_profiles().unwrap_or_default();
                 let profile = if let Some(ref emu_id) = emulator_id {
@@ -813,28 +822,85 @@ impl GameLauncher {
                     return Err(format!("Emulator '{}' has no executable path configured", profile.name));
                 }
 
-                let mut args = profile.arguments_template.clone();
-                args = args.replace("{rom_path}", &rom_path);
-                if let Some(ref core) = profile.selected_core {
-                    args = args.replace("{core}", core);
-                }
-                if let Some(ref custom_args) = launch_arguments {
-                    if !custom_args.trim().is_empty() {
-                        args = format!("{} {}", args, custom_args.trim());
-                    }
-                }
-                (profile.executable_path, args, profile.name)
+                (profile.executable_path, profile.arguments_template, profile.name, profile.selected_core)
             };
 
-            if exe_path.trim().is_empty() {
+            if raw_exe_path.trim().is_empty() {
                 return Err(format!("Console/Emulator '{}' has no executable path configured", emu_name));
             }
 
-            let mut cmd = Command::new(&exe_path);
-            let emu_path_buf = std::path::PathBuf::from(&exe_path);
-            let raw_parent = emu_path_buf.parent().map(|p| p.to_string_lossy().to_string());
-            // Never use a shared system directory (like /usr/bin) as install_directory for process scanning!
-            let parent_dir = raw_parent.filter(|d| {
+            // If user saved a Linux .desktop entry path, resolve it cleanly to its actual Exec command
+            let effective_exe_path = crate::emulator::EmulatorService::resolve_emulator_target(&raw_exe_path).command;
+            let is_flatpak_cmd = effective_exe_path.to_lowercase().contains("flatpak");
+
+            // Resolve RetroArch {core} cleanly across Windows (cores/{core}.dll) and Linux (native/Flatpak/Snap .so paths)
+            if let Some(ref core) = core_opt {
+                let trimmed_core = core.trim();
+                if !trimmed_core.is_empty() {
+                    if let Some(resolved_core) =
+                        crate::emulator::EmulatorService::resolve_retroarch_core_path(&effective_exe_path, trimmed_core)
+                    {
+                        let mut resolved_str = resolved_core.to_string_lossy().to_string();
+                        // Inside Flatpak RetroArch sandbox, host .../org.libretro.RetroArch/current/active/files/... maps to /app/...
+                        if is_flatpak_cmd {
+                            if let Some(idx) = resolved_str.find("/current/active/files/") {
+                                resolved_str = format!("/app/{}", &resolved_str[idx + "/current/active/files/".len()..]);
+                            }
+                        }
+                        args_template = args_template
+                            .replace("cores/{core}", &resolved_str)
+                            .replace("cores\\{core}", &resolved_str)
+                            .replace("{core}", &resolved_str);
+                    } else {
+                        #[cfg(target_os = "linux")]
+                        let fallback_core = {
+                            let is_win_exe = effective_exe_path.to_lowercase().ends_with(".exe");
+                            if !is_win_exe && trimmed_core.to_lowercase().ends_with(".dll") {
+                                format!("{}.so", &trimmed_core[..trimmed_core.len() - 4])
+                            } else {
+                                trimmed_core.to_string()
+                            }
+                        };
+                        #[cfg(not(target_os = "linux"))]
+                        let fallback_core = trimmed_core.to_string();
+
+                        if Path::new(&fallback_core).is_absolute() {
+                            args_template = args_template
+                                .replace("cores/{core}", &fallback_core)
+                                .replace("cores\\{core}", &fallback_core)
+                                .replace("{core}", &fallback_core);
+                        } else {
+                            args_template = args_template.replace("{core}", &fallback_core);
+                        }
+                    }
+                }
+            }
+
+            args_template = args_template.replace("{rom_path}", &rom_path);
+            if let Some(ref custom_args) = launch_arguments {
+                if !custom_args.trim().is_empty() {
+                    args_template = format!("{} {}", args_template, custom_args.trim());
+                }
+            }
+
+            let (emu_path_buf, mut all_args) = resolve_executable_command(&effective_exe_path).ok_or_else(|| {
+                format!(
+                    "Emulator executable not found for '{}' ('{}'). Please verify the binary path or Flatpak command in Library Manager > Emulation.",
+                    emu_name, effective_exe_path
+                )
+            })?;
+
+            let mut template_parts = split_cli_arguments(&args_template);
+            all_args.append(&mut template_parts);
+
+            let flatpak_app_id = extract_flatpak_app_id(&emu_path_buf, &all_args);
+
+            let raw_parent = emu_path_buf
+                .parent()
+                .filter(|p| !p.as_os_str().is_empty() && p.is_dir())
+                .map(|p| p.to_string_lossy().to_string());
+            // Never use a shared system directory (like /usr/bin) as install_directory for process scanning or cwd
+            let parent_dir = raw_parent.clone().filter(|d| {
                 let norm = d.to_lowercase().replace('/', "\\");
                 !is_unsafe_shared_directory(norm.trim_end_matches('\\'))
             });
@@ -843,17 +909,78 @@ impl GameLauncher {
                 .map(|f| f.to_string_lossy().to_lowercase())
                 .unwrap_or_default();
 
-            if let Some(parent) = emu_path_buf.parent() {
-                cmd.current_dir(parent);
-            }
+            #[cfg(target_os = "linux")]
+            let (mut cmd, prefix_path_opt, runner_path_opt) = {
+                let is_windows_exe = emu_path_buf
+                    .extension()
+                    .map(|e| e.to_string_lossy().eq_ignore_ascii_case("exe"))
+                    .unwrap_or(false);
 
-            let parts = split_cli_arguments(&args_template);
-            cmd.args(parts);
+                if is_windows_exe {
+                    let config = db.get_app_config().unwrap_or_default();
+                    let runner = RunnerManager::resolve_runner(
+                        config.linux_preferred_runner_id.as_deref(),
+                        config.linux_custom_runner_path.as_deref(),
+                    )
+                    .ok_or_else(|| {
+                        "No Proton or Wine runner found on this system to run this Windows (.exe) emulator. Please install a native Linux emulator (Flatpak/AppImage) or configure a Proton/Wine runner in Settings > Linux.".to_string()
+                    })?;
+
+                    let prefix_dir = LinuxWineEngine::get_game_prefix_dir(&game_id);
+                    let enable_gamemode = config.enable_gamemode.unwrap_or(true);
+                    let enable_mangohud = config.enable_mangohud.unwrap_or(false);
+
+                    let c = LinuxWineEngine::build_execution_command(
+                        &emu_path_buf,
+                        raw_parent.as_deref().map(Path::new),
+                        &all_args,
+                        &prefix_dir,
+                        &runner,
+                        enable_gamemode,
+                        enable_mangohud,
+                        &HashMap::new(),
+                    )?;
+                    (c, Some(prefix_dir.to_string_lossy().to_string()), Some(runner.path.clone()))
+                } else {
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::PermissionsExt;
+                        if let Ok(meta) = fs::metadata(&emu_path_buf) {
+                            let mut perms = meta.permissions();
+                            let mode = perms.mode();
+                            if mode & 0o111 == 0 {
+                                perms.set_mode(mode | 0o755);
+                                let _ = fs::set_permissions(&emu_path_buf, perms);
+                            }
+                        }
+                    }
+                    let mut c = Command::new(&emu_path_buf);
+                    if let Some(ref p) = parent_dir {
+                        c.current_dir(p);
+                    }
+                    if !all_args.is_empty() {
+                        c.args(&all_args);
+                    }
+                    (c, None, None)
+                }
+            };
+
+            #[cfg(not(target_os = "linux"))]
+            let (mut cmd, prefix_path_opt, runner_path_opt) = {
+                let mut c = Command::new(&emu_path_buf);
+                if let Some(ref p) = raw_parent {
+                    c.current_dir(p);
+                }
+                if !all_args.is_empty() {
+                    c.args(&all_args);
+                }
+                (c, None::<String>, None::<String>)
+            };
 
             let start_time = Instant::now();
-            let child = cmd
+            let mut child = cmd
                 .spawn()
-                .map_err(|e| format!("Failed to execute emulator '{}' ({}): {}", emu_name, exe_path, e))?;
+                .map_err(|e| format!("Failed to execute emulator '{}' ({}): {}", emu_name, effective_exe_path, e))?;
 
             let child_pid = child.id();
             let candidate_exes = if !emu_filename.is_empty() && !is_protected_system_process(&emu_filename) {
@@ -880,8 +1007,9 @@ impl GameLauncher {
                         pids: vec![child_pid],
                         candidate_exes: candidate_exes.clone(),
                         install_directory: parent_dir.clone(),
-                        prefix_path: None,
-                        runner_path: None,
+                        prefix_path: prefix_path_opt,
+                        runner_path: runner_path_opt,
+                        flatpak_app_id,
                         start_time,
                     },
                 );
@@ -896,10 +1024,9 @@ impl GameLauncher {
 
             std::thread::spawn(move || {
                 let mut sys = sysinfo::System::new();
-                let mut has_started = false;
                 let mut consecutive_missing = 0;
 
-                for tick in 0..1000000 {
+                loop {
                     std::thread::sleep(std::time::Duration::from_millis(1500));
 
                     {
@@ -909,6 +1036,12 @@ impl GameLauncher {
                         }
                     }
 
+                    let child_exited = match child.try_wait() {
+                        Ok(Some(_)) => true,
+                        Ok(None) => false,
+                        Err(_) => true,
+                    };
+
                     sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
                     let active_pids = find_active_pids_for_game(
                         &sys,
@@ -916,20 +1049,21 @@ impl GameLauncher {
                         inst_dir.as_deref(),
                     );
 
-                    if !active_pids.is_empty() {
-                        has_started = true;
-                        consecutive_missing = 0;
-                        let mut map = running_games_map().lock().unwrap();
-                        if let Some(info) = map.get_mut(&gid) {
-                            info.pids = active_pids;
-                        }
-                    } else if has_started {
+                    if child_exited && active_pids.is_empty() {
                         consecutive_missing += 1;
                         if consecutive_missing >= 2 {
                             break;
                         }
-                    } else if tick >= 30 {
-                        break;
+                    } else {
+                        consecutive_missing = 0;
+                        let mut tracked = active_pids;
+                        if !child_exited && !tracked.contains(&child_pid) {
+                            tracked.push(child_pid);
+                        }
+                        let mut map = running_games_map().lock().unwrap();
+                        if let Some(info) = map.get_mut(&gid) {
+                            info.pids = tracked;
+                        }
                     }
                 }
 
@@ -1026,6 +1160,7 @@ impl GameLauncher {
                                     install_directory: install_directory.clone(),
                                     prefix_path: None,
                                     runner_path: None,
+                                    flatpak_app_id: None,
                                     start_time,
                                 },
                             );
@@ -1201,6 +1336,7 @@ impl GameLauncher {
                 }),
             );
 
+            let local_flatpak_app_id = extract_flatpak_app_id(&exe_path_buf, &all_args);
             {
                 let mut map = running_games_map().lock().unwrap();
                 map.insert(
@@ -1212,6 +1348,7 @@ impl GameLauncher {
                         install_directory: parent_dir.clone(),
                         prefix_path: prefix_path_opt.clone(),
                         runner_path: runner_path_opt.clone(),
+                        flatpak_app_id: local_flatpak_app_id,
                         start_time,
                     },
                 );
@@ -1461,6 +1598,7 @@ impl GameLauncher {
                     install_directory: safe_work_dir.clone(),
                     prefix_path: prefix_path_opt.clone(),
                     runner_path: runner_path_opt.clone(),
+                    flatpak_app_id: None,
                     start_time,
                 },
             );
@@ -1526,6 +1664,7 @@ impl GameLauncher {
         let mut candidate_exes = Vec::new();
         let mut prefix_path_opt: Option<String> = None;
         let mut runner_path_opt: Option<String> = None;
+        let mut flatpak_app_id_opt: Option<String> = None;
         let mut elapsed = 0u64;
 
         if let Some(info) = unregister_running_game(game_id) {
@@ -1533,6 +1672,7 @@ impl GameLauncher {
             candidate_exes = info.candidate_exes;
             prefix_path_opt = info.prefix_path;
             runner_path_opt = info.runner_path;
+            flatpak_app_id_opt = info.flatpak_app_id;
             elapsed = info.start_time.elapsed().as_secs();
         }
 
@@ -1540,6 +1680,7 @@ impl GameLauncher {
 
         #[cfg(target_os = "windows")]
         {
+            let _ = &flatpak_app_id_opt;
             for pid in &pids_to_kill {
                 if *pid > 4 && *pid != self_pid {
                     let _ = Command::new("taskkill")
@@ -1554,6 +1695,14 @@ impl GameLauncher {
             if let Some(ref pfx) = prefix_path_opt {
                 LinuxWineEngine::shutdown_prefix(Path::new(pfx), runner_path_opt.as_deref());
             }
+            if let Some(ref app_id) = flatpak_app_id_opt {
+                let _ = Command::new("flatpak").args(["kill", app_id]).spawn();
+            }
+        }
+
+        #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+        {
+            let _ = (&prefix_path_opt, &runner_path_opt, &flatpak_app_id_opt);
         }
 
         let mut sys = sysinfo::System::new();
@@ -1642,13 +1791,18 @@ impl GameLauncher {
                     continue;
                 }
 
+                let tracked_pid_alive = info
+                    .pids
+                    .iter()
+                    .any(|&p| p > 1 && sys.process(sysinfo::Pid::from_u32(p)).is_some());
+
                 let active_pids = find_active_pids_for_game(
                     &sys,
                     &info.candidate_exes,
                     info.install_directory.as_deref(),
                 );
 
-                if !active_pids.is_empty() {
+                if tracked_pid_alive || !active_pids.is_empty() {
                     alive_games.push(gid.clone());
                 } else {
                     dead_games.push((gid.clone(), info.start_time));

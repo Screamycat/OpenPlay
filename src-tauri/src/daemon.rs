@@ -699,9 +699,23 @@ pub async fn handle_rpc_call(
             Ok(serde_json::to_value(game).map_err(|e| e.to_string())?)
         }
         "get_game_hltb" => {
+            let game_id = get_str_param(&params, &["gameId", "game_id"]);
             let title = get_str_param(&params, &["title"])
                 .ok_or_else(|| "Missing title".to_string())?;
             let res = HltbFetcher::fetch_hltb(&title).await;
+            if let Some(ref hltb) = res {
+                if let Some(ref gid) = game_id {
+                    if let Ok(Some(mut game)) = db.get_game_by_id(gid) {
+                        game.hltb_main = Some(hltb.main_story_hours);
+                        game.hltb_extra = Some(hltb.main_extra_hours);
+                        game.hltb_completionist = Some(hltb.completionist_hours);
+                        game.updated_at = Some(chrono::Utc::now().to_rfc3339());
+                        if db.upsert_game(&game).is_ok() {
+                            emitter.emit("game-updated", &game);
+                        }
+                    }
+                }
+            }
             Ok(serde_json::to_value(res).map_err(|e| e.to_string())?)
         }
         "get_store_trailers" => {
@@ -1325,6 +1339,15 @@ pub async fn handle_rpc_call(
             let cores = EmulatorService::scan_retroarch_cores(&retroarch_path);
             Ok(serde_json::to_value(cores).map_err(|e| e.to_string())?)
         }
+        "list_installed_linux_emulators" => {
+            let apps = EmulatorService::list_installed_linux_emulators();
+            Ok(serde_json::to_value(apps).map_err(|e| e.to_string())?)
+        }
+        "resolve_linux_emulator_target" => {
+            let path = get_str_param(&params, &["path"]).unwrap_or_default();
+            let resolved = EmulatorService::resolve_emulator_target(&path);
+            Ok(serde_json::to_value(resolved).map_err(|e| e.to_string())?)
+        }
         "scan_and_import_console_roms" => {
             let console_id = get_str_param(&params, &["consoleId", "console_id"])
                 .ok_or_else(|| "Missing consoleId".to_string())?;
@@ -1375,7 +1398,24 @@ pub async fn handle_rpc_call(
             let filter = get_str_param(&params, &["filter"]);
             let mut dialog = rfd::AsyncFileDialog::new().set_title("Select File");
             if let Some(ref f) = filter {
-                if f.contains(".exe") {
+                if (f.contains(".so") || f.contains(".dll")) && !f.contains(".exe") {
+                    #[cfg(target_os = "windows")]
+                    {
+                        dialog = dialog
+                            .add_filter("Libretro Cores (*.dll)", &["dll"])
+                            .add_filter("All Files (*.*)", &["*"]);
+                    }
+                    #[cfg(target_os = "linux")]
+                    {
+                        dialog = dialog
+                            .add_filter("Libretro Cores (*.so)", &["so"])
+                            .add_filter("All Files (*)", &["*"]);
+                    }
+                    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+                    {
+                        dialog = dialog.add_filter("All Files (*)", &["*"]);
+                    }
+                } else if f.contains(".exe") || f.contains(".AppImage") {
                     #[cfg(target_os = "windows")]
                     {
                         dialog = dialog.add_filter("Executable (*.exe)", &["exe"]);
@@ -1383,8 +1423,8 @@ pub async fn handle_rpc_call(
                     #[cfg(target_os = "linux")]
                     {
                         dialog = dialog
-                            .add_filter("Linux Executables & Scripts (*, *.AppImage, *.sh, *.desktop, *.bin)", &["AppImage", "sh", "desktop", "bin", "run", "exe"])
-                            .add_filter("All Files (*)", &["*"]);
+                            .add_filter("All Files & Linux Executables (*)", &["*"])
+                            .add_filter("Packages & Scripts (*.AppImage, *.sh, *.desktop, *.bin)", &["AppImage", "appimage", "sh", "desktop", "bin", "run", "x86_64", "exe"]);
                     }
                     #[cfg(not(any(target_os = "windows", target_os = "linux")))]
                     {
@@ -1410,7 +1450,7 @@ pub async fn handle_rpc_call(
             let filter = get_str_param(&params, &["filter"]);
             let mut dialog = rfd::AsyncFileDialog::new().set_title("Select Files");
             if let Some(ref f) = filter {
-                if f.contains(".exe") {
+                if f.contains(".exe") || f.contains(".AppImage") {
                     #[cfg(target_os = "windows")]
                     {
                         dialog = dialog.add_filter("Executable (*.exe)", &["exe"]);
@@ -1418,8 +1458,8 @@ pub async fn handle_rpc_call(
                     #[cfg(target_os = "linux")]
                     {
                         dialog = dialog
-                            .add_filter("Linux Executables & Scripts (*, *.AppImage, *.sh, *.desktop, *.bin)", &["AppImage", "sh", "desktop", "bin", "run", "exe"])
-                            .add_filter("All Files (*)", &["*"]);
+                            .add_filter("All Files & Linux Executables (*)", &["*"])
+                            .add_filter("Packages & Scripts (*.AppImage, *.sh, *.desktop, *.bin)", &["AppImage", "appimage", "sh", "desktop", "bin", "run", "x86_64", "exe"]);
                     }
                     #[cfg(not(any(target_os = "windows", target_os = "linux")))]
                     {

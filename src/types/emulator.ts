@@ -52,3 +52,16 @@ export interface ConsolePreset {
   extensions: string[];
   emulators: ConsoleEmulatorOption[];
 }
+
+export interface InstalledEmulatorApp {
+  name: string;
+  command: string;
+  source: string;
+  desktop_file?: string | null;
+  app_id?: string | null;
+}
+
+export interface ResolvedEmulatorTarget {
+  command: string;
+  name?: string | null;
+}

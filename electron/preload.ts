@@ -40,4 +40,7 @@ contextBridge.exposeInMainWorld("openplayAPI", {
     ipcRenderer.invoke("openplay:window:setFullscreen", enabled, displayId),
   isFullscreen: () => ipcRenderer.invoke("openplay:window:isFullscreen"),
   getDisplays: () => ipcRenderer.invoke("openplay:window:getDisplays"),
+  getAudioOutputs: () => ipcRenderer.invoke("openplay:audio:getOutputs"),
+  setAudioOutput: (sinkId?: string) => ipcRenderer.invoke("openplay:audio:setOutput", sinkId),
+  restoreAudioOutput: () => ipcRenderer.invoke("openplay:audio:restore"),
 });

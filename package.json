@@ -1,7 +1,7 @@
 {
   "name": "openplay",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Open-source, offline-first cross-platform game library and launcher",
   "homepage": "https://github.com/Screamycat/OpenPlay",
   "author": "ScreamyCat <screamys.cat@gmail.com>",

@@ -108,6 +108,7 @@ pub struct AppConfig {
     pub console_bg_music_volume: Option<f64>,
     pub console_bg_music_path: Option<String>,
     pub console_display_id: Option<String>,
+    pub console_audio_output_id: Option<String>,
     pub console_profiles: Option<Vec<ConsoleProfile>>,
     pub console_active_profile_id: Option<String>,
 }
@@ -186,6 +187,7 @@ impl Default for AppConfig {
             console_bg_music_volume: Some(0.25),
             console_bg_music_path: None,
             console_display_id: Some("auto".to_string()),
+            console_audio_output_id: Some("auto".to_string()),
             console_profiles: None,
             console_active_profile_id: None,
         }
